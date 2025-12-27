@@ -329,9 +329,9 @@ elif menu == "거래처관리":
         if partners:
             data = []
             for p in partners:
-                pd = p.to_dict()
-                pd['id'] = p.id
-                data.append(pd)
+                p_data = p.to_dict()
+                p_data['id'] = p.id
+                data.append(p_data)
             df = pd.DataFrame(data)
             
             # 보여줄 컬럼 선택

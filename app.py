@@ -6,8 +6,8 @@ import datetime
 import json
 
 # 1. 화면 기본 설정 (제목 등)
-st.set_page_config(page_title="우리 가게 재고관리", layout="wide")
-st.title("재고 관리 시스템")
+st.set_page_config(page_title="타올 생산 현황 관리", layout="wide")
+st.title("🏭 타올 생산 현황 관리 시스템")
 
 # 2. 데이터베이스 연결 (아까 받은 열쇠 사용)
 # 이미 연결되어 있다면 건너뛰고, 안 되어 있을 때만 연결합니다.
@@ -63,76 +63,86 @@ with st.sidebar:
         st.session_state["role"] = None
         st.rerun()
     st.divider()
-
-    # 관리자(admin)에게만 등록 화면 보여주기
-    if st.session_state["role"] == "admin":
-        st.header("📝 상품 등록")
-        name = st.text_input("상품명")
-        category = st.selectbox("카테고리", ["전자제품", "의류", "식품", "기타"])
-        stock = st.number_input("수량", min_value=0, step=1)
-        
-        if st.button("저장하기"):
-            if name:
-                # Firestore 데이터베이스에 저장하는 코드
-                doc_ref = db.collection("inventory").add({
-                    "name": name,
-                    "category": category,
-                    "stock": stock,
-                    "date": datetime.datetime.now()
-                })
-                st.success(f"'{name}' 저장 완료!")
-                # 저장 후 화면을 바로 새로고침합니다.
-                st.rerun()
-            else:
-                st.error("상품명을 입력해주세요.")
-    else:
-        st.info("게스트 계정은 재고 조회만 가능합니다.")
-
-# 4. [메인 화면] 재고 목록 보여주기
-st.header("📊 현재 재고 목록")
-
-# 새로고침 버튼 (누르면 최신 데이터 불러옴)
-if st.button("목록 새로고침"):
-    st.rerun()
-
-# 데이터베이스에서 모든 데이터 가져오기 (최신순 정렬)
-docs = list(db.collection("inventory").order_by("date", direction=firestore.Query.DESCENDING).stream())
-
-# 가져온 데이터를 표로 만들기 좋게 정리
-if not docs:
-    st.info("아직 등록된 상품이 없습니다. 왼쪽 사이드바에서 등록해주세요.")
-
-# 헤더 (표의 머리글)
-col1, col2, col3, col4 = st.columns([3, 1, 2, 2])
-col1.write("**상품명 (카테고리)**")
-col2.write("**수량**")
-col3.write("**등록일**")
-col4.write("**관리**")
-
-for doc in docs:
-    item = doc.to_dict()
-    doc_id = doc.id
     
-    with st.container():
-        c1, c2, c3, c4 = st.columns([3, 1, 2, 2])
-        c1.write(f"{item.get('name')} ({item.get('category')})")
-        c2.write(f"{item.get('stock')}개")
-        c3.write(item.get('date').strftime("%Y-%m-%d") if item.get('date') else "")
+    # 메뉴 선택 기능 추가
+    st.subheader("작업 메뉴")
+    menu = st.radio("이동할 메뉴를 선택하세요", 
+        ["발주서접수", "제직현황", "염색현황", "봉제현황", "출고현황", "현재고현황"])
+
+# 4. [메인 화면] 메뉴별 기능 구현
+if menu == "발주서접수":
+    st.header("📑 발주서 접수")
+    if st.session_state["role"] == "admin":
+        with st.form("order_form"):
+            st.write("새로운 발주 내용을 입력하세요.")
+            name = st.text_input("제품명 (타올 종류)")
+            category = st.selectbox("구분", ["세면타올", "바스타올", "핸드타올", "비치타올", "기타"])
+            stock = st.number_input("발주 수량", min_value=0, step=10)
+            
+            submitted = st.form_submit_button("발주 등록")
+            if submitted:
+                if name:
+                    db.collection("inventory").add({
+                        "name": name,
+                        "category": category,
+                        "stock": stock,
+                        "date": datetime.datetime.now(),
+                        "status": "발주접수"
+                    })
+                    st.success(f"'{name}' 발주가 정상적으로 접수되었습니다!")
+                    st.rerun()
+                else:
+                    st.error("제품명을 입력해주세요.")
+    else:
+        st.info("관리자만 발주를 등록할 수 있습니다.")
+
+elif menu == "현재고현황":
+    st.header("📦 현재고 현황")
+
+    # 새로고침 버튼
+    if st.button("목록 새로고침"):
+        st.rerun()
+
+    # 데이터베이스에서 모든 데이터 가져오기
+    docs = list(db.collection("inventory").order_by("date", direction=firestore.Query.DESCENDING).stream())
+
+    if not docs:
+        st.info("아직 등록된 데이터가 없습니다.")
+
+    # 헤더
+    col1, col2, col3, col4 = st.columns([3, 1, 2, 2])
+    col1.write("**제품명 (구분)**")
+    col2.write("**수량**")
+    col3.write("**등록일**")
+    col4.write("**관리**")
+
+    for doc in docs:
+        item = doc.to_dict()
+        doc_id = doc.id
         
-        with c4:
-            if st.session_state["role"] == "admin":
-                # 수량 조절 및 삭제 버튼
-                btn1, btn2, btn3 = st.columns(3)
-                if btn1.button("➕", key=f"add_{doc_id}"):
-                    db.collection("inventory").document(doc_id).update({"stock": item.get('stock') + 1})
-                    st.rerun()
-                if btn2.button("➖", key=f"sub_{doc_id}"):
-                    if item.get('stock') > 0:
-                        db.collection("inventory").document(doc_id).update({"stock": item.get('stock') - 1})
+        with st.container():
+            c1, c2, c3, c4 = st.columns([3, 1, 2, 2])
+            c1.write(f"{item.get('name')} ({item.get('category')})")
+            c2.write(f"{item.get('stock')}개")
+            c3.write(item.get('date').strftime("%Y-%m-%d") if item.get('date') else "")
+            
+            with c4:
+                if st.session_state["role"] == "admin":
+                    btn1, btn2, btn3 = st.columns(3)
+                    if btn1.button("➕", key=f"add_{doc_id}"):
+                        db.collection("inventory").document(doc_id).update({"stock": item.get('stock') + 1})
                         st.rerun()
-                if btn3.button("🗑️", key=f"del_{doc_id}", help="삭제"):
-                    db.collection("inventory").document(doc_id).delete()
-                    st.rerun()
-            else:
-                st.caption("조회 전용")
-    st.divider()
+                    if btn2.button("➖", key=f"sub_{doc_id}"):
+                        if item.get('stock') > 0:
+                            db.collection("inventory").document(doc_id).update({"stock": item.get('stock') - 1})
+                            st.rerun()
+                    if btn3.button("🗑️", key=f"del_{doc_id}", help="삭제"):
+                        db.collection("inventory").document(doc_id).delete()
+                        st.rerun()
+                else:
+                    st.caption("조회 전용")
+        st.divider()
+
+else:
+    st.header(f"🏗️ {menu}")
+    st.info(f"'{menu}' 기능은 추후 업데이트될 예정입니다.")

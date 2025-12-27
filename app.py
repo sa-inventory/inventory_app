@@ -34,35 +34,36 @@ db = get_db()
 
 # --- 로그인 기능 추가 ---
 if "logged_in" not in st.session_state:
-    st.session_state["logged_in"] = False
-    st.session_state["role"] = None
+    st.session_state["logged_in"] = True   # 개발 편의를 위해 True로 설정
+    st.session_state["role"] = "admin"     # 개발 편의를 위해 admin으로 설정
 
-if not st.session_state["logged_in"]:
-    st.subheader("로그인")
-    login_id = st.text_input("아이디", placeholder="admin 또는 guest")
-    login_pw = st.text_input("비밀번호", type="password", placeholder="1234")
-    
-    if st.button("로그인"):
-        # 예시를 위해 하드코딩된 계정 사용 (실제로는 DB에서 확인 권장)
-        if login_id == "admin" and login_pw == "1234":
-            st.session_state["logged_in"] = True
-            st.session_state["role"] = "admin"
-            st.rerun()
-        elif login_id == "guest" and login_pw == "1234":
-            st.session_state["logged_in"] = True
-            st.session_state["role"] = "guest"
-            st.rerun()
-        else:
-            st.error("아이디 또는 비밀번호를 확인하세요.")
-    st.stop()  # 로그인 전에는 아래 내용을 보여주지 않음
+# 개발 중 로그인 비활성화 (나중에 주석 해제하여 다시 사용)
+# if not st.session_state["logged_in"]:
+#     st.subheader("로그인")
+#     login_id = st.text_input("아이디", placeholder="admin 또는 guest")
+#     login_pw = st.text_input("비밀번호", type="password", placeholder="1234")
+#     
+#     if st.button("로그인"):
+#         # 예시를 위해 하드코딩된 계정 사용 (실제로는 DB에서 확인 권장)
+#         if login_id == "admin" and login_pw == "1234":
+#             st.session_state["logged_in"] = True
+#             st.session_state["role"] = "admin"
+#             st.rerun()
+#         elif login_id == "guest" and login_pw == "1234":
+#             st.session_state["logged_in"] = True
+#             st.session_state["role"] = "guest"
+#             st.rerun()
+#         else:
+#             st.error("아이디 또는 비밀번호를 확인하세요.")
+#     st.stop()  # 로그인 전에는 아래 내용을 보여주지 않음
 
 # 3. [왼쪽 사이드바] 상품 등록 기능
 with st.sidebar:
     st.write(f"환영합니다, **{st.session_state['role']}**님!")
-    if st.button("로그아웃"):
-        st.session_state["logged_in"] = False
-        st.session_state["role"] = None
-        st.rerun()
+    # if st.button("로그아웃"):
+    #     st.session_state["logged_in"] = False
+    #     st.session_state["role"] = None
+    #     st.rerun()
     st.divider()
     
     # 메뉴 선택 기능 추가
@@ -334,12 +335,37 @@ elif menu == "거래처관리":
                 data.append(p_data)
             df = pd.DataFrame(data)
             
-            # 보여줄 컬럼 선택
-            cols = ["type", "name", "rep_name", "phone", "address", "note"]
-            st.dataframe(df[cols], use_container_width=True)
+            # 1. 모든 컬럼 보여주기 (빈 값이라도 표시)
+            all_cols = ["type", "name", "rep_name", "biz_num", "item", "phone", "fax", "email", "address", "account", "note"]
             
-            # 삭제 기능 (간단히 구현)
-            st.caption("거래처 삭제는 관리자에게 문의하세요. (추후 구현 예정)")
+            # 데이터프레임에 없는 컬럼은 빈 문자열로 채움
+            for col in all_cols:
+                if col not in df.columns:
+                    df[col] = ""
+            
+            # 컬럼명 한글로 변경
+            col_map = {
+                "type": "구분", "name": "거래처명", "rep_name": "대표자", 
+                "biz_num": "사업자번호", "item": "업태/종목", "phone": "전화번호", 
+                "fax": "팩스", "email": "이메일", "address": "주소", 
+                "account": "계좌번호", "note": "비고"
+            }
+            st.dataframe(df[all_cols].rename(columns=col_map), use_container_width=True)
+            
+            # 2. 거래처 삭제 기능
+            st.divider()
+            st.subheader("🗑️ 거래처 삭제")
+            
+            # 이름으로 ID 매핑 (삭제용)
+            id_map = {row['name']: row['id'] for row in data}
+            delete_list = st.multiselect("삭제할 거래처를 선택하세요", list(id_map.keys()))
+            
+            if st.button("선택한 거래처 삭제"):
+                if delete_list:
+                    for name in delete_list:
+                        db.collection("partners").document(id_map[name]).delete()
+                    st.success("삭제되었습니다.")
+                    st.rerun()
         else:
             st.info("등록된 거래처가 없습니다.")
 

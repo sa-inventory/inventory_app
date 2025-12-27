@@ -107,7 +107,6 @@ if menu == "발주서접수":
     with tab1:
         if st.session_state["role"] == "admin":
             # 기초 데이터 불러오기
-            towel_types = get_common_codes("towel_types", ["세면타올", "바스타올", "핸드타올", "비치타올", "기타"])
             weaving_types = get_common_codes("weaving_types", ["30수 연사", "40수 코마사", "무지", "자카드", "기타"])
             customer_list = get_partners("발주처")
 
@@ -123,9 +122,8 @@ if menu == "발주서접수":
                 delivery_req_date = c3.date_input("납품요청일", datetime.date.today() + datetime.timedelta(days=7))
 
                 st.subheader("제품 상세 정보")
-                c1, c2, c3, c4 = st.columns(4)
+                c1, c3, c4 = st.columns(3)
                 name = c1.text_input("제품명 (타올 종류)")
-                category = c2.selectbox("제품구분", towel_types)
                 weaving_type = c3.selectbox("제직타입", weaving_types)
                 yarn_type = c4.text_input("사종", placeholder="예: 최고급 면사")
                 
@@ -177,7 +175,6 @@ if menu == "발주서접수":
                             "customer": customer,
                             "delivery_req_date": str(delivery_req_date),
                             "name": name,
-                            "category": category,
                             "weaving_type": weaving_type,
                             "yarn_type": yarn_type,
                             "color": color,
@@ -240,65 +237,85 @@ if menu == "발주서접수":
                 
                 # 컬럼명 한글 매핑
                 col_map = {
-                    "order_no": "발주번호", "date": "접수일", "customer": "발주처",
-                    "name": "제품명", "category": "제품구분", "weaving_type": "제직타입",
+                    "order_no": "발주번호", "status": "상태", "date": "접수일", "customer": "발주처",
+                    "name": "제품명", "weaving_type": "제직타입",
                     "yarn_type": "사종", "color": "색상", "weight": "중량",
-                    "size": "사이즈", "stock": "수량", "status": "상태",
+                    "size": "사이즈", "stock": "수량",
                     "delivery_req_date": "납품요청일", "delivery_to": "납품처",
                     "delivery_contact": "납품연락처", "delivery_address": "납품주소",
                     "note": "비고"
                 }
 
-                display_cols = ["order_no", "date", "customer", "name", "category", "weaving_type", "yarn_type", "color", "weight", "size", "stock", "status", "delivery_req_date", "delivery_to", "delivery_contact", "delivery_address", "note"]
+                # 컬럼 순서 변경 (발주번호 -> 상태 -> 접수일 ...)
+                display_cols = ["order_no", "status", "date", "customer", "name", "stock", "weaving_type", "yarn_type", "color", "weight", "size", "delivery_req_date", "delivery_to", "delivery_contact", "delivery_address", "note"]
                 final_cols = [c for c in display_cols if c in df.columns] # 실제 존재하는 컬럼만 선택
                 
                 # 화면 표시용 데이터프레임 (한글 컬럼 적용)
                 df_display = df[final_cols].rename(columns=col_map)
                 
-                st.dataframe(df_display, use_container_width=True)
+                # --- 수정/삭제를 위한 테이블 선택 기능 ---
+                st.write("🔽 목록에서 수정할 행을 선택(체크)하세요.")
+                selection = st.dataframe(
+                    df_display, 
+                    use_container_width=True, 
+                    hide_index=True,  # 맨 왼쪽 순번(0,1,2..) 숨기기
+                    on_select="rerun", # 선택 시 리런
+                    selection_mode="single-row" # 한 번에 한 줄만 선택
+                )
                 
+                # 버튼 영역 (엑셀 다운로드 + 인쇄)
+                btn_c1, btn_c2 = st.columns([1, 1])
                 csv = df_display.to_csv(index=False).encode('utf-8-sig')
-                st.download_button(
+                btn_c1.download_button(
                     label="💾 엑셀 다운로드",
                     data=csv,
                     file_name='발주현황.csv',
                     mime='text/csv',
                 )
-                
-                # 인쇄용 미리보기 (HTML)
-                with st.expander("🖨️ 인쇄용 미리보기 (클릭)"):
-                    # 인쇄 시 사이드바 등 숨기는 CSS 적용
-                    st.markdown("""
-                        <style>
-                        @media print {
-                            [data-testid="stSidebar"], header, footer, .stButton { display: none !important; }
-                            .block-container { padding: 0 !important; }
-                        }
-                        </style>
-                    """, unsafe_allow_html=True)
-                    st.markdown("### 발주 현황 리스트")
-                    st.markdown(df_display.to_html(index=False, border=1, justify='center'), unsafe_allow_html=True)
-                    st.caption("위 표가 펼쳐진 상태에서 Ctrl+P를 누르면 리스트만 깔끔하게 인쇄됩니다.")
+
+                # 인쇄 버튼 (HTML 생성 후 새 창 열기 방식 흉내)
+                if btn_c2.button("🖨️ 인쇄 페이지 열기"):
+                    print_html = f"""
+                        <html>
+                        <head>
+                            <title>발주현황 인쇄</title>
+                            <style>
+                                body {{ font-family: sans-serif; padding: 20px; }}
+                                table {{ width: 100%; border-collapse: collapse; font-size: 12px; }}
+                                th, td {{ border: 1px solid #ddd; padding: 8px; text-align: center; }}
+                                th {{ background-color: #f2f2f2; }}
+                                @media print {{ .no-print {{ display: none; }} }}
+                            </style>
+                        </head>
+                        <body>
+                            <h2 style="text-align:center;">발주 현황 리스트</h2>
+                            <div class="no-print" style="text-align:right; margin-bottom:10px;">
+                                <button onclick="window.print()" style="padding:10px 20px; font-size:16px; cursor:pointer;">🖨️ 지금 인쇄하기 (Click)</button>
+                            </div>
+                            {df_display.to_html(index=False, border=1)}
+                            <script>window.print();</script>
+                        </body>
+                        </html>
+                    """
+                    # 인쇄용 HTML을 화면 하단에 렌더링 (스크립트로 인해 인쇄창이 뜸)
+                    st.components.v1.html(print_html, height=600, scrolling=True)
 
                 # --- 수정 및 삭제 기능 (발주접수 상태만) ---
                 st.divider()
                 st.subheader("🛠️ 발주 내역 수정/삭제 (발주접수 상태만 가능)")
                 
-                # 수정 가능한 목록 필터링
-                editable_df = df[df['status'] == '발주접수']
-                
-                if not editable_df.empty:
-                    # 선택 박스 생성 (발주번호 - 거래처 - 제품명)
-                    edit_options = editable_df.apply(lambda x: f"{x.get('order_no', 'NoID')} | {x['customer']} | {x['name']} (ID:{x['id']})", axis=1).tolist()
-                    selected_edit = st.selectbox("수정할 발주 건을 선택하세요", edit_options)
+                # 테이블에서 선택된 행이 있는지 확인
+                if selection.selection.rows:
+                    selected_idx = selection.selection.rows[0]
+                    # 선택된 행의 데이터 가져오기 (df는 필터링된 상태일 수 있으므로 iloc 사용)
+                    sel_row = df.iloc[selected_idx]
+                    sel_id = sel_row['id']
                     
-                    if selected_edit:
-                        sel_id = selected_edit.split("(ID:")[-1].replace(")", "")
-                        # 선택된 데이터 가져오기
-                        sel_row = editable_df[editable_df['id'] == sel_id].iloc[0]
+                    if sel_row['status'] != '발주접수':
+                        st.warning(f"선택하신 건은 현재 '{sel_row['status']}' 상태이므로 수정/삭제할 수 없습니다.")
+                    else:
                         
                         # 수정 폼을 위해 기초 데이터 다시 로드
-                        towel_types = get_common_codes("towel_types", ["세면타올", "바스타올", "기타"])
                         weaving_types = get_common_codes("weaving_types", ["30수 연사", "무지", "기타"])
                         customer_list = get_partners("발주처")
 
@@ -306,10 +323,9 @@ if menu == "발주서접수":
                             st.write(f"선택된 발주건: **{sel_row['customer']} - {sel_row['name']}**")
                             
                             # 모든 필드 수정 가능하도록 배치
-                            ec1, ec2, ec3, ec4 = st.columns(4)
+                            ec1, ec2, ec4 = st.columns(3)
                             e_customer = ec1.selectbox("발주처", customer_list, index=customer_list.index(sel_row['customer']) if sel_row['customer'] in customer_list else 0)
                             e_name = ec2.text_input("제품명", value=sel_row['name'])
-                            e_category = ec3.selectbox("제품구분", towel_types, index=towel_types.index(sel_row['category']) if sel_row['category'] in towel_types else 0)
                             e_stock = ec4.number_input("수량", value=int(sel_row['stock']), step=10)
 
                             ec5, ec6, ec7, ec8 = st.columns(4)
@@ -336,7 +352,6 @@ if menu == "발주서접수":
                                 db.collection("inventory").document(sel_id).update({
                                     "customer": e_customer,
                                     "name": e_name,
-                                    "category": e_category,
                                     "stock": e_stock,
                                     "weaving_type": e_weaving,
                                     "yarn_type": e_yarn,
@@ -357,7 +372,7 @@ if menu == "발주서접수":
                                 st.success("삭제되었습니다.")
                                 st.rerun()
                 else:
-                    st.info("수정 가능한(발주접수 상태) 내역이 없습니다.")
+                    st.info("👆 위 목록에서 수정할 행을 선택해주세요.")
 
             else:
                 st.info("해당 기간에 조회된 데이터가 없습니다.")
@@ -390,7 +405,7 @@ elif menu == "현재고현황":
         
         with st.container():
             c1, c2, c3, c4 = st.columns([3, 1, 2, 2])
-            c1.write(f"{item.get('name')} ({item.get('category')})")
+            c1.write(f"{item.get('name')}")
             c2.write(f"{item.get('stock')}개")
             c3.write(item.get('date').strftime("%Y-%m-%d") if item.get('date') else "")
             
@@ -421,13 +436,17 @@ elif menu == "제직현황":
     with tab1:
         # '발주접수' 또는 '제직' 상태인 건만 가져오기
         # Firestore의 'in' 쿼리 사용
-        docs = db.collection("inventory").where("status", "in", ["발주접수", "제직"]).order_by("date").stream()
+        # [수정] order_by("date") 제거 (복합 인덱스 오류 방지) -> 파이썬에서 정렬
+        docs = db.collection("inventory").where("status", "in", ["발주접수", "제직"]).stream()
         
         rows = []
         for doc in docs:
             d = doc.to_dict()
             d['id'] = doc.id
             rows.append(d)
+            
+        # 파이썬에서 날짜순 정렬
+        rows.sort(key=lambda x: x['date'])
         
         if rows:
             for item in rows:
@@ -454,7 +473,7 @@ elif menu == "제직현황":
                             <hr>
                             <p><strong>발주번호:</strong> {item.get('order_no')}</p>
                             <p><strong>발 주 처:</strong> {item['customer']}</p>
-                            <p><strong>제 품 명:</strong> {item['name']} ({item['category']})</p>
+                            <p><strong>제 품 명:</strong> {item['name']}</p>
                             <p><strong>제직타입:</strong> {item['weaving_type']}</p>
                             <p><strong>사    종:</strong> {item['yarn_type']}</p>
                             <p><strong>색상/수량:</strong> {item['color']} / {item['stock']}장</p>
@@ -582,7 +601,7 @@ elif menu == "기초코드관리":
     st.header("⚙️ 기초 코드 관리")
     st.info("콤보박스에 표시될 항목들을 관리합니다.")
     
-    code_tabs = st.tabs(["타올 구분", "제직 타입", "거래처 구분"])
+    code_tabs = st.tabs(["제직 타입", "거래처 구분"])
     
     # 코드 관리용 함수
     def manage_code(code_key, default_list, label):
@@ -605,9 +624,8 @@ elif menu == "기초코드관리":
                 st.success("삭제되었습니다.")
                 st.rerun()
 
-    with code_tabs[0]: manage_code("towel_types", ["세면타올", "바스타올", "핸드타올", "비치타올", "기타"], "타올 구분")
-    with code_tabs[1]: manage_code("weaving_types", ["30수 연사", "40수 코마사", "무지", "자카드", "기타"], "제직 타입")
-    with code_tabs[2]: manage_code("partner_types", ["발주처", "염색업체", "봉제업체", "배송업체", "기타"], "거래처 구분")
+    with code_tabs[0]: manage_code("weaving_types", ["30수 연사", "40수 코마사", "무지", "자카드", "기타"], "제직 타입")
+    with code_tabs[1]: manage_code("partner_types", ["발주처", "염색업체", "봉제업체", "배송업체", "기타"], "거래처 구분")
 
 else:
     st.header(f"🏗️ {menu}")

@@ -125,7 +125,7 @@ if menu == "발주서접수":
                 st.subheader("제품 상세 정보")
                 c1, c2, c3, c4 = st.columns(4)
                 name = c1.text_input("제품명 (타올 종류)")
-                category = c2.selectbox("구분", towel_types)
+                category = c2.selectbox("제품구분", towel_types)
                 weaving_type = c3.selectbox("제직타입", weaving_types)
                 yarn_type = c4.text_input("사종", placeholder="예: 최고급 면사")
                 
@@ -206,7 +206,9 @@ if menu == "발주서접수":
             # 날짜 범위 선택 (기본값: 최근 30일)
             today = datetime.date.today()
             date_range = c1.date_input("조회 기간", [today - datetime.timedelta(days=30), today])
-            filter_status = c2.multiselect("진행 상태", ["발주접수", "제직", "염색", "봉제", "출고"], default=["발주접수", "제직", "염색", "봉제"])
+            # 상세 공정 상태 목록 추가
+            status_options = ["발주접수", "제직대기", "제직중", "제직완료", "염색출고", "염색중", "염색완료", "봉제중", "봉제완료", "출고완료"]
+            filter_status = c2.multiselect("진행 상태", status_options, default=["발주접수", "제직대기", "제직중"])
             filter_customer = c3.text_input("발주처 검색")
             
             search_btn = st.form_submit_button("🔍 조회하기")
@@ -236,13 +238,26 @@ if menu == "발주서접수":
                 if filter_customer:
                     df = df[df['customer'].str.contains(filter_customer, na=False)]
                 
-                # 모든 컬럼 표시 (발주번호 포함)
+                # 컬럼명 한글 매핑
+                col_map = {
+                    "order_no": "발주번호", "date": "접수일", "customer": "발주처",
+                    "name": "제품명", "category": "제품구분", "weaving_type": "제직타입",
+                    "yarn_type": "사종", "color": "색상", "weight": "중량",
+                    "size": "사이즈", "stock": "수량", "status": "상태",
+                    "delivery_req_date": "납품요청일", "delivery_to": "납품처",
+                    "delivery_contact": "납품연락처", "delivery_address": "납품주소",
+                    "note": "비고"
+                }
+
                 display_cols = ["order_no", "date", "customer", "name", "category", "weaving_type", "yarn_type", "color", "weight", "size", "stock", "status", "delivery_req_date", "delivery_to", "delivery_contact", "delivery_address", "note"]
                 final_cols = [c for c in display_cols if c in df.columns] # 실제 존재하는 컬럼만 선택
                 
-                st.dataframe(df[final_cols], use_container_width=True)
+                # 화면 표시용 데이터프레임 (한글 컬럼 적용)
+                df_display = df[final_cols].rename(columns=col_map)
                 
-                csv = df.to_csv(index=False).encode('utf-8-sig')
+                st.dataframe(df_display, use_container_width=True)
+                
+                csv = df_display.to_csv(index=False).encode('utf-8-sig')
                 st.download_button(
                     label="💾 엑셀 다운로드",
                     data=csv,
@@ -252,9 +267,18 @@ if menu == "발주서접수":
                 
                 # 인쇄용 미리보기 (HTML)
                 with st.expander("🖨️ 인쇄용 미리보기 (클릭)"):
+                    # 인쇄 시 사이드바 등 숨기는 CSS 적용
+                    st.markdown("""
+                        <style>
+                        @media print {
+                            [data-testid="stSidebar"], header, footer, .stButton { display: none !important; }
+                            .block-container { padding: 0 !important; }
+                        }
+                        </style>
+                    """, unsafe_allow_html=True)
                     st.markdown("### 발주 현황 리스트")
-                    st.markdown(df[final_cols].to_html(index=False), unsafe_allow_html=True)
-                    st.caption("위 표가 보이면 브라우저의 인쇄 기능(Ctrl+P)을 사용하여 출력하세요.")
+                    st.markdown(df_display.to_html(index=False, border=1, justify='center'), unsafe_allow_html=True)
+                    st.caption("위 표가 펼쳐진 상태에서 Ctrl+P를 누르면 리스트만 깔끔하게 인쇄됩니다.")
 
                 # --- 수정 및 삭제 기능 (발주접수 상태만) ---
                 st.divider()
@@ -273,17 +297,36 @@ if menu == "발주서접수":
                         # 선택된 데이터 가져오기
                         sel_row = editable_df[editable_df['id'] == sel_id].iloc[0]
                         
+                        # 수정 폼을 위해 기초 데이터 다시 로드
+                        towel_types = get_common_codes("towel_types", ["세면타올", "바스타올", "기타"])
+                        weaving_types = get_common_codes("weaving_types", ["30수 연사", "무지", "기타"])
+                        customer_list = get_partners("발주처")
+
                         with st.form("edit_order_form"):
                             st.write(f"선택된 발주건: **{sel_row['customer']} - {sel_row['name']}**")
-                            ec1, ec2, ec3, ec4 = st.columns(4)
-                            e_name = ec1.text_input("제품명", value=sel_row['name'])
-                            e_stock = ec2.number_input("수량", value=int(sel_row['stock']), step=10)
-                            e_color = ec3.text_input("색상", value=sel_row.get('color', ''))
-                            e_note = ec4.text_input("특이사항", value=sel_row.get('note', ''))
                             
-                            ec5, ec6 = st.columns(2)
-                            e_del_to = ec5.text_input("납품처", value=sel_row.get('delivery_to', ''))
-                            e_del_addr = ec6.text_input("납품주소", value=sel_row.get('delivery_address', ''))
+                            # 모든 필드 수정 가능하도록 배치
+                            ec1, ec2, ec3, ec4 = st.columns(4)
+                            e_customer = ec1.selectbox("발주처", customer_list, index=customer_list.index(sel_row['customer']) if sel_row['customer'] in customer_list else 0)
+                            e_name = ec2.text_input("제품명", value=sel_row['name'])
+                            e_category = ec3.selectbox("제품구분", towel_types, index=towel_types.index(sel_row['category']) if sel_row['category'] in towel_types else 0)
+                            e_stock = ec4.number_input("수량", value=int(sel_row['stock']), step=10)
+
+                            ec5, ec6, ec7, ec8 = st.columns(4)
+                            e_weaving = ec5.selectbox("제직타입", weaving_types, index=weaving_types.index(sel_row['weaving_type']) if sel_row['weaving_type'] in weaving_types else 0)
+                            e_yarn = ec6.text_input("사종", value=sel_row.get('yarn_type', ''))
+                            e_color = ec7.text_input("색상", value=sel_row.get('color', ''))
+                            e_weight = ec8.number_input("중량", value=int(sel_row.get('weight', 0)), step=10)
+
+                            ec9, ec10, ec11 = st.columns(3)
+                            e_size = ec9.text_input("사이즈", value=sel_row.get('size', ''))
+                            e_del_date = ec10.date_input("납품요청일", datetime.datetime.strptime(sel_row['delivery_req_date'], "%Y-%m-%d").date() if sel_row.get('delivery_req_date') else datetime.date.today())
+                            e_note = ec11.text_input("특이사항", value=sel_row.get('note', ''))
+                            
+                            ec12, ec13, ec14 = st.columns(3)
+                            e_del_to = ec12.text_input("납품처", value=sel_row.get('delivery_to', ''))
+                            e_del_contact = ec13.text_input("납품연락처", value=sel_row.get('delivery_contact', ''))
+                            e_del_addr = ec14.text_input("납품주소", value=sel_row.get('delivery_address', ''))
 
                             c_btn1, c_btn2 = st.columns(2)
                             update_submitted = c_btn1.form_submit_button("수정 저장")
@@ -291,11 +334,19 @@ if menu == "발주서접수":
                             
                             if update_submitted:
                                 db.collection("inventory").document(sel_id).update({
+                                    "customer": e_customer,
                                     "name": e_name,
+                                    "category": e_category,
                                     "stock": e_stock,
+                                    "weaving_type": e_weaving,
+                                    "yarn_type": e_yarn,
                                     "color": e_color,
+                                    "weight": e_weight,
+                                    "size": e_size,
+                                    "delivery_req_date": str(e_del_date),
                                     "note": e_note,
                                     "delivery_to": e_del_to,
+                                    "delivery_contact": e_del_contact,
                                     "delivery_address": e_del_addr
                                 })
                                 st.success("수정되었습니다.")

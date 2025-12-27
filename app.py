@@ -111,7 +111,7 @@ if menu == "발주서접수":
             weaving_types = get_common_codes("weaving_types", ["30수 연사", "40수 코마사", "무지", "자카드", "기타"])
             customer_list = get_partners("발주처")
 
-            with st.form("order_form"):
+            with st.form("order_form", clear_on_submit=True):
                 st.subheader("기본 발주 정보")
                 c1, c2, c3 = st.columns(3)
                 order_date = c1.date_input("발주접수일", datetime.date.today())
@@ -146,8 +146,33 @@ if menu == "발주서접수":
                 submitted = st.form_submit_button("발주 등록")
                 if submitted:
                     if name and customer:
+                        # 발주번호 생성 로직 (YYMM + 3자리 일련번호, 예: 2505001)
+                        now = datetime.datetime.now()
+                        prefix = now.strftime("%y%m") # 예: 2405
+                        
+                        # 해당 월의 가장 마지막 발주번호 조회
+                        last_docs = db.collection("inventory")\
+                            .where("order_no", ">=", f"{prefix}000")\
+                            .where("order_no", "<=", f"{prefix}999")\
+                            .order_by("order_no", direction=firestore.Query.DESCENDING)\
+                            .limit(1)\
+                            .stream()
+                        
+                        last_seq = 0
+                        for doc in last_docs:
+                            last_val = doc.to_dict().get("order_no")
+                            if last_val and len(last_val) == 7:
+                                try:
+                                    last_seq = int(last_val[-3:])
+                                except:
+                                    pass
+                        
+                        new_seq = last_seq + 1
+                        order_no = f"{prefix}{new_seq:03d}"
+
                         # Firestore에 저장할 데이터 딕셔너리 생성
                         doc_data = {
+                            "order_no": order_no,
                             "date": datetime.datetime.combine(order_date, datetime.time.min), # 날짜 형식을 datetime으로 변환
                             "customer": customer,
                             "delivery_req_date": str(delivery_req_date),
@@ -166,7 +191,7 @@ if menu == "발주서접수":
                             "status": "발주접수" # 초기 상태
                         }
                         db.collection("inventory").add(doc_data)
-                        st.success(f"'{customer}' - '{name}' 발주가 정상적으로 접수되었습니다!")
+                        st.success(f"발주번호 [{order_no}] 접수 완료!")
                         st.rerun()
                     else:
                         st.error("제품명과 발주처는 필수 입력 항목입니다.")
@@ -211,8 +236,9 @@ if menu == "발주서접수":
                 if filter_customer:
                     df = df[df['customer'].str.contains(filter_customer, na=False)]
                 
-                display_cols = ["date", "customer", "name", "category", "stock", "status", "delivery_req_date", "note"]
-                final_cols = [c for c in display_cols if c in df.columns]
+                # 모든 컬럼 표시 (발주번호 포함)
+                display_cols = ["order_no", "date", "customer", "name", "category", "weaving_type", "yarn_type", "color", "weight", "size", "stock", "status", "delivery_req_date", "delivery_to", "delivery_contact", "delivery_address", "note"]
+                final_cols = [c for c in display_cols if c in df.columns] # 실제 존재하는 컬럼만 선택
                 
                 st.dataframe(df[final_cols], use_container_width=True)
                 
@@ -223,6 +249,65 @@ if menu == "발주서접수":
                     file_name='발주현황.csv',
                     mime='text/csv',
                 )
+                
+                # 인쇄용 미리보기 (HTML)
+                with st.expander("🖨️ 인쇄용 미리보기 (클릭)"):
+                    st.markdown("### 발주 현황 리스트")
+                    st.markdown(df[final_cols].to_html(index=False), unsafe_allow_html=True)
+                    st.caption("위 표가 보이면 브라우저의 인쇄 기능(Ctrl+P)을 사용하여 출력하세요.")
+
+                # --- 수정 및 삭제 기능 (발주접수 상태만) ---
+                st.divider()
+                st.subheader("🛠️ 발주 내역 수정/삭제 (발주접수 상태만 가능)")
+                
+                # 수정 가능한 목록 필터링
+                editable_df = df[df['status'] == '발주접수']
+                
+                if not editable_df.empty:
+                    # 선택 박스 생성 (발주번호 - 거래처 - 제품명)
+                    edit_options = editable_df.apply(lambda x: f"{x.get('order_no', 'NoID')} | {x['customer']} | {x['name']} (ID:{x['id']})", axis=1).tolist()
+                    selected_edit = st.selectbox("수정할 발주 건을 선택하세요", edit_options)
+                    
+                    if selected_edit:
+                        sel_id = selected_edit.split("(ID:")[-1].replace(")", "")
+                        # 선택된 데이터 가져오기
+                        sel_row = editable_df[editable_df['id'] == sel_id].iloc[0]
+                        
+                        with st.form("edit_order_form"):
+                            st.write(f"선택된 발주건: **{sel_row['customer']} - {sel_row['name']}**")
+                            ec1, ec2, ec3, ec4 = st.columns(4)
+                            e_name = ec1.text_input("제품명", value=sel_row['name'])
+                            e_stock = ec2.number_input("수량", value=int(sel_row['stock']), step=10)
+                            e_color = ec3.text_input("색상", value=sel_row.get('color', ''))
+                            e_note = ec4.text_input("특이사항", value=sel_row.get('note', ''))
+                            
+                            ec5, ec6 = st.columns(2)
+                            e_del_to = ec5.text_input("납품처", value=sel_row.get('delivery_to', ''))
+                            e_del_addr = ec6.text_input("납품주소", value=sel_row.get('delivery_address', ''))
+
+                            c_btn1, c_btn2 = st.columns(2)
+                            update_submitted = c_btn1.form_submit_button("수정 저장")
+                            delete_submitted = c_btn2.form_submit_button("삭제 하기", type="primary")
+                            
+                            if update_submitted:
+                                db.collection("inventory").document(sel_id).update({
+                                    "name": e_name,
+                                    "stock": e_stock,
+                                    "color": e_color,
+                                    "note": e_note,
+                                    "delivery_to": e_del_to,
+                                    "delivery_address": e_del_addr
+                                })
+                                st.success("수정되었습니다.")
+                                st.rerun()
+                                
+                            if delete_submitted:
+                                db.collection("inventory").document(sel_id).delete()
+                                st.success("삭제되었습니다.")
+                                st.rerun()
+                else:
+                    st.info("수정 가능한(발주접수 상태) 내역이 없습니다.")
+
             else:
                 st.info("해당 기간에 조회된 데이터가 없습니다.")
         else:
@@ -274,6 +359,79 @@ elif menu == "현재고현황":
                 else:
                     st.caption("조회 전용")
         st.divider()
+
+elif menu == "제직현황":
+    st.header("🧵 제직 현황")
+    st.info("발주된 건을 확인하고 제직 작업을 지시하거나, 완료된 건을 염색 공정으로 넘깁니다.")
+
+    # 탭 분리: 작업 대기/진행 vs 전체 조회
+    tab1, tab2 = st.tabs(["🏭 작업 관리 (지시/완료)", "📋 제직 내역 조회"])
+
+    with tab1:
+        # '발주접수' 또는 '제직' 상태인 건만 가져오기
+        # Firestore의 'in' 쿼리 사용
+        docs = db.collection("inventory").where("status", "in", ["발주접수", "제직"]).order_by("date").stream()
+        
+        rows = []
+        for doc in docs:
+            d = doc.to_dict()
+            d['id'] = doc.id
+            rows.append(d)
+        
+        if rows:
+            for item in rows:
+                with st.container():
+                    # 카드 형태로 각 건 표시
+                    c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 1, 2])
+                    
+                    # 상태에 따라 배지 색상 다르게 표시
+                    status_color = "blue" if item['status'] == "제직" else "green"
+                    c1.markdown(f"**[{item['status']}]** :{status_color}[{item.get('order_no', '-')}]")
+                    c1.write(f"📅 {item['date'].strftime('%Y-%m-%d')}")
+                    
+                    c2.write(f"**{item['customer']}**")
+                    c2.write(f"{item['name']}")
+                    
+                    c3.write(f"{item['weaving_type']} / {item['yarn_type']}")
+                    c3.write(f"{item['color']} / {item['stock']}장")
+                    
+                    # 작업지시서 미리보기 (Expander)
+                    with c4.expander("🖨️ 지시서"):
+                        st.markdown(f"""
+                        <div style="border:1px solid #000; padding:10px; font-size:12px;">
+                            <h3 style="text-align:center; margin:0;">작 업 지 시 서</h3>
+                            <hr>
+                            <p><strong>발주번호:</strong> {item.get('order_no')}</p>
+                            <p><strong>발 주 처:</strong> {item['customer']}</p>
+                            <p><strong>제 품 명:</strong> {item['name']} ({item['category']})</p>
+                            <p><strong>제직타입:</strong> {item['weaving_type']}</p>
+                            <p><strong>사    종:</strong> {item['yarn_type']}</p>
+                            <p><strong>색상/수량:</strong> {item['color']} / {item['stock']}장</p>
+                            <p><strong>중량/사이즈:</strong> {item['weight']}g / {item['size']}</p>
+                            <p><strong>납품요청일:</strong> {item['delivery_req_date']}</p>
+                            <p><strong>특이사항:</strong> {item.get('note', '-')}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        st.caption("Ctrl+P로 인쇄")
+
+                    # 상태 변경 버튼
+                    if item['status'] == "발주접수":
+                        if c5.button("제직 시작 ➡️", key=f"start_{item['id']}"):
+                            db.collection("inventory").document(item['id']).update({"status": "제직"})
+                            st.rerun()
+                    elif item['status'] == "제직":
+                        if c5.button("제직 완료 (염색으로) ➡️", key=f"end_{item['id']}"):
+                            db.collection("inventory").document(item['id']).update({"status": "염색"})
+                            st.rerun()
+                    
+                    st.divider()
+        else:
+            st.info("현재 제직 대기 중이거나 작업 중인 건이 없습니다.")
+
+    with tab2:
+        st.write("제직 공정에 있는 모든 내역을 조회합니다.")
+        # 간단한 리스트 조회 구현 (필요 시 확장)
+        st.caption("전체 제직 내역 조회 기능은 추후 업데이트 예정입니다.")
 
 elif menu == "거래처관리":
     st.header("🏢 거래처 관리")

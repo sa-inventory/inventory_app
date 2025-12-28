@@ -206,7 +206,13 @@ if menu == "발주서접수":
             date_range = c1.date_input("조회 기간", [today - datetime.timedelta(days=30), today])
             # 상세 공정 상태 목록 추가
             status_options = ["발주접수", "제직대기", "제직중", "제직완료", "염색출고", "염색중", "염색완료", "봉제중", "봉제완료", "출고완료"]
-            filter_status = c2.multiselect("진행 상태", status_options, default=["발주접수", "제직대기", "제직중"])
+            
+            # 초기값: 이전에 검색한 값이 있으면 유지, 없으면 전체 선택
+            default_status = st.session_state.get("search_filter_status", status_options)
+            # 에러 방지: 현재 옵션에 있는 값만 필터링 (코드가 바뀌었을 때를 대비)
+            valid_default = [x for x in default_status if x in status_options]
+            
+            filter_status = c2.multiselect("진행 상태", status_options, default=valid_default)
             filter_customer = c3.text_input("발주처 검색")
             
             search_btn = st.form_submit_button("🔍 조회하기")
@@ -311,7 +317,6 @@ if menu == "발주서접수":
                                 <button onclick="window.print()" style="padding:10px 20px; font-size:16px; cursor:pointer;">🖨️ 지금 인쇄하기 (Click)</button>
                             </div>
                             {df_display.to_html(index=False, border=1)}
-                            <script>window.print();</script>
                         </body>
                         </html>
                     """
@@ -520,6 +525,72 @@ elif menu == "제직현황":
         st.write("제직 공정에 있는 모든 내역을 조회합니다.")
         # 간단한 리스트 조회 구현 (필요 시 확장)
         st.caption("전체 제직 내역 조회 기능은 추후 업데이트 예정입니다.")
+
+elif menu == "염색현황":
+    st.header("🎨 염색 현황")
+    st.info("제직이 완료된 건을 염색 공장에서 작업하고 봉제 단계로 넘깁니다.")
+
+    tab1, tab2 = st.tabs(["🏭 염색 작업 관리", "📋 염색 내역 조회"])
+
+    with tab1:
+        # '염색' (대기) 또는 '염색중' 상태인 건만 가져오기
+        docs = db.collection("inventory").where("status", "in", ["염색", "염색중"]).stream()
+        
+        rows = []
+        for doc in docs:
+            d = doc.to_dict()
+            d['id'] = doc.id
+            rows.append(d)
+            
+        rows.sort(key=lambda x: x['date'])
+        
+        if rows:
+            for item in rows:
+                with st.container():
+                    c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 1, 2])
+                    
+                    status_color = "red" if item['status'] == "염색중" else "orange"
+                    c1.markdown(f"**[{item['status']}]** :{status_color}[{item.get('order_no', '-')}]")
+                    c1.write(f"📅 {item['date'].strftime('%Y-%m-%d')}")
+                    
+                    c2.write(f"**{item['customer']}**")
+                    c2.write(f"{item['name']}")
+                    
+                    c3.write(f"{item['color']} / {item['stock']}장")
+                    c3.write(f"{item['weight']}g")
+                    
+                    with c4.expander("🖨️ 지시서"):
+                        st.markdown(f"""
+                        <div style="border:1px solid #000; padding:10px; font-size:12px;">
+                            <h3 style="text-align:center; margin:0;">염 색 지 시 서</h3>
+                            <hr>
+                            <p><strong>발주번호:</strong> {item.get('order_no')}</p>
+                            <p><strong>발 주 처:</strong> {item['customer']}</p>
+                            <p><strong>제 품 명:</strong> {item['name']}</p>
+                            <p><strong>색    상:</strong> {item['color']}</p>
+                            <p><strong>수    량:</strong> {item['stock']}장</p>
+                            <p><strong>중    량:</strong> {item['weight']}g</p>
+                            <p><strong>납품요청일:</strong> {item['delivery_req_date']}</p>
+                            <p><strong>특이사항:</strong> {item.get('note', '-')}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        st.caption("Ctrl+P로 인쇄")
+
+                    if item['status'] == "염색":
+                        if c5.button("염색 시작 ➡️", key=f"dye_start_{item['id']}"):
+                            db.collection("inventory").document(item['id']).update({"status": "염색중"})
+                            st.rerun()
+                    elif item['status'] == "염색중":
+                        if c5.button("염색 완료 (봉제로) ➡️", key=f"dye_end_{item['id']}"):
+                            db.collection("inventory").document(item['id']).update({"status": "봉제"})
+                            st.rerun()
+                    
+                    st.divider()
+        else:
+            st.info("현재 염색 대기 중이거나 작업 중인 건이 없습니다.")
+
+    with tab2:
+        st.write("염색 공정 내역 조회 (추후 구현)")
 
 elif menu == "거래처관리":
     st.header("🏢 거래처 관리")

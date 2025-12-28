@@ -232,12 +232,12 @@ if menu == "발주서접수":
             # 상세 공정 상태 목록 추가
             status_options = ["발주접수", "제직대기", "제직중", "제직완료", "염색출고", "염색중", "염색완료", "봉제중", "봉제완료", "출고완료"]
             
-            # 초기값: 이전에 검색한 값이 있으면 유지, 없으면 전체 선택
-            default_status = st.session_state.get("search_filter_status", status_options)
+            # 초기값: 이전에 검색한 값이 있으면 유지, 없으면 빈 리스트 (전체 조회)
+            default_status = st.session_state.get("search_filter_status_new", [])
             # 에러 방지: 현재 옵션에 있는 값만 필터링 (코드가 바뀌었을 때를 대비)
             valid_default = [x for x in default_status if x in status_options]
             
-            filter_status = c2.multiselect("진행 상태", status_options, default=valid_default)
+            filter_status = c2.multiselect("진행 상태 (비워두면 전체)", status_options, default=valid_default)
             filter_customer = c3.text_input("발주처 검색")
             
             search_btn = st.form_submit_button("🔍 조회하기")
@@ -246,13 +246,13 @@ if menu == "발주서접수":
         if search_btn:
             st.session_state["search_performed"] = True
             st.session_state["search_date_range"] = date_range
-            st.session_state["search_filter_status"] = filter_status
+            st.session_state["search_filter_status_new"] = filter_status
             st.session_state["search_filter_customer"] = filter_customer
 
         if st.session_state.get("search_performed"):
             # 저장된 검색 조건 사용
             s_date_range = st.session_state["search_date_range"]
-            s_filter_status = st.session_state["search_filter_status"]
+            s_filter_status = st.session_state["search_filter_status_new"]
             s_filter_customer = st.session_state["search_filter_customer"]
 
             # 날짜 필터링을 위해 datetime 변환

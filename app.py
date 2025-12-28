@@ -396,11 +396,7 @@ if menu == "발주서접수":
                             e_del_contact = ec13.text_input("납품연락처", value=sel_row.get('delivery_contact', ''))
                             e_del_addr = ec14.text_input("납품주소", value=sel_row.get('delivery_address', ''))
 
-                            c_btn1, c_btn2 = st.columns(2)
-                            update_submitted = c_btn1.form_submit_button("수정 저장")
-                            delete_submitted = c_btn2.form_submit_button("삭제 하기", type="primary")
-                            
-                            if update_submitted:
+                            if st.form_submit_button("수정 저장"):
                                 db.collection("inventory").document(sel_id).update({
                                     "customer": e_customer,
                                     "name": e_name,
@@ -418,10 +414,22 @@ if menu == "발주서접수":
                                 })
                                 st.success("수정되었습니다.")
                                 st.rerun()
-                                
-                            if delete_submitted:
+                        
+                        # 삭제 확인 및 처리 (폼 밖에서 처리)
+                        st.divider()
+                        if st.button("🗑️ 이 발주건 삭제", type="primary", key="btn_del_req"):
+                            st.session_state["delete_confirm_id"] = sel_id
+                        
+                        if st.session_state.get("delete_confirm_id") == sel_id:
+                            st.warning("정말로 삭제하시겠습니까? (복구 불가)")
+                            col_conf1, col_conf2 = st.columns(2)
+                            if col_conf1.button("✅ 예, 삭제합니다", key="btn_del_yes"):
                                 db.collection("inventory").document(sel_id).delete()
+                                st.session_state["delete_confirm_id"] = None
                                 st.success("삭제되었습니다.")
+                                st.rerun()
+                            if col_conf2.button("❌ 취소", key="btn_del_no"):
+                                st.session_state["delete_confirm_id"] = None
                                 st.rerun()
                 else:
                     st.info("👆 위 목록에서 수정할 행을 선택해주세요.")

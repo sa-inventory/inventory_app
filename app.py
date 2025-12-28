@@ -235,6 +235,7 @@ if menu == "발주서접수":
                     }
                     db.collection("inventory").add(doc_data)
                     st.success(f"발주번호 [{order_no}] 접수 완료!")
+                    st.balloons()
                     st.rerun()
                 else:
                     st.error("제품명과 발주처는 필수 입력 항목입니다.")
@@ -290,9 +291,20 @@ elif menu == "발주현황":
             if 'date' in d and d['date']:
                 d['date'] = d['date'].strftime("%Y-%m-%d")
             rows.append(d)
-            
+        
         if rows:
             df = pd.DataFrame(rows)
+            
+            # [추가] 날짜 및 출고정보 컬럼이 없으면 빈 값으로 생성 (에러 방지)
+            for col in ["weaving_end_time", "dyeing_end_time", "sewing_end_time", "shipping_date", "shipping_method"]:
+                if col not in df.columns:
+                    df[col] = ""
+            
+            # 날짜 포맷팅 (YYYY-MM-DD)
+            date_cols = ["weaving_end_time", "dyeing_end_time", "sewing_end_time", "shipping_date"]
+            for col in date_cols:
+                if col in df.columns:
+                    df[col] = df[col].apply(lambda x: x.strftime("%Y-%m-%d") if hasattr(x, 'strftime') else x)
             
             # [수정] 발주번호(order_no) 컬럼이 없으면 강제로 생성 (빈 값)
             if 'order_no' not in df.columns:
@@ -763,7 +775,10 @@ elif menu == "염색현황":
                             st.rerun()
                     elif item['status'] == "염색중":
                         if c5.button("염색 완료 (봉제로) ➡️", key=f"dye_end_{item['id']}"):
-                            db.collection("inventory").document(item['id']).update({"status": "봉제"})
+                            db.collection("inventory").document(item['id']).update({
+                                "status": "봉제",
+                                "dyeing_end_time": datetime.datetime.now()
+                            })
                             st.rerun()
                     
                     st.divider()
@@ -772,6 +787,98 @@ elif menu == "염색현황":
 
     with tab2:
         st.write("염색 공정 내역 조회 (추후 구현)")
+
+elif menu == "봉제현황":
+    st.header("🪡 봉제 현황")
+    st.info("염색이 완료된 원단을 봉제하여 완제품으로 만듭니다.")
+    
+    tab1, tab2 = st.tabs(["🏭 봉제 작업 관리", "📋 봉제 내역 조회"])
+    
+    with tab1:
+        # '봉제' (대기) 또는 '봉제중' 상태
+        docs = db.collection("inventory").where("status", "in", ["봉제", "봉제중"]).stream()
+        rows = []
+        for doc in docs:
+            d = doc.to_dict()
+            d['id'] = doc.id
+            rows.append(d)
+        rows.sort(key=lambda x: x.get('date', datetime.datetime.max))
+        
+        if rows:
+            for item in rows:
+                with st.container():
+                    c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 1, 2])
+                    status_color = "red" if item['status'] == "봉제중" else "orange"
+                    c1.markdown(f"**[{item['status']}]** :{status_color}[{item.get('order_no', '-')}]")
+                    c1.write(f"📅 {item.get('date', datetime.date.today()).strftime('%Y-%m-%d')}")
+                    
+                    c2.write(f"**{item.get('customer')}**")
+                    c2.write(f"{item.get('name')}")
+                    
+                    c3.write(f"{item.get('color')} / {item.get('stock')}장")
+                    
+                    with c4.expander("🖨️ 지시서"):
+                        st.write(f"봉제 지시서 내용 (발주번호: {item.get('order_no')})")
+                        
+                    if item['status'] == "봉제":
+                        if c5.button("봉제 시작 ➡️", key=f"sew_start_{item['id']}"):
+                            db.collection("inventory").document(item['id']).update({"status": "봉제중"})
+                            st.rerun()
+                    elif item['status'] == "봉제중":
+                        if c5.button("봉제 완료 (출고대기) ➡️", key=f"sew_end_{item['id']}"):
+                            db.collection("inventory").document(item['id']).update({
+                                "status": "출고대기",
+                                "sewing_end_time": datetime.datetime.now()
+                            })
+                            st.rerun()
+                    st.divider()
+        else:
+            st.info("봉제 대기 중이거나 작업 중인 건이 없습니다.")
+            
+    with tab2:
+        st.write("봉제 내역 조회 (추후 구현)")
+
+elif menu == "출고현황":
+    st.header("🚚 출고 현황")
+    st.info("완성된 제품을 출고 처리하고 배송 정보를 입력합니다.")
+    
+    tab1, tab2 = st.tabs(["🚀 출고 대기 관리", "📋 출고 완료 내역"])
+    
+    with tab1:
+        # '출고대기' 상태
+        docs = db.collection("inventory").where("status", "==", "출고대기").stream()
+        rows = []
+        for doc in docs:
+            d = doc.to_dict()
+            d['id'] = doc.id
+            rows.append(d)
+        rows.sort(key=lambda x: x.get('date', datetime.datetime.max))
+        
+        if rows:
+            for item in rows:
+                with st.container():
+                    c1, c2, c3, c4 = st.columns([2, 2, 3, 2])
+                    c1.markdown(f"**[{item['status']}]** :green[{item.get('order_no', '-')}]")
+                    c2.write(f"**{item.get('customer')}**")
+                    c3.write(f"{item.get('name')} ({item.get('stock')}장)")
+                    
+                    # 출고 방법 선택 및 완료 처리
+                    with c4:
+                        ship_method = st.selectbox("출고방법", ["택배", "화물", "용차", "직배송", "기타"], key=f"sm_{item['id']}")
+                        if st.button("🚀 출고 완료 처리", key=f"ship_{item['id']}"):
+                            db.collection("inventory").document(item['id']).update({
+                                "status": "출고완료",
+                                "shipping_date": datetime.datetime.now(),
+                                "shipping_method": ship_method
+                            })
+                            st.success("출고 처리되었습니다.")
+                            st.rerun()
+                st.divider()
+        else:
+            st.info("출고 대기 중인 건이 없습니다.")
+
+    with tab2:
+        st.write("출고 완료 내역 조회 (추후 구현)")
 
 elif menu == "거래처관리":
     st.header("🏢 거래처 관리")

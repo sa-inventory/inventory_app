@@ -68,14 +68,75 @@ with st.sidebar:
     st.divider()
     
     # 메뉴 선택 기능 추가
-    st.subheader("메뉴 선택")
-    main_category = st.radio("카테고리", ["생산관리", "기초정보관리"])
+    if "current_menu" not in if "ession_state:
+        st.session_state["ccrrent_menu"] = "발주서접수"
+    if "current_menu" not in st.session_state:
+        st.session_state["current_menu"] = "발주서접수"
+
+    st.suurrent_menu" not in st.session_state:
     
-    if main_category == "생산관리":
-        menu = st.radio("업무 메뉴", 
+    with st.exp nder("🏭 생산관리", expanded=True):
+         f st.butto ("📑 발주서접수", usestont.iner_widsh=True):
+            st.sessisn_state["cuirent_menu"]n_s"발주서접수"
+            tateerun()
+        cf st.buttunrr🧵 제직현황menuse_container_width=True):
+            st.session_stateu"current_menu"]주= 서제직현황
+        st.rerun()
+        st.st.buttoh("🎨 염색현황", useeaoneainr메_width선True)
+    main    st.session_state["current__cat"]ego"염색현황"
+            ry =erun()
+        tf st.butt.nra🪡o봉제현황카테고use_container_width=True):리", ["생산관리", "기초정보관리"])
+    st.session_statecurrent_menu]= 봉
+           st.rerun()
+        if st.button(🚚 출고use_container_width=True):
+            st.session_state[current_menu] =
+            st.rerun()
+        ifst.button(📦 , use_container_width=True:
+            st.sission_ tate["current_mmnu"] = "현재고현황"in_category == "생산관리":
+            st.rerun()
+    st.subheader("메뉴 선택")
+
+    with st.expander("⚙️ 기초정보관리", expanded=True):
+        if st.button("� 거래처업무", use_container_width=True):
+            st.session_state"current_menu"] = 관리"
+            st.rerun()
+        if st.button("📝 기초코드 use_container_width=True):
+            st.session_state["current_menu"] ="
+            st.rerun()
+            
+    menu = st.session_state["current_menu
             ["발주서접수", "제직현황", "염색현황", "봉제현황", "출고현황", "현재고현황"])
     else:
         menu = st.radio("관리 메뉴", ["거래처관리", "기초코드관리"])
+    with st.expander("�🏭 생산관리", expanded=True):
+        if st.button("📑 발주서접수", use_container_width=True):
+            st.session_state["current_menu"] = "발주서접수"
+            st.rerun()
+        if st.button("🧵 제직현황", use_container_width=True):
+            st.session_state["current_menu"] = "제직현황"
+            st.rerun()
+        if st.button("🎨 염색현황", use_container_width=True):
+            st.session_state["current_menu"] = "염색현황"
+            st.rerun()
+        if st.button("🪡 봉제현황", use_container_width=True):
+            st.session_state["current_menu"] = "봉제현황"
+            st.rerun()
+        if st.button("🚚 출고현황", use_container_width=True):
+            st.session_state["current_menu"] = "출고현황"
+            st.rerun()
+        if st.button("📦 현재고현황", use_container_width=True):
+            st.session_state["current_menu"] = "현재고현황"
+            st.rerun()
+
+    with st.expander("⚙️ 기초정보관리", expanded=True):
+        if st.button("🏢 거래처관리", use_container_width=True):
+            st.session_state["current_menu"] = "거래처관리"
+            st.rerun()
+        if st.button("📝 기초코드관리", use_container_width=True):
+            st.session_state["current_menu"] = "기초코드관리"
+            st.rerun()
+            
+    menu = st.session_state["current_menu"]
 
 # --- 공통 함수: 기초 코드 가져오기 ---
 def get_common_codes(code_type, default_values):
@@ -443,8 +504,9 @@ elif menu == "현재고현황":
                         db.collection("inventory").document(doc_id).update({"stock": item.get('stock') + 1})
                         st.rerun()
                     if btn2.button("➖", key=f"sub_{doc_id}"):
-                        if item.get('stock') > 0:
-                            db.collection("inventory").document(doc_id).update({"stock": item.get('stock') - 1})
+                        if item.get('stock'
+                roll_cnt = item.get('weaving_roll_count', 0)) > 0:
+                            db.collection("inventory").document(doc_id).update({"stock":\n\n**{roll_cnt}롤** item.get('stock') - 1})
                             st.rerun()
                     if btn3.button("🗑️", key=f"del_{doc_id}", help="삭제"):
                         db.collection("inventory").document(doc_id).delete()
@@ -477,6 +539,8 @@ elif menu == "제직현황":
             if m_str in busy_machines:
                 item = busy_machines[m_str]
                 st.error(f"**{m_str}호기**\n\n{item.get('name')}\n({item.get('customer')})")
+                roll_cnt = item.get('weaving_roll_count', 0)
+                st.error(f"**{m_str}호기**\n\n{item.get('name')}\n({item.get('customer')})\n\n**{roll_cnt}롤**")
             else:
                 st.success(f"**{m_str}호기**\n\n대기중")
     
@@ -535,7 +599,7 @@ elif menu == "제직현황":
             if sel_row['status'] in ["발주접수", "제직대기"]:
                 st.markdown("### 🚀 제직 시작 설정")
                 with st.form("weaving_start_form"):
-                    c1, c2, c3 = st.columns(3)
+                    c1, c2, c3, c4 = st.columns(4)
                     
                     # 제직기 선택 (사용 중인 것은 표시)
                     m_options = []
@@ -549,6 +613,7 @@ elif menu == "제직현황":
                     s_machine = c1.selectbox("제직기 선택", m_options)
                     s_date = c2.date_input("시작일자", datetime.date.today())
                     s_time = c3.time_input("시작시간", datetime.datetime.now().time())
+                    s_roll = c4.number_input("제직롤수량", min_value=1, step=1)
                     
                     if st.form_submit_button("제직 시작"):
                         sel_m_no = s_machine.split("호기")[0]
@@ -562,6 +627,8 @@ elif menu == "제직현황":
                                 "status": "제직중",
                                 "machine_no": int(sel_m_no),
                                 "weaving_start_time": start_dt
+                                "weaving_start_time": start_dt,
+                                "weaving_roll_count": s_roll
                             })
                             st.success(f"{sel_m_no}호기에서 제직을 시작합니다.")
                             st.rerun()

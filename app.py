@@ -248,6 +248,10 @@ if menu == "발주서접수":
             if rows:
                 df = pd.DataFrame(rows)
                 
+                # [수정] 발주번호(order_no) 컬럼이 없으면 강제로 생성 (빈 값)
+                if 'order_no' not in df.columns:
+                    df['order_no'] = ""
+                
                 # 상태 및 거래처 필터 (메모리 상에서 2차 필터)
                 if s_filter_status:
                     df = df[df['status'].isin(s_filter_status)]
@@ -453,78 +457,129 @@ elif menu == "제직현황":
     st.header("🧵 제직 현황")
     st.info("발주된 건을 확인하고 제직 작업을 지시하거나, 완료된 건을 염색 공정으로 넘깁니다.")
 
-    # 탭 분리: 작업 대기/진행 vs 전체 조회
-    tab1, tab2 = st.tabs(["🏭 작업 관리 (지시/완료)", "📋 제직 내역 조회"])
-
-    with tab1:
-        # '발주접수' 또는 '제직' 상태인 건만 가져오기
-        # Firestore의 'in' 쿼리 사용
-        # [수정] order_by("date") 제거 (복합 인덱스 오류 방지) -> 파이썬에서 정렬
-        docs = db.collection("inventory").where("status", "in", ["발주접수", "제직"]).stream()
-        
-        rows = []
-        for doc in docs:
-            d = doc.to_dict()
-            d['id'] = doc.id
-            rows.append(d)
+    # 1. 제직기 가동 현황 (Dashboard)
+    st.subheader("🏭 제직기 가동 현황 (1호기 ~ 9호기)")
+    
+    # 현재 가동 중인 제직기 정보 가져오기
+    busy_machines = {}
+    running_docs = db.collection("inventory").where("status", "==", "제직중").stream()
+    for doc in running_docs:
+        d = doc.to_dict()
+        m_no = d.get("machine_no")
+        if m_no:
+            busy_machines[str(m_no)] = d
             
-        # 파이썬에서 날짜순 정렬
-        rows.sort(key=lambda x: x['date'])
+    # 9개의 제직기 상태 표시
+    cols = st.columns(9)
+    for i in range(1, 10):
+        m_str = str(i)
+        with cols[i-1]:
+            if m_str in busy_machines:
+                item = busy_machines[m_str]
+                st.error(f"**{m_str}호기**\n\n{item.get('name')}\n({item.get('customer')})")
+            else:
+                st.success(f"**{m_str}호기**\n\n대기중")
+    
+    st.divider()
+
+    # 2. 제직 작업 관리 (테이블 뷰)
+    st.subheader("📋 제직 작업 관리")
+    
+    # '발주접수', '제직대기', '제직중' 상태인 건 가져오기
+    docs = db.collection("inventory").where("status", "in", ["발주접수", "제직대기", "제직중"]).stream()
+    rows = []
+    for doc in docs:
+        d = doc.to_dict()
+        d['id'] = doc.id
+        rows.append(d)
+    
+    # 날짜순 정렬
+    rows.sort(key=lambda x: x.get('date', datetime.datetime.max))
+    
+    if rows:
+        df = pd.DataFrame(rows)
+        # 필수 컬럼 확보
+        for col in ["order_no", "machine_no", "weaving_start_time"]:
+            if col not in df.columns:
+                df[col] = ""
+
+        # 컬럼 매핑 (납품처 등 제외)
+        col_map = {
+            "order_no": "발주번호", "status": "상태", "machine_no": "제직기", 
+            "weaving_start_time": "시작시간", "customer": "발주처", "name": "제품명", 
+            "weaving_type": "제직타입", "yarn_type": "사종", "color": "색상", 
+            "stock": "수량", "weight": "중량", "size": "사이즈", "date": "접수일"
+        }
+        display_cols = ["order_no", "status", "machine_no", "weaving_start_time", "customer", "name", "stock", "weaving_type", "yarn_type", "color", "weight", "size", "date"]
+        final_cols = [c for c in display_cols if c in df.columns]
         
-        if rows:
-            for item in rows:
-                with st.container():
-                    # 카드 형태로 각 건 표시
-                    c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 1, 2])
+        df_display = df[final_cols].rename(columns=col_map)
+        
+        st.write("🔽 작업할 항목을 선택하세요.")
+        selection = st.dataframe(
+            df_display,
+            use_container_width=True,
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row"
+        )
+        
+        if selection.selection.rows:
+            idx = selection.selection.rows[0]
+            sel_row = df.iloc[idx]
+            sel_id = sel_row['id']
+            
+            st.info(f"선택된 항목: **{sel_row['order_no']} - {sel_row['name']}** (현재상태: {sel_row['status']})")
+            
+            # --- 제직 시작 설정 (대기 상태일 때) ---
+            if sel_row['status'] in ["발주접수", "제직대기"]:
+                st.markdown("### 🚀 제직 시작 설정")
+                with st.form("weaving_start_form"):
+                    c1, c2, c3 = st.columns(3)
                     
-                    # 상태에 따라 배지 색상 다르게 표시
-                    status_color = "blue" if item['status'] == "제직" else "green"
-                    c1.markdown(f"**[{item['status']}]** :{status_color}[{item.get('order_no', '-')}]")
-                    c1.write(f"📅 {item['date'].strftime('%Y-%m-%d')}")
+                    # 제직기 선택 (사용 중인 것은 표시)
+                    m_options = []
+                    for i in range(1, 10):
+                        m_str = str(i)
+                        if m_str in busy_machines:
+                            m_options.append(f"{m_str}호기 (사용중 - {busy_machines[m_str].get('name')})")
+                        else:
+                            m_options.append(f"{m_str}호기")
                     
-                    c2.write(f"**{item['customer']}**")
-                    c2.write(f"{item['name']}")
+                    s_machine = c1.selectbox("제직기 선택", m_options)
+                    s_date = c2.date_input("시작일자", datetime.date.today())
+                    s_time = c3.time_input("시작시간", datetime.datetime.now().time())
                     
-                    c3.write(f"{item['weaving_type']} / {item['yarn_type']}")
-                    c3.write(f"{item['color']} / {item['stock']}장")
-                    
-                    # 작업지시서 미리보기 (Expander)
-                    with c4.expander("🖨️ 지시서"):
-                        st.markdown(f"""
-                        <div style="border:1px solid #000; padding:10px; font-size:12px;">
-                            <h3 style="text-align:center; margin:0;">작 업 지 시 서</h3>
-                            <hr>
-                            <p><strong>발주번호:</strong> {item.get('order_no')}</p>
-                            <p><strong>발 주 처:</strong> {item['customer']}</p>
-                            <p><strong>제 품 명:</strong> {item['name']}</p>
-                            <p><strong>제직타입:</strong> {item['weaving_type']}</p>
-                            <p><strong>사    종:</strong> {item['yarn_type']}</p>
-                            <p><strong>색상/수량:</strong> {item['color']} / {item['stock']}장</p>
-                            <p><strong>중량/사이즈:</strong> {item['weight']}g / {item['size']}</p>
-                            <p><strong>납품요청일:</strong> {item['delivery_req_date']}</p>
-                            <p><strong>특이사항:</strong> {item.get('note', '-')}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        st.caption("Ctrl+P로 인쇄")
-
-                    # 상태 변경 버튼
-                    if item['status'] == "발주접수":
-                        if c5.button("제직 시작 ➡️", key=f"start_{item['id']}"):
-                            db.collection("inventory").document(item['id']).update({"status": "제직"})
+                    if st.form_submit_button("제직 시작"):
+                        sel_m_no = s_machine.split("호기")[0]
+                        
+                        # 중복 할당 방지
+                        if sel_m_no in busy_machines:
+                            st.error(f"⛔ {sel_m_no}호기는 이미 작업 중입니다! 다른 제직기를 선택하세요.")
+                        else:
+                            start_dt = datetime.datetime.combine(s_date, s_time)
+                            db.collection("inventory").document(sel_id).update({
+                                "status": "제직중",
+                                "machine_no": int(sel_m_no),
+                                "weaving_start_time": start_dt
+                            })
+                            st.success(f"{sel_m_no}호기에서 제직을 시작합니다.")
                             st.rerun()
-                    elif item['status'] == "제직":
-                        if c5.button("제직 완료 (염색으로) ➡️", key=f"end_{item['id']}"):
-                            db.collection("inventory").document(item['id']).update({"status": "염색"})
-                            st.rerun()
-                    
-                    st.divider()
-        else:
-            st.info("현재 제직 대기 중이거나 작업 중인 건이 없습니다.")
 
-    with tab2:
-        st.write("제직 공정에 있는 모든 내역을 조회합니다.")
-        # 간단한 리스트 조회 구현 (필요 시 확장)
-        st.caption("전체 제직 내역 조회 기능은 추후 업데이트 예정입니다.")
+            # --- 제직 완료 처리 (제직중 상태일 때) ---
+            elif sel_row['status'] == "제직중":
+                st.markdown("### ✅ 제직 완료 처리")
+                if st.button("제직 완료 (염색대기로 이동)"):
+                    db.collection("inventory").document(sel_id).update({
+                        "status": "제직완료", # 다음 공정에서 확인 가능하도록 상태 변경
+                        "weaving_end_time": datetime.datetime.now()
+                    })
+                    st.success("제직이 완료되었습니다.")
+                    st.rerun()
+            else:
+                st.warning("이 메뉴에서 처리할 수 없는 상태입니다.")
+    else:
+        st.info("제직 작업 대기 중이거나 진행 중인 건이 없습니다.")
 
 elif menu == "염색현황":
     st.header("🎨 염색 현황")

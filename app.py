@@ -354,7 +354,7 @@ if menu == "발주서접수":
 
                 # --- 수정 및 삭제 기능 (발주접수 상태만) ---
                 st.divider()
-                st.subheader("🛠️ 발주 내역 수정/삭제 (발주접수 상태만 가능)")
+                st.subheader("🛠️ 발주 내역 수정 및 관리")
                 
                 # 테이블에서 선택된 행이 있는지 확인
                 if selection.selection.rows:
@@ -363,74 +363,77 @@ if menu == "발주서접수":
                     sel_row = df.iloc[selected_idx]
                     sel_id = sel_row['id']
                     
-                    if sel_row['status'] != '발주접수':
-                        st.warning(f"선택하신 건은 현재 '{sel_row['status']}' 상태이므로 수정/삭제할 수 없습니다.")
-                    else:
+                    # 수정 폼을 위해 기초 데이터 다시 로드
+                    weaving_types = get_common_codes("weaving_types", ["30수 연사", "무지", "기타"])
+                    customer_list = get_partners("발주처")
+
+                    with st.form("edit_order_form"):
+                        st.write(f"선택된 발주건: **{sel_row['customer']} - {sel_row['name']}**")
                         
-                        # 수정 폼을 위해 기초 데이터 다시 로드
-                        weaving_types = get_common_codes("weaving_types", ["30수 연사", "무지", "기타"])
-                        customer_list = get_partners("발주처")
-
-                        with st.form("edit_order_form"):
-                            st.write(f"선택된 발주건: **{sel_row['customer']} - {sel_row['name']}**")
-                            
-                            # 모든 필드 수정 가능하도록 배치
-                            ec1, ec2, ec4 = st.columns(3)
-                            e_customer = ec1.selectbox("발주처", customer_list, index=customer_list.index(sel_row['customer']) if sel_row['customer'] in customer_list else 0)
-                            e_name = ec2.text_input("제품명", value=sel_row['name'])
-                            e_stock = ec4.number_input("수량", value=int(sel_row['stock']), step=10)
-
-                            ec5, ec6, ec7, ec8 = st.columns(4)
-                            e_weaving = ec5.selectbox("제직타입", weaving_types, index=weaving_types.index(sel_row['weaving_type']) if sel_row['weaving_type'] in weaving_types else 0)
-                            e_yarn = ec6.text_input("사종", value=sel_row.get('yarn_type', ''))
-                            e_color = ec7.text_input("색상", value=sel_row.get('color', ''))
-                            e_weight = ec8.number_input("중량", value=int(sel_row.get('weight', 0)), step=10)
-
-                            ec9, ec10, ec11 = st.columns(3)
-                            e_size = ec9.text_input("사이즈", value=sel_row.get('size', ''))
-                            e_del_date = ec10.date_input("납품요청일", datetime.datetime.strptime(sel_row['delivery_req_date'], "%Y-%m-%d").date() if sel_row.get('delivery_req_date') else datetime.date.today())
-                            e_note = ec11.text_input("특이사항", value=sel_row.get('note', ''))
-                            
-                            ec12, ec13, ec14 = st.columns(3)
-                            e_del_to = ec12.text_input("납품처", value=sel_row.get('delivery_to', ''))
-                            e_del_contact = ec13.text_input("납품연락처", value=sel_row.get('delivery_contact', ''))
-                            e_del_addr = ec14.text_input("납품주소", value=sel_row.get('delivery_address', ''))
-
-                            if st.form_submit_button("수정 저장"):
-                                db.collection("inventory").document(sel_id).update({
-                                    "customer": e_customer,
-                                    "name": e_name,
-                                    "stock": e_stock,
-                                    "weaving_type": e_weaving,
-                                    "yarn_type": e_yarn,
-                                    "color": e_color,
-                                    "weight": e_weight,
-                                    "size": e_size,
-                                    "delivery_req_date": str(e_del_date),
-                                    "note": e_note,
-                                    "delivery_to": e_del_to,
-                                    "delivery_contact": e_del_contact,
-                                    "delivery_address": e_del_addr
-                                })
-                                st.success("수정되었습니다.")
-                                st.rerun()
-                        
-                        # 삭제 확인 및 처리 (폼 밖에서 처리)
+                        # [추가] 상태 변경 기능 (관리자용 강제 변경)
+                        st.markdown("##### ⚠️ 관리자 상태 변경 (실수 복구용)")
+                        status_options = ["발주접수", "제직대기", "제직중", "제직완료", "염색출고", "염색중", "염색완료", "봉제중", "봉제완료", "출고완료"]
+                        e_status = st.selectbox("현재 상태", status_options, index=status_options.index(sel_row['status']) if sel_row['status'] in status_options else 0)
                         st.divider()
-                        if st.button("🗑️ 이 발주건 삭제", type="primary", key="btn_del_req"):
-                            st.session_state["delete_confirm_id"] = sel_id
+
+                        # 모든 필드 수정 가능하도록 배치
+                        ec1, ec2, ec4 = st.columns(3)
+                        e_customer = ec1.selectbox("발주처", customer_list, index=customer_list.index(sel_row['customer']) if sel_row['customer'] in customer_list else 0)
+                        e_name = ec2.text_input("제품명", value=sel_row['name'])
+                        e_stock = ec4.number_input("수량", value=int(sel_row['stock']), step=10)
+
+                        ec5, ec6, ec7, ec8 = st.columns(4)
+                        e_weaving = ec5.selectbox("제직타입", weaving_types, index=weaving_types.index(sel_row['weaving_type']) if sel_row['weaving_type'] in weaving_types else 0)
+                        e_yarn = ec6.text_input("사종", value=sel_row.get('yarn_type', ''))
+                        e_color = ec7.text_input("색상", value=sel_row.get('color', ''))
+                        e_weight = ec8.number_input("중량", value=int(sel_row.get('weight', 0)), step=10)
+
+                        ec9, ec10, ec11 = st.columns(3)
+                        e_size = ec9.text_input("사이즈", value=sel_row.get('size', ''))
+                        e_del_date = ec10.date_input("납품요청일", datetime.datetime.strptime(sel_row['delivery_req_date'], "%Y-%m-%d").date() if sel_row.get('delivery_req_date') else datetime.date.today())
+                        e_note = ec11.text_input("특이사항", value=sel_row.get('note', ''))
                         
-                        if st.session_state.get("delete_confirm_id") == sel_id:
-                            st.warning("정말로 삭제하시겠습니까? (복구 불가)")
-                            col_conf1, col_conf2 = st.columns(2)
-                            if col_conf1.button("✅ 예, 삭제합니다", key="btn_del_yes"):
-                                db.collection("inventory").document(sel_id).delete()
-                                st.session_state["delete_confirm_id"] = None
-                                st.success("삭제되었습니다.")
-                                st.rerun()
-                            if col_conf2.button("❌ 취소", key="btn_del_no"):
-                                st.session_state["delete_confirm_id"] = None
-                                st.rerun()
+                        ec12, ec13, ec14 = st.columns(3)
+                        e_del_to = ec12.text_input("납품처", value=sel_row.get('delivery_to', ''))
+                        e_del_contact = ec13.text_input("납품연락처", value=sel_row.get('delivery_contact', ''))
+                        e_del_addr = ec14.text_input("납품주소", value=sel_row.get('delivery_address', ''))
+
+                        if st.form_submit_button("수정 저장"):
+                            db.collection("inventory").document(sel_id).update({
+                                "status": e_status, # 상태 변경 반영
+                                "customer": e_customer,
+                                "name": e_name,
+                                "stock": e_stock,
+                                "weaving_type": e_weaving,
+                                "yarn_type": e_yarn,
+                                "color": e_color,
+                                "weight": e_weight,
+                                "size": e_size,
+                                "delivery_req_date": str(e_del_date),
+                                "note": e_note,
+                                "delivery_to": e_del_to,
+                                "delivery_contact": e_del_contact,
+                                "delivery_address": e_del_addr
+                            })
+                            st.success("수정되었습니다.")
+                            st.rerun()
+                    
+                    # 삭제 확인 및 처리 (폼 밖에서 처리)
+                    st.divider()
+                    if st.button("🗑️ 이 발주건 삭제", type="primary", key="btn_del_req"):
+                        st.session_state["delete_confirm_id"] = sel_id
+                    
+                    if st.session_state.get("delete_confirm_id") == sel_id:
+                        st.warning("정말로 삭제하시겠습니까? (복구 불가)")
+                        col_conf1, col_conf2 = st.columns(2)
+                        if col_conf1.button("✅ 예, 삭제합니다", key="btn_del_yes"):
+                            db.collection("inventory").document(sel_id).delete()
+                            st.session_state["delete_confirm_id"] = None
+                            st.success("삭제되었습니다.")
+                            st.rerun()
+                        if col_conf2.button("❌ 취소", key="btn_del_no"):
+                            st.session_state["delete_confirm_id"] = None
+                            st.rerun()
                 else:
                     st.info("👆 위 목록에서 수정할 행을 선택해주세요.")
 
@@ -612,6 +615,17 @@ elif menu == "제직현황":
             # --- 제직 완료 처리 (제직중 상태일 때) ---
             elif sel_row['status'] == "제직중":
                 st.markdown("### ✅ 제직 완료 처리")
+                
+                # [추가] 제직 취소 버튼
+                if st.button("🚫 제직 취소 (대기로 되돌리기)", type="secondary"):
+                    db.collection("inventory").document(sel_id).update({
+                        "status": "발주접수", # 다시 대기 상태로
+                        "machine_no": firestore.DELETE_FIELD, # 제직기 할당 해제
+                        "weaving_start_time": firestore.DELETE_FIELD
+                    })
+                    st.success("제직이 취소되었습니다. (대기 상태로 복귀)")
+                    st.rerun()
+
                 if st.button("제직 완료 (염색대기로 이동)"):
                     db.collection("inventory").document(sel_id).update({
                         "status": "염색", # 염색 대기 상태로 변경

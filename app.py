@@ -151,7 +151,7 @@ if menu == "발주서접수":
                 c1, c3, c4 = st.columns(3)
                 name = c1.text_input("제품명 (타올 종류)")
                 weaving_type = c3.selectbox("제직타입", weaving_types)
-                yarn_type = c4.text_input("사종", placeholder="예: 최고급 면사")
+                yarn_type = c4.text_input("사종", placeholder="예:30, 40")
                 
                 c1, c2, c3, c4 = st.columns(4)
                 color = c1.text_input("색상")
@@ -491,7 +491,7 @@ elif menu == "제직현황":
     st.info("발주된 건을 확인하고 제직 작업을 지시하거나, 완료된 건을 염색 공정으로 넘깁니다.")
 
     # 1. 제직기 가동 현황 (Dashboard)
-    st.subheader("🏭 제직기 가동 현황 (1호기 ~ 9호기)")
+    st.subheader("🏭 제직기 가동 현황 (1호대 ~ 9호대)")
     
     # 현재 가동 중인 제직기 정보 가져오기
     busy_machines = {}
@@ -510,9 +510,9 @@ elif menu == "제직현황":
             if m_str in busy_machines:
                 item = busy_machines[m_str]
                 roll_cnt = item.get('weaving_roll_count', 0)
-                st.error(f"**{m_str}호기**\n\n{item.get('name')}\n({item.get('customer')})\n\n**{roll_cnt}롤**")
+                st.error(f"**{m_str}호대**\n\n{item.get('name')}\n({item.get('customer')})\n\n**{roll_cnt}롤**")
             else:
-                st.success(f"**{m_str}호기**\n\n대기중")
+                st.success(f"**{m_str}호대**\n\n대기중")
     
     st.divider()
 
@@ -536,7 +536,12 @@ elif menu == "제직현황":
         for col in ["order_no", "machine_no", "weaving_start_time"]:
             if col not in df.columns:
                 df[col] = ""
-                df[col] = ""
+        
+        # 날짜/시간 포맷팅
+        if 'date' in df.columns:
+            df['date'] = df['date'].apply(lambda x: x.strftime('%Y-%m-%d') if hasattr(x, 'strftime') else x)
+        if 'weaving_start_time' in df.columns:
+            df['weaving_start_time'] = df['weaving_start_time'].apply(lambda x: x.strftime('%Y-%m-%d %H:%M') if hasattr(x, 'strftime') else x)
 
         # 컬럼 매핑 (납품처 등 제외)
         col_map = {
@@ -578,9 +583,9 @@ elif menu == "제직현황":
                     for i in range(1, 10):
                         m_str = str(i)
                         if m_str in busy_machines:
-                            m_options.append(f"{m_str}호기 (사용중 - {busy_machines[m_str].get('name')})")
+                            m_options.append(f"{m_str}호대 (사용중 - {busy_machines[m_str].get('name')})")
                         else:
-                            m_options.append(f"{m_str}호기")
+                            m_options.append(f"{m_str}호대")
                     
                     s_machine = c1.selectbox("제직기 선택", m_options)
                     s_date = c2.date_input("시작일자", datetime.date.today())
@@ -588,11 +593,11 @@ elif menu == "제직현황":
                     s_roll = c4.number_input("제직롤수량", min_value=1, step=1)
                     
                     if st.form_submit_button("제직 시작"):
-                        sel_m_no = s_machine.split("호기")[0]
+                        sel_m_no = s_machine.split("호대")[0]
                         
                         # 중복 할당 방지
                         if sel_m_no in busy_machines:
-                            st.error(f"⛔ {sel_m_no}호기는 이미 작업 중입니다! 다른 제직기를 선택하세요.")
+                            st.error(f"⛔ {sel_m_no}호대는 이미 작업 중입니다! 다른 제직기를 선택하세요.")
                         else:
                             start_dt = datetime.datetime.combine(s_date, s_time)
                             db.collection("inventory").document(sel_id).update({
@@ -601,7 +606,7 @@ elif menu == "제직현황":
                                 "weaving_start_time": start_dt,
                                 "weaving_roll_count": s_roll
                             })
-                            st.success(f"{sel_m_no}호기에서 제직을 시작합니다.")
+                            st.success(f"{sel_m_no}호대에서 제직을 시작합니다.")
                             st.rerun()
 
             # --- 제직 완료 처리 (제직중 상태일 때) ---

@@ -68,47 +68,11 @@ with st.sidebar:
     st.divider()
     
     # 메뉴 선택 기능 추가
-    if "current_menu" not in if "ession_state:
-        st.session_state["ccrrent_menu"] = "발주서접수"
     if "current_menu" not in st.session_state:
         st.session_state["current_menu"] = "발주서접수"
 
-    st.suurrent_menu" not in st.session_state:
-    
-    with st.exp nder("🏭 생산관리", expanded=True):
-         f st.butto ("📑 발주서접수", usestont.iner_widsh=True):
-            st.sessisn_state["cuirent_menu"]n_s"발주서접수"
-            tateerun()
-        cf st.buttunrr🧵 제직현황menuse_container_width=True):
-            st.session_stateu"current_menu"]주= 서제직현황
-        st.rerun()
-        st.st.buttoh("🎨 염색현황", useeaoneainr메_width선True)
-    main    st.session_state["current__cat"]ego"염색현황"
-            ry =erun()
-        tf st.butt.nra🪡o봉제현황카테고use_container_width=True):리", ["생산관리", "기초정보관리"])
-    st.session_statecurrent_menu]= 봉
-           st.rerun()
-        if st.button(🚚 출고use_container_width=True):
-            st.session_state[current_menu] =
-            st.rerun()
-        ifst.button(📦 , use_container_width=True:
-            st.sission_ tate["current_mmnu"] = "현재고현황"in_category == "생산관리":
-            st.rerun()
     st.subheader("메뉴 선택")
-
-    with st.expander("⚙️ 기초정보관리", expanded=True):
-        if st.button("� 거래처업무", use_container_width=True):
-            st.session_state"current_menu"] = 관리"
-            st.rerun()
-        if st.button("📝 기초코드 use_container_width=True):
-            st.session_state["current_menu"] ="
-            st.rerun()
-            
-    menu = st.session_state["current_menu
-            ["발주서접수", "제직현황", "염색현황", "봉제현황", "출고현황", "현재고현황"])
-    else:
-        menu = st.radio("관리 메뉴", ["거래처관리", "기초코드관리"])
-    with st.expander("�🏭 생산관리", expanded=True):
+    with st.expander("🏭 생산관리", expanded=True):
         if st.button("📑 발주서접수", use_container_width=True):
             st.session_state["current_menu"] = "발주서접수"
             st.rerun()
@@ -504,9 +468,8 @@ elif menu == "현재고현황":
                         db.collection("inventory").document(doc_id).update({"stock": item.get('stock') + 1})
                         st.rerun()
                     if btn2.button("➖", key=f"sub_{doc_id}"):
-                        if item.get('stock'
-                roll_cnt = item.get('weaving_roll_count', 0)) > 0:
-                            db.collection("inventory").document(doc_id).update({"stock":\n\n**{roll_cnt}롤** item.get('stock') - 1})
+                        if item.get('stock', 0) > 0:
+                            db.collection("inventory").document(doc_id).update({"stock": item.get('stock') - 1})
                             st.rerun()
                     if btn3.button("🗑️", key=f"del_{doc_id}", help="삭제"):
                         db.collection("inventory").document(doc_id).delete()
@@ -566,6 +529,7 @@ elif menu == "제직현황":
         for col in ["order_no", "machine_no", "weaving_start_time"]:
             if col not in df.columns:
                 df[col] = ""
+                df[col] = ""
 
         # 컬럼 매핑 (납품처 등 제외)
         col_map = {
@@ -599,6 +563,7 @@ elif menu == "제직현황":
             if sel_row['status'] in ["발주접수", "제직대기"]:
                 st.markdown("### 🚀 제직 시작 설정")
                 with st.form("weaving_start_form"):
+                    c1, c2, c3 = st.columns(3)
                     c1, c2, c3, c4 = st.columns(4)
                     
                     # 제직기 선택 (사용 중인 것은 표시)
@@ -626,7 +591,6 @@ elif menu == "제직현황":
                             db.collection("inventory").document(sel_id).update({
                                 "status": "제직중",
                                 "machine_no": int(sel_m_no),
-                                "weaving_start_time": start_dt
                                 "weaving_start_time": start_dt,
                                 "weaving_roll_count": s_roll
                             })
@@ -638,7 +602,7 @@ elif menu == "제직현황":
                 st.markdown("### ✅ 제직 완료 처리")
                 if st.button("제직 완료 (염색대기로 이동)"):
                     db.collection("inventory").document(sel_id).update({
-                        "status": "제직완료", # 다음 공정에서 확인 가능하도록 상태 변경
+                        "status": "염색", # 염색 대기 상태로 변경
                         "weaving_end_time": datetime.datetime.now()
                     })
                     st.success("제직이 완료되었습니다.")
@@ -713,6 +677,94 @@ elif menu == "염색현황":
 
     with tab2:
         st.write("염색 공정 내역 조회 (추후 구현)")
+
+elif menu == "봉제현황":
+    st.header("🪡 봉제 현황")
+    st.info("염색이 완료된 원단을 봉제하여 완제품으로 만듭니다.")
+    
+    tab1, tab2 = st.tabs(["🏭 봉제 작업 관리", "📋 봉제 내역 조회"])
+    
+    with tab1:
+        # '봉제' (대기) 또는 '봉제중' 상태
+        docs = db.collection("inventory").where("status", "in", ["봉제", "봉제중"]).stream()
+        rows = []
+        for doc in docs:
+            d = doc.to_dict()
+            d['id'] = doc.id
+            rows.append(d)
+        rows.sort(key=lambda x: x.get('date', datetime.datetime.max))
+        
+        if rows:
+            for item in rows:
+                with st.container():
+                    c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 1, 2])
+                    status_color = "red" if item['status'] == "봉제중" else "orange"
+                    c1.markdown(f"**[{item['status']}]** :{status_color}[{item.get('order_no', '-')}]")
+                    c1.write(f"📅 {item.get('date', datetime.date.today()).strftime('%Y-%m-%d')}")
+                    
+                    c2.write(f"**{item.get('customer')}**")
+                    c2.write(f"{item.get('name')}")
+                    
+                    c3.write(f"{item.get('color')} / {item.get('stock')}장")
+                    
+                    with c4.expander("🖨️ 지시서"):
+                        st.markdown(f"""
+                        <div style="border:1px solid #000; padding:10px; font-size:12px;">
+                            <h3 style="text-align:center; margin:0;">봉 제 지 시 서</h3>
+                            <hr>
+                            <p><strong>발주번호:</strong> {item.get('order_no')}</p>
+                            <p><strong>제 품 명:</strong> {item['name']}</p>
+                            <p><strong>색상/수량:</strong> {item['color']} / {item['stock']}장</p>
+                            <p><strong>특이사항:</strong> {item.get('note', '-')}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                    if item['status'] == "봉제":
+                        if c5.button("봉제 시작 ➡️", key=f"sew_start_{item['id']}"):
+                            db.collection("inventory").document(item['id']).update({"status": "봉제중"})
+                            st.rerun()
+                    elif item['status'] == "봉제중":
+                        if c5.button("봉제 완료 (출고대기) ➡️", key=f"sew_end_{item['id']}"):
+                            db.collection("inventory").document(item['id']).update({"status": "출고대기"})
+                            st.rerun()
+                    st.divider()
+        else:
+            st.info("봉제 대기 중이거나 작업 중인 건이 없습니다.")
+            
+    with tab2:
+        st.write("봉제 내역 조회 (추후 구현)")
+
+elif menu == "출고현황":
+    st.header("🚚 출고 현황")
+    st.info("완성된 제품을 출고 처리합니다.")
+    
+    # '출고대기' 상태
+    docs = db.collection("inventory").where("status", "==", "출고대기").stream()
+    rows = []
+    for doc in docs:
+        d = doc.to_dict()
+        d['id'] = doc.id
+        rows.append(d)
+    rows.sort(key=lambda x: x.get('date', datetime.datetime.max))
+    
+    if rows:
+        for item in rows:
+            with st.container():
+                c1, c2, c3, c4 = st.columns([2, 2, 3, 2])
+                c1.markdown(f"**[{item['status']}]** :green[{item.get('order_no', '-')}]")
+                c2.write(f"**{item.get('customer')}**")
+                c3.write(f"{item.get('name')} ({item.get('stock')}장)")
+                
+                if c4.button("🚀 출고 완료 처리", key=f"ship_{item['id']}"):
+                    db.collection("inventory").document(item['id']).update({
+                        "status": "출고완료",
+                        "shipping_date": datetime.datetime.now()
+                    })
+                    st.success("출고 처리되었습니다.")
+                    st.rerun()
+            st.divider()
+    else:
+        st.info("출고 대기 중인 건이 없습니다.")
 
 elif menu == "거래처관리":
     st.header("🏢 거래처 관리")

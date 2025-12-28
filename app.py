@@ -215,7 +215,6 @@ if menu == "발주서접수":
                         }
                         db.collection("inventory").add(doc_data)
                         st.success(f"발주번호 [{order_no}] 접수 완료!")
-                    st.balloons()
                         st.rerun()
                     else:
                         st.error("제품명과 발주처는 필수 입력 항목입니다.")
@@ -273,6 +272,17 @@ if menu == "발주서접수":
                 
             if rows:
                 df = pd.DataFrame(rows)
+                
+                # [추가] 날짜 및 출고정보 컬럼이 없으면 빈 값으로 생성 (에러 방지)
+                for col in ["weaving_end_time", "dyeing_end_time", "sewing_end_time", "shipping_date", "shipping_method"]:
+                    if col not in df.columns:
+                        df[col] = ""
+                
+                # 날짜 포맷팅 (YYYY-MM-DD)
+                date_cols = ["weaving_end_time", "dyeing_end_time", "sewing_end_time", "shipping_date"]
+                for col in date_cols:
+                    if col in df.columns:
+                        df[col] = df[col].apply(lambda x: x.strftime("%Y-%m-%d") if hasattr(x, 'strftime') else x)
                 
                 # [수정] 발주번호(order_no) 컬럼이 없으면 강제로 생성 (빈 값)
                 if 'order_no' not in df.columns:
@@ -700,7 +710,10 @@ elif menu == "염색현황":
                             st.rerun()
                     elif item['status'] == "염색중":
                         if c5.button("염색 완료 (봉제로) ➡️", key=f"dye_end_{item['id']}"):
-                            db.collection("inventory").document(item['id']).update({"status": "봉제"})
+                            db.collection("inventory").document(item['id']).update({
+                                "status": "봉제",
+                                "dyeing_end_time": datetime.datetime.now()
+                            })
                             st.rerun()
                     
                     st.divider()
@@ -757,7 +770,10 @@ elif menu == "봉제현황":
                             st.rerun()
                     elif item['status'] == "봉제중":
                         if c5.button("봉제 완료 (출고대기) ➡️", key=f"sew_end_{item['id']}"):
-                            db.collection("inventory").document(item['id']).update({"status": "출고대기"})
+                            db.collection("inventory").document(item['id']).update({
+                                "status": "출고대기",
+                                "sewing_end_time": datetime.datetime.now()
+                            })
                             st.rerun()
                     st.divider()
         else:

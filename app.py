@@ -16,15 +16,22 @@ st.title("🏭 세안타올 생산관리 현황")
 @st.cache_resource
 def get_db():
     if not firebase_admin._apps:
-        # 방법 1: Streamlit Cloud의 비밀 금고(Secrets)에 키가 있는지 확인
-        if "FIREBASE_KEY" in st.secrets:
-            secret_val = st.secrets["FIREBASE_KEY"]
-            if isinstance(secret_val, str):
-                key_dict = json.loads(secret_val)
-            else:
-                key_dict = dict(secret_val)
-            cred = credentials.Certificate(key_dict)
-        else:
+        cred = None
+        # 방법 1: Streamlit Cloud의 비밀 금고(Secrets) 시도
+        try:
+            if "FIREBASE_KEY" in st.secrets:
+                secret_val = st.secrets["FIREBASE_KEY"]
+                if isinstance(secret_val, str):
+                    key_dict = json.loads(secret_val)
+                else:
+                    key_dict = dict(secret_val)
+                cred = credentials.Certificate(key_dict)
+        except:
+            # 로컬 환경이라 secrets가 없는 경우 무시하고 넘어감
+            pass
+
+        # 방법 2: 로컬 환경이거나 비밀 금고가 없으면 내 컴퓨터 파일 사용
+        if cred is None:
             # 방법 2: 로컬 환경이거나 비밀 금고가 없으면 내 컴퓨터 파일 사용
             cred = credentials.Certificate("serviceAccountKey.json")
             
@@ -545,9 +552,9 @@ elif menu == "제직현황":
         
         # 날짜/시간 포맷팅
         if 'date' in df.columns:
-            df['date'] = df['date'].apply(lambda x: x.strftime('%Y-%m-%d') if hasattr(x, 'strftime') else x)
+            df['date'] = df['date'].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isnull(x) and hasattr(x, 'strftime') else x)
         if 'weaving_start_time' in df.columns:
-            df['weaving_start_time'] = df['weaving_start_time'].apply(lambda x: x.strftime('%Y-%m-%d %H:%M') if hasattr(x, 'strftime') else x)
+            df['weaving_start_time'] = df['weaving_start_time'].apply(lambda x: x.strftime('%Y-%m-%d %H:%M') if not pd.isnull(x) and hasattr(x, 'strftime') else x)
 
         # 컬럼 매핑 (납품처 등 제외)
         col_map = {

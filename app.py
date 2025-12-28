@@ -501,7 +501,6 @@ elif menu == "제직현황":
         with cols[i-1]:
             if m_str in busy_machines:
                 item = busy_machines[m_str]
-                st.error(f"**{m_str}호기**\n\n{item.get('name')}\n({item.get('customer')})")
                 roll_cnt = item.get('weaving_roll_count', 0)
                 st.error(f"**{m_str}호기**\n\n{item.get('name')}\n({item.get('customer')})\n\n**{roll_cnt}롤**")
             else:
@@ -736,35 +735,93 @@ elif menu == "봉제현황":
 
 elif menu == "출고현황":
     st.header("🚚 출고 현황")
-    st.info("완성된 제품을 출고 처리합니다.")
+    st.info("완성된 제품을 출고 처리하거나, 출고된 내역의 거래명세서를 발행합니다.")
     
-    # '출고대기' 상태
-    docs = db.collection("inventory").where("status", "==", "출고대기").stream()
-    rows = []
-    for doc in docs:
-        d = doc.to_dict()
-        d['id'] = doc.id
-        rows.append(d)
-    rows.sort(key=lambda x: x.get('date', datetime.datetime.max))
+    tab1, tab2 = st.tabs(["🚀 출고 대기 관리", "📋 출고 완료 내역 (명세서)"])
     
-    if rows:
-        for item in rows:
-            with st.container():
-                c1, c2, c3, c4 = st.columns([2, 2, 3, 2])
-                c1.markdown(f"**[{item['status']}]** :green[{item.get('order_no', '-')}]")
-                c2.write(f"**{item.get('customer')}**")
-                c3.write(f"{item.get('name')} ({item.get('stock')}장)")
-                
-                if c4.button("🚀 출고 완료 처리", key=f"ship_{item['id']}"):
-                    db.collection("inventory").document(item['id']).update({
-                        "status": "출고완료",
-                        "shipping_date": datetime.datetime.now()
-                    })
-                    st.success("출고 처리되었습니다.")
-                    st.rerun()
-            st.divider()
-    else:
-        st.info("출고 대기 중인 건이 없습니다.")
+    with tab1:
+        # '출고대기' 상태
+        docs = db.collection("inventory").where("status", "==", "출고대기").stream()
+        rows = []
+        for doc in docs:
+            d = doc.to_dict()
+            d['id'] = doc.id
+            rows.append(d)
+        rows.sort(key=lambda x: x.get('date', datetime.datetime.max))
+        
+        if rows:
+            for item in rows:
+                with st.container():
+                    c1, c2, c3, c4 = st.columns([2, 2, 3, 2])
+                    c1.markdown(f"**[{item['status']}]** :green[{item.get('order_no', '-')}]")
+                    c2.write(f"**{item.get('customer')}**")
+                    c3.write(f"{item.get('name')} ({item.get('stock')}장)")
+                    
+                    if c4.button("🚀 출고 완료 처리", key=f"ship_{item['id']}"):
+                        db.collection("inventory").document(item['id']).update({
+                            "status": "출고완료",
+                            "shipping_date": datetime.datetime.now()
+                        })
+                        st.success("출고 처리되었습니다.")
+                        st.rerun()
+                st.divider()
+        else:
+            st.info("출고 대기 중인 건이 없습니다.")
+
+    with tab2:
+        # '출고완료' 상태 조회
+        docs = db.collection("inventory").where("status", "==", "출고완료").stream()
+        rows = []
+        for doc in docs:
+            d = doc.to_dict()
+            d['id'] = doc.id
+            rows.append(d)
+            
+        # 출고일(shipping_date) 기준 내림차순 정렬 (최신순)
+        rows.sort(key=lambda x: x.get('shipping_date', datetime.datetime.min), reverse=True)
+        
+        if rows:
+            for item in rows:
+                with st.container():
+                    c1, c2, c3, c4 = st.columns([2, 2, 3, 2])
+                    ship_date = item.get('shipping_date').strftime('%Y-%m-%d') if item.get('shipping_date') else "-"
+                    c1.write(f"📅 {ship_date}")
+                    c2.write(f"**{item.get('customer')}**")
+                    c3.write(f"{item.get('name')} ({item.get('stock')}장)")
+                    
+                    with c4.expander("🖨️ 거래명세서"):
+                        # 거래명세서 HTML 디자인
+                        invoice_html = f"""
+                        <div style="border:2px solid #333; padding:20px; font-family:sans-serif; background-color:white; color:black;">
+                            <h2 style="text-align:center; margin-bottom:30px; text-decoration:underline;">거 래 명 세 서</h2>
+                            <table style="width:100%; margin-bottom:20px;">
+                                <tr>
+                                    <td style="width:50%;"><strong>공급받는자:</strong> {item.get('customer')} 귀하</td>
+                                    <td style="width:50%; text-align:right;"><strong>일자:</strong> {ship_date}</td>
+                                </tr>
+                            </table>
+                            <table style="width:100%; border-collapse:collapse; text-align:center; border:1px solid #333;">
+                                <tr style="background-color:#eee;">
+                                    <th style="border:1px solid #333; padding:8px;">품목</th>
+                                    <th style="border:1px solid #333; padding:8px;">규격/사종</th>
+                                    <th style="border:1px solid #333; padding:8px;">수량</th>
+                                    <th style="border:1px solid #333; padding:8px;">비고</th>
+                                </tr>
+                                <tr>
+                                    <td style="border:1px solid #333; padding:10px;">{item.get('name')}</td>
+                                    <td style="border:1px solid #333; padding:10px;">{item.get('weaving_type')}</td>
+                                    <td style="border:1px solid #333; padding:10px;">{item.get('stock')} 장</td>
+                                    <td style="border:1px solid #333; padding:10px;">{item.get('note', '')}</td>
+                                </tr>
+                            </table>
+                            <p style="margin-top:20px; text-align:center;">위와 같이 정히 영수(청구)함.</p>
+                        </div>
+                        """
+                        st.markdown(invoice_html, unsafe_allow_html=True)
+                        st.caption("Ctrl+P를 눌러 인쇄하세요.")
+                st.divider()
+        else:
+            st.info("출고 완료된 내역이 없습니다.")
 
 elif menu == "거래처관리":
     st.header("🏢 거래처 관리")

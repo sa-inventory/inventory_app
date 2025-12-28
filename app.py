@@ -237,7 +237,7 @@ if menu == "발주서접수":
             # 에러 방지: 현재 옵션에 있는 값만 필터링 (코드가 바뀌었을 때를 대비)
             valid_default = [x for x in default_status if x in status_options]
             
-            filter_status = c2.multiselect("진행 상태 (비워두면 전체)", status_options, default=valid_default)
+            filter_status = c2.multiselect("진행 상태 (미선택 시 전체선택)", status_options, default=valid_default)
             filter_customer = c3.text_input("발주처 검색")
             
             search_btn = st.form_submit_button("🔍 조회하기")

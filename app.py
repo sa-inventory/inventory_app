@@ -5,6 +5,7 @@ from firebase_admin import firestore
 import datetime
 import json
 import pandas as pd
+import io
 
 # 1. 화면 기본 설정 (제목 등)
 st.set_page_config(page_title="타올 생산 현황 관리", layout="wide")
@@ -210,10 +211,22 @@ if menu == "발주서접수":
             
             search_btn = st.form_submit_button("🔍 조회하기")
 
+        # 검색 버튼 클릭 시 세션에 검색 조건 저장 (새로고침 되어도 유지되도록)
         if search_btn:
+            st.session_state["search_performed"] = True
+            st.session_state["search_date_range"] = date_range
+            st.session_state["search_filter_status"] = filter_status
+            st.session_state["search_filter_customer"] = filter_customer
+
+        if st.session_state.get("search_performed"):
+            # 저장된 검색 조건 사용
+            s_date_range = st.session_state["search_date_range"]
+            s_filter_status = st.session_state["search_filter_status"]
+            s_filter_customer = st.session_state["search_filter_customer"]
+
             # 날짜 필터링을 위해 datetime 변환
-            start_date = datetime.datetime.combine(date_range[0], datetime.time.min)
-            end_date = datetime.datetime.combine(date_range[1], datetime.time.max) if len(date_range) > 1 else datetime.datetime.combine(date_range[0], datetime.time.max)
+            start_date = datetime.datetime.combine(s_date_range[0], datetime.time.min)
+            end_date = datetime.datetime.combine(s_date_range[1], datetime.time.max) if len(s_date_range) > 1 else datetime.datetime.combine(s_date_range[0], datetime.time.max)
 
             docs = db.collection("inventory").where("date", ">=", start_date).where("date", "<=", end_date).order_by("date", direction=firestore.Query.DESCENDING).stream()
 
@@ -230,10 +243,10 @@ if menu == "발주서접수":
                 df = pd.DataFrame(rows)
                 
                 # 상태 및 거래처 필터 (메모리 상에서 2차 필터)
-                if filter_status:
-                    df = df[df['status'].isin(filter_status)]
-                if filter_customer:
-                    df = df[df['customer'].str.contains(filter_customer, na=False)]
+                if s_filter_status:
+                    df = df[df['status'].isin(s_filter_status)]
+                if s_filter_customer:
+                    df = df[df['customer'].str.contains(s_filter_customer, na=False)]
                 
                 # 컬럼명 한글 매핑
                 col_map = {
@@ -265,12 +278,17 @@ if menu == "발주서접수":
                 
                 # 버튼 영역 (엑셀 다운로드 + 인쇄)
                 btn_c1, btn_c2 = st.columns([1, 1])
-                csv = df_display.to_csv(index=False).encode('utf-8-sig')
+                
+                # 엑셀 다운로드 (xlsx)
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    df_display.to_excel(writer, index=False)
+                    
                 btn_c1.download_button(
-                    label="💾 엑셀 다운로드",
-                    data=csv,
-                    file_name='발주현황.csv',
-                    mime='text/csv',
+                    label="💾 엑셀(.xlsx) 다운로드",
+                    data=buffer.getvalue(),
+                    file_name='발주현황.xlsx',
+                    mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                 )
 
                 # 인쇄 버튼 (HTML 생성 후 새 창 열기 방식 흉내)

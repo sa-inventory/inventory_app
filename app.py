@@ -277,6 +277,15 @@ elif menu == "발주현황":
         for doc in docs:
             d = doc.to_dict()
             d['id'] = doc.id
+            
+            # [수정] 롤별 상세 내역(하위 문서)은 발주현황 목록에서 제외
+            if 'parent_id' in d:
+                continue
+                
+            # [수정] 마스터 완료 상태를 일반 '제직완료'로 표시
+            if d.get('status') == "제직완료(Master)":
+                d['status'] = "제직완료"
+            
             if 'date' in d and d['date']:
                 d['date'] = d['date'].strftime("%Y-%m-%d")
             rows.append(d)
@@ -337,24 +346,44 @@ elif menu == "발주현황":
                 mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             )
 
+            # 인쇄 옵션 설정
+            with st.expander("🖨️ 인쇄 옵션 설정"):
+                po_c1, po_c2, po_c3, po_c4 = st.columns(4)
+                p_title = po_c1.text_input("제목", value="발주 현황 리스트")
+                p_title_size = po_c2.number_input("제목 크기(px)", value=24, step=1)
+                p_body_size = po_c3.number_input("본문 글자 크기(px)", value=11, step=1)
+                p_padding = po_c4.number_input("셀 여백(px)", value=6, step=1)
+                
+                po_c5, po_c6, po_c7 = st.columns(3)
+                p_show_date = po_c5.checkbox("출력일시 표시", value=True)
+                p_date_pos = po_c6.selectbox("일시 위치", ["Right", "Left", "Center"], index=0)
+                p_date_size = po_c7.number_input("일시 글자 크기(px)", value=12, step=1)
+
             # 인쇄 버튼 (HTML 생성 후 새 창 열기 방식 흉내)
             if btn_c2.button("🖨️ 인쇄 페이지 열기"):
+                print_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                date_align = p_date_pos.lower()
+                date_display = "block" if p_show_date else "none"
+                
                 print_html = f"""
                     <html>
                     <head>
-                        <title>발주현황 인쇄</title>
+                        <title>{p_title}</title>
                         <style>
-                            body {{ font-family: sans-serif; padding: 20px; }}
-                            table {{ width: 100%; border-collapse: collapse; font-size: 12px; }}
-                            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: center; }}
-                            th {{ background-color: #f2f2f2; }}
+                            body {{ font-family: 'Malgun Gothic', sans-serif; padding: 20px; }}
+                            h2 {{ text-align: center; margin-bottom: 5px; font-size: {p_title_size}px; }}
+                            .info {{ text-align: {date_align}; font-size: {p_date_size}px; margin-bottom: 10px; color: #555; display: {date_display}; }}
+                            table {{ width: 100%; border-collapse: collapse; font-size: {p_body_size}px; }}
+                            th, td {{ border: 1px solid #444; padding: {p_padding}px 4px; text-align: center; }}
+                            th {{ background-color: #f0f0f0; font-weight: bold; }}
                             @media print {{ .no-print {{ display: none; }} }}
                         </style>
                     </head>
                     <body>
-                        <h2 style="text-align:center;">발주 현황 리스트</h2>
+                        <h2>{p_title}</h2>
+                        <div class="info">출력일시: {print_date}</div>
                         <div class="no-print" style="text-align:right; margin-bottom:10px;">
-                            <button onclick="window.print()" style="padding:10px 20px; font-size:16px; cursor:pointer;">🖨️ 지금 인쇄하기 (Click)</button>
+                            <button onclick="window.print()" style="padding:8px 15px; font-size:14px; cursor:pointer; background-color:#4CAF50; color:white; border:none; border-radius:4px;">🖨️ 인쇄하기</button>
                         </div>
                         {df_display.to_html(index=False, border=1)}
                     </body>
@@ -945,9 +974,39 @@ elif menu == "제직현황":
         
         notes_data = notes_doc.to_dict() if notes_doc.exists else {}
         
+        # 인쇄 옵션 설정
+        with st.expander("🖨️ 인쇄 옵션 설정"):
+            po_c1, po_c2, po_c3, po_c4 = st.columns(4)
+            p_title = po_c1.text_input("제목", value=f"작업 일지 ({view_date})", key="wl_title")
+            p_title_size = po_c2.number_input("제목 크기(px)", value=24, step=1, key="wl_ts")
+            p_body_size = po_c3.number_input("본문 글자 크기(px)", value=12, step=1, key="wl_bs")
+            p_padding = po_c4.number_input("셀 여백(px)", value=6, step=1, key="wl_pad")
+            
+            po_c5, po_c6, po_c7 = st.columns(3)
+            p_show_date = po_c5.checkbox("출력일시 표시", value=True, key="wl_sd")
+            p_date_pos = po_c6.selectbox("일시 위치", ["Right", "Left", "Center"], index=0, key="wl_dp")
+            p_date_size = po_c7.number_input("일시 글자 크기(px)", value=12, step=1, key="wl_ds")
+
         # 화면 표시 & 인쇄용 HTML 생성
-        style = "<style>table { width: 100%; border-collapse: collapse; margin-bottom: 20px; } th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 12px; } th { background-color: #f2f2f2; text-align: center; } .header { text-align: center; margin-bottom: 20px; } .section-title { font-size: 14px; font-weight: bold; margin-top: 10px; margin-bottom: 5px; background-color: #eee; padding: 5px; } .note-box { border: 1px solid #ccc; padding: 10px; min-height: 50px; margin-bottom: 20px; }</style>"
-        html_content = f"<html><head><title>작업일지 - {view_date}</title>{style}</head><body><div class='header'><h2>작업 일지 ({view_date})</h2></div>"
+        print_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        date_align = p_date_pos.lower()
+        date_display = "block" if p_show_date else "none"
+
+        style = f"""<style>
+            body { font-family: 'Malgun Gothic', sans-serif; padding: 20px; }
+            table {{ width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: {p_body_size}px; }}
+            th, td {{ border: 1px solid #444; padding: {p_padding}px; text-align: left; }}
+            th { background-color: #f0f0f0; text-align: center; font-weight: bold; }
+            .header { text-align: center; margin-bottom: 10px; }
+            .header h2 {{ font-size: {p_title_size}px; margin: 0; }}
+            .sub-header {{ text-align: {date_align}; font-size: {p_date_size}px; color: #555; margin-bottom: 10px; display: {date_display}; }}
+            .section-title {{ font-size: {p_body_size + 2}px; font-weight: bold; margin-top: 20px; margin-bottom: 5px; border-bottom: 2px solid #ddd; padding-bottom: 3px; }}
+            .note-box {{ border: 1px solid #444; padding: 10px; min-height: 60px; font-size: {p_body_size}px; }}
+        </style>"""
+        
+        html_content = f"<html><head><title>{p_title}</title>{style}</head><body>"
+        html_content += f"<div class='header'><h2>{p_title}</h2></div>"
+        html_content += f"<div class='sub-header'>출력일시: {print_now}</div>"
         
         # 주간 섹션
         st.markdown("#### ☀️ 주간 작업")
@@ -1036,7 +1095,36 @@ elif menu == "제직현황":
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                 df_display.to_excel(writer, index=False)
                 
-            print_html = f"<html><head><title>{prod_date} 생산일지</title><style>body {{ font-family: sans-serif; }} table {{ width: 100%; border-collapse: collapse; }} th, td {{ border: 1px solid #ddd; padding: 8px; text-align: center; }} th {{ background-color: #f2f2f2; }} h2 {{ text-align: center; }}</style></head><body><h2>{prod_date} 생산일지</h2>{df_display.to_html(index=False)}</body></html>"
+            # 인쇄 옵션 설정
+            with st.expander("🖨️ 인쇄 옵션 설정"):
+                po_c1, po_c2, po_c3, po_c4 = st.columns(4)
+                p_title = po_c1.text_input("제목", value=f"{prod_date} 생산일지", key="pl_title")
+                p_title_size = po_c2.number_input("제목 크기(px)", value=24, step=1, key="pl_ts")
+                p_body_size = po_c3.number_input("본문 글자 크기(px)", value=11, step=1, key="pl_bs")
+                p_padding = po_c4.number_input("셀 여백(px)", value=6, step=1, key="pl_pad")
+                
+                po_c5, po_c6, po_c7 = st.columns(3)
+                p_show_date = po_c5.checkbox("출력일시 표시", value=True, key="pl_sd")
+                p_date_pos = po_c6.selectbox("일시 위치", ["Right", "Left", "Center"], index=0, key="pl_dp")
+                p_date_size = po_c7.number_input("일시 글자 크기(px)", value=12, step=1, key="pl_ds")
+
+            print_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+            date_align = p_date_pos.lower()
+            date_display = "block" if p_show_date else "none"
+
+            print_html = f"""<html><head><title>{p_title}</title>
+            <style>
+                body {{ font-family: 'Malgun Gothic', sans-serif; padding: 20px; }}
+                h2 {{ text-align: center; margin-bottom: 5px; font-size: {p_title_size}px; }}
+                .info {{ text-align: {date_align}; font-size: {p_date_size}px; margin-bottom: 10px; color: #555; display: {date_display}; }}
+                table {{ width: 100%; border-collapse: collapse; font-size: {p_body_size}px; }}
+                th, td {{ border: 1px solid #444; padding: {p_padding}px 4px; text-align: center; }}
+                th {{ background-color: #f0f0f0; }}
+            </style></head><body>
+            <h2>{p_title}</h2>
+            <div class="info">출력일시: {print_now}</div>
+            {df_display.to_html(index=False)}</body></html>"""
+            
             with c2:
                 c2_1, c2_2 = st.columns(2)
                 
@@ -1402,6 +1490,75 @@ elif menu == "제직기관리":
                     "machine_no": new_no,
                     "name": new_name,
                     "model": new_model,
+                    "note": new_note
+                })
+                st.success("저장되었습니다.")
+                st.rerun()
+
+    with tab2:
+        st.subheader("제직기 목록")
+        machines_ref = db.collection("machines").order_by("machine_no")
+        m_docs = list(machines_ref.stream())
+        m_list = [d.to_dict() for d in m_docs]
+        
+        if not m_list:
+            st.warning("등록된 제직기가 없습니다.")
+            if st.button("기본 제직기(1~9호대) 자동 생성"):
+                for i in range(1, 10):
+                    db.collection("machines").document(str(i)).set({
+                        "machine_no": i,
+                        "name": f"{i}호대",
+                        "model": "",
+                        "note": ""
+                    })
+                st.success("기본 제직기가 생성되었습니다.")
+                st.rerun()
+        else:
+            st.dataframe(pd.DataFrame(m_list), use_container_width=True, hide_index=True)
+            
+            st.divider()
+            st.subheader("🗑️ 제직기 삭제")
+            del_targets = st.multiselect("삭제할 제직기를 선택하세요", [f"{m['machine_no']}:{m['name']}" for m in m_list])
+            if st.button("선택한 제직기 삭제"):
+                for target in del_targets:
+                    del_id = target.split(":")[0]
+                    db.collection("machines").document(del_id).delete()
+                st.success("삭제되었습니다.")
+                st.rerun()
+
+elif menu == "기초코드관리":
+    st.header("⚙️ 기초 코드 관리")
+    st.info("콤보박스에 표시될 항목들을 관리합니다.")
+    
+    code_tabs = st.tabs(["제직 타입", "거래처 구분"])
+    
+    # 코드 관리용 함수
+    def manage_code(code_key, default_list, label):
+        current_list = get_common_codes(code_key, default_list)
+        st.write(f"현재 등록된 {label}: {', '.join(current_list)}")
+        
+        new_val = st.text_input(f"추가할 {label}", key=f"new_{code_key}")
+        if st.button(f"추가", key=f"btn_add_{code_key}"):
+            if new_val and new_val not in current_list:
+                current_list.append(new_val)
+                db.collection("settings").document("codes").set({code_key: current_list}, merge=True)
+                st.success("추가되었습니다.")
+                st.rerun()
+        
+        del_val = st.selectbox(f"삭제할 {label} 선택", ["선택하세요"] + current_list, key=f"del_{code_key}")
+        if st.button(f"삭제", key=f"btn_del_{code_key}"):
+            if del_val != "선택하세요":
+                current_list.remove(del_val)
+                db.collection("settings").document("codes").set({code_key: current_list}, merge=True)
+                st.success("삭제되었습니다.")
+                st.rerun()
+
+    with code_tabs[0]: manage_code("weaving_types", ["30수 연사", "40수 코마사", "무지", "자카드", "기타"], "제직 타입")
+    with code_tabs[1]: manage_code("partner_types", ["발주처", "염색업체", "봉제업체", "배송업체", "기타"], "거래처 구분")
+
+else:
+    st.header(f"🏗️ {menu}")
+    st.info(f"'{menu}' 기능은 추후 업데이트될 예정입니다.")
                     "note": new_note
                 })
                 st.success("저장되었습니다.")

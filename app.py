@@ -504,7 +504,15 @@ elif menu == "제직현황":
     st.info("발주된 건을 확인하고 제직 작업을 지시하거나, 완료된 건을 염색 공정으로 넘깁니다.")
 
     # 1. 제직기 가동 현황 (Dashboard)
-    st.subheader("🏭 제직기 가동 현황 (1호대 ~ 9호대)")
+    st.subheader("🏭 제직기 가동 현황")
+    
+    # 제직기 설정 가져오기
+    machines_docs = list(db.collection("machines").order_by("machine_no").stream())
+    if not machines_docs:
+        # 설정이 없으면 기본 1~9호대 가상 데이터 사용 (호환성 유지)
+        machines_data = [{"machine_no": i, "name": f"{i}호대", "model": "", "note": ""} for i in range(1, 10)]
+    else:
+        machines_data = [d.to_dict() for d in machines_docs]
     
     # 현재 가동 중인 제직기 정보 가져오기
     busy_machines = {}
@@ -515,17 +523,26 @@ elif menu == "제직현황":
         if m_no:
             busy_machines[str(m_no)] = d
             
-    # 9개의 제직기 상태 표시
-    cols = st.columns(9)
-    for i in range(1, 10):
-        m_str = str(i)
-        with cols[i-1]:
-            if m_str in busy_machines:
-                item = busy_machines[m_str]
-                roll_cnt = item.get('weaving_roll_count', 0)
-                st.error(f"**{m_str}호대**\n\n{item.get('name')}\n({item.get('customer')})\n\n**{roll_cnt}롤**")
-            else:
-                st.success(f"**{m_str}호대**\n\n대기중")
+    # 제직기 상태 표시 (한 줄에 5개씩 자동 줄바꿈)
+    cols_per_row = 5
+    for i in range(0, len(machines_data), cols_per_row):
+        cols = st.columns(cols_per_row)
+        for j in range(cols_per_row):
+            if i + j < len(machines_data):
+                m = machines_data[i+j]
+                m_no = str(m['machine_no'])
+                m_name = m['name']
+                m_desc = f"{m.get('model','')}\n{m.get('note','')}".strip()
+                
+                with cols[j]:
+                    if m_no in busy_machines:
+                        item = busy_machines[m_no]
+                        roll_cnt = item.get('weaving_roll_count', 0)
+                        # 진행률 표시
+                        cur_roll = item.get('completed_rolls', 0) + 1
+                        st.error(f"**{m_name}**\n\n{item.get('name')}\n({cur_roll}/{roll_cnt}롤)")
+                    else:
+                        st.success(f"**{m_name}**\n\n대기중\n\n{m_desc}")
     
     st.divider()
 
@@ -573,12 +590,13 @@ elif menu == "제직현황":
                     
                     # 제직기 선택 (사용 중인 것은 표시)
                     m_options = []
-                    for i in range(1, 10):
-                        m_str = str(i)
-                        if m_str in busy_machines:
-                            m_options.append(f"{m_str}호대 (사용중)")
+                    for m in machines_data:
+                        m_no = str(m['machine_no'])
+                        m_name = m['name']
+                        if m_no in busy_machines:
+                            m_options.append(f"{m_no}:{m_name} (사용중)")
                         else:
-                            m_options.append(f"{m_str}호대")
+                            m_options.append(f"{m_no}:{m_name}")
                     
                     s_machine = c1.selectbox("제직기 선택", m_options)
                     s_date = c2.date_input("시작일자", datetime.date.today(), format="YYYY-MM-DD")
@@ -586,9 +604,9 @@ elif menu == "제직현황":
                     s_roll = c4.number_input("제직롤수량", min_value=1, step=1)
                     
                     if st.form_submit_button("제직 시작"):
-                        sel_m_no = s_machine.split("호대")[0]
+                        sel_m_no = s_machine.split(":")[0]
                         if sel_m_no in busy_machines:
-                            st.error(f"⛔ {sel_m_no}호대는 이미 작업 중입니다!")
+                            st.error(f"⛔ 해당 제직기는 이미 작업 중입니다!")
                         else:
                             start_dt = datetime.datetime.combine(s_date, s_time)
                             db.collection("inventory").document(sel_id).update({
@@ -598,7 +616,7 @@ elif menu == "제직현황":
                                 "weaving_roll_count": s_roll,
                                 "completed_rolls": 0
                             })
-                            st.success(f"{sel_m_no}호대에서 제직을 시작합니다.")
+                            st.success(f"제직을 시작합니다.")
                             st.rerun()
         else:
             st.info("대기 중인 작업이 없습니다.")
@@ -734,11 +752,41 @@ elif menu == "제직현황":
     # --- 3. 제직완료 탭 ---
     with tab_done:
         st.subheader("제직 완료 목록")
+        
+        # 검색 조건 (기간 + 발주처)
+        with st.form("search_weaving_done"):
+            c1, c2 = st.columns([2, 1])
+            today = datetime.date.today()
+            s_date = c1.date_input("조회 기간 (완료일)", [today - datetime.timedelta(days=30), today])
+            s_cust = c2.text_input("발주처 검색")
+            st.form_submit_button("🔍 조회")
+
+        # 날짜 범위 계산
+        if len(s_date) == 2:
+            start_dt = datetime.datetime.combine(s_date[0], datetime.time.min)
+            end_dt = datetime.datetime.combine(s_date[1], datetime.time.max)
+        else:
+            start_dt = datetime.datetime.combine(s_date[0], datetime.time.min)
+            end_dt = datetime.datetime.combine(s_date[0], datetime.time.max)
+
         docs = db.collection("inventory").where("status", "==", "제직완료").stream()
         rows = []
         for doc in docs:
             d = doc.to_dict()
             d['id'] = doc.id
+            
+            # 1. 날짜 필터 (weaving_end_time 기준)
+            w_end = d.get('weaving_end_time')
+            if w_end:
+                if w_end.tzinfo: w_end = w_end.replace(tzinfo=None) # 시간대 정보 제거 후 비교
+                if not (start_dt <= w_end <= end_dt): continue
+            else:
+                continue
+            
+            # 2. 발주처 필터
+            if s_cust and s_cust not in d.get('customer', ''):
+                continue
+                
             rows.append(d)
         
         # 최신순 정렬
@@ -1141,7 +1189,7 @@ elif menu == "기초코드관리":
     st.header("⚙️ 기초 코드 관리")
     st.info("콤보박스에 표시될 항목들을 관리합니다.")
     
-    code_tabs = st.tabs(["제직 타입", "거래처 구분"])
+    code_tabs = st.tabs(["제직 타입", "거래처 구분", "🏭 제직기 관리"])
     
     # 코드 관리용 함수
     def manage_code(code_key, default_list, label):
@@ -1166,6 +1214,59 @@ elif menu == "기초코드관리":
 
     with code_tabs[0]: manage_code("weaving_types", ["30수 연사", "40수 코마사", "무지", "자카드", "기타"], "제직 타입")
     with code_tabs[1]: manage_code("partner_types", ["발주처", "염색업체", "봉제업체", "배송업체", "기타"], "거래처 구분")
+    
+    with code_tabs[2]:
+        st.subheader("제직기 설정")
+        st.caption("제직현황에 표시될 제직기 목록을 관리합니다.")
+        
+        # 목록 조회
+        machines_ref = db.collection("machines").order_by("machine_no")
+        m_docs = list(machines_ref.stream())
+        m_list = [d.to_dict() for d in m_docs]
+        
+        if not m_list:
+            st.warning("등록된 제직기가 없습니다.")
+            if st.button("기본 제직기(1~9호대) 자동 생성"):
+                for i in range(1, 10):
+                    db.collection("machines").document(str(i)).set({
+                        "machine_no": i,
+                        "name": f"{i}호대",
+                        "model": "",
+                        "note": ""
+                    })
+                st.success("기본 제직기가 생성되었습니다.")
+                st.rerun()
+        else:
+            st.dataframe(pd.DataFrame(m_list), use_container_width=True, hide_index=True)
+            
+        st.divider()
+        st.write("➕ 제직기 추가 / 수정")
+        with st.form("add_machine_form"):
+            c1, c2 = st.columns(2)
+            new_no = c1.number_input("호기 번호 (No.)", min_value=1, step=1, help="정렬 순서 및 고유 ID로 사용됩니다.")
+            new_name = c2.text_input("제직기 명칭", placeholder="예: 1호대")
+            c3, c4 = st.columns(2)
+            new_model = c3.text_input("모델명")
+            new_note = c4.text_input("특이사항/메모")
+            
+            if st.form_submit_button("저장"):
+                db.collection("machines").document(str(new_no)).set({
+                    "machine_no": new_no,
+                    "name": new_name,
+                    "model": new_model,
+                    "note": new_note
+                })
+                st.success("저장되었습니다.")
+                st.rerun()
+        
+        if m_list:
+            st.write("🗑️ 제직기 삭제")
+            del_target = st.selectbox("삭제할 제직기 선택", [f"{m['machine_no']}:{m['name']}" for m in m_list])
+            if st.button("삭제"):
+                del_id = del_target.split(":")[0]
+                db.collection("machines").document(del_id).delete()
+                st.success("삭제되었습니다.")
+                st.rerun()
 
 else:
     st.header(f"🏗️ {menu}")

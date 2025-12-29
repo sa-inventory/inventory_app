@@ -1280,32 +1280,31 @@ elif menu == "염색현황":
                 tab_act1, tab_act2 = st.tabs(["✅ 염색 완료 처리", "🛠️ 정보 수정 / 취소"])
                 
                 with tab_act1:
-                    with st.form("dyeing_complete_form"):
-                        st.write("염색 완료(입고) 정보를 입력하세요.")
-                        c1, c2 = st.columns(2)
-                        d_in_date = c1.date_input("염색완료일(입고일)", datetime.date.today())
-                        d_stock = c2.number_input("입고수량(장)", value=int(sel_row.get('stock', 0)), step=10)
-                        
-                        c3, c4 = st.columns(2)
-                        # 기본값으로 출고 중량 사용
-                        def_weight = float(sel_row.get('dyeing_out_weight', 0)) if not pd.isna(sel_row.get('dyeing_out_weight')) else 0.0
-                        d_weight = c3.number_input("입고중량(kg)", value=def_weight, step=0.1, format="%.1f")
-                        d_price = c4.number_input("염색단가(원)", min_value=0, step=10)
-                        
-                        st.caption("※ 염색금액 = 입고중량 × 염색단가")
-                        
-                        if st.form_submit_button("염색 완료 (봉제대기로 이동)"):
-                            d_amount = int(d_weight * d_price)
-                            db.collection("inventory").document(sel_id).update({
-                                "status": "염색완료",
-                                "dyeing_in_date": str(d_in_date),
-                                "stock": d_stock,
-                                "dyeing_in_weight": d_weight,
-                                "dyeing_unit_price": d_price,
-                                "dyeing_amount": d_amount
-                            })
-                            st.success(f"염색이 완료되었습니다. (금액: {d_amount:,}원)")
-                            st.rerun()
+                    st.write("염색 완료(입고) 정보를 입력하세요.")
+                    c1, c2 = st.columns(2)
+                    d_in_date = c1.date_input("염색완료일(입고일)", datetime.date.today())
+                    d_stock = c2.number_input("입고수량(장)", value=int(sel_row.get('stock', 0)), step=10)
+                    
+                    c3, c4 = st.columns(2)
+                    # 기본값으로 출고 중량 사용
+                    def_weight = float(sel_row.get('dyeing_out_weight', 0)) if not pd.isna(sel_row.get('dyeing_out_weight')) else 0.0
+                    d_weight = c3.number_input("입고중량(kg)", value=def_weight, step=0.1, format="%.1f")
+                    d_price = c4.number_input("염색단가(원)", min_value=0, step=10)
+                    
+                    d_amount = int(d_weight * d_price)
+                    st.info(f"💰 **염색금액 합계**: {d_amount:,}원 ( {d_weight}kg × {d_price}원 )")
+                    
+                    if st.button("염색 완료 (봉제대기로 이동)"):
+                        db.collection("inventory").document(sel_id).update({
+                            "status": "염색완료",
+                            "dyeing_in_date": str(d_in_date),
+                            "stock": d_stock,
+                            "dyeing_in_weight": d_weight,
+                            "dyeing_unit_price": d_price,
+                            "dyeing_amount": d_amount
+                        })
+                        st.success(f"염색이 완료되었습니다. (금액: {d_amount:,}원)")
+                        st.rerun()
                             
                 with tab_act2:
                     with st.form("dyeing_edit_form"):
@@ -1341,15 +1340,56 @@ elif menu == "염색현황":
     # --- 3. 염색 완료 탭 ---
     with tab_dye_done:
         st.subheader("염색 완료 목록")
+        
+        # 검색 조건 (기간 + 염색업체)
+        with st.form("search_dye_done"):
+            c1, c2 = st.columns([2, 1])
+            today = datetime.date.today()
+            s_date = c1.date_input("조회 기간 (완료일)", [today - datetime.timedelta(days=30), today])
+            s_partner = c2.text_input("염색업체 검색")
+            st.form_submit_button("🔍 조회")
+
+        # 날짜 범위 계산
+        if len(s_date) == 2:
+            start_dt = datetime.datetime.combine(s_date[0], datetime.time.min)
+            end_dt = datetime.datetime.combine(s_date[1], datetime.time.max)
+        else:
+            start_dt = datetime.datetime.combine(s_date[0], datetime.time.min)
+            end_dt = datetime.datetime.combine(s_date[0], datetime.time.max)
+
         docs = db.collection("inventory").where("status", "==", "염색완료").stream()
         rows = []
         for doc in docs:
             d = doc.to_dict()
             d['id'] = doc.id
+            
+            # 1. 날짜 필터 (dyeing_in_date 기준)
+            d_date_str = d.get('dyeing_in_date')
+            if d_date_str:
+                try:
+                    d_date_obj = datetime.datetime.strptime(d_date_str, "%Y-%m-%d")
+                    if not (start_dt <= d_date_obj <= end_dt): continue
+                except:
+                    continue
+            else:
+                continue
+            
+            # 2. 염색업체 필터
+            if s_partner and s_partner not in d.get('dyeing_partner', ''):
+                continue
+                
             rows.append(d)
             
+        # 최신순 정렬 (완료일 기준)
+        rows.sort(key=lambda x: x.get('dyeing_in_date', ''), reverse=True)
+
         if rows:
             df = pd.DataFrame(rows)
+            
+            # 금액 합계 표시
+            total_amount = df['dyeing_amount'].sum() if 'dyeing_amount' in df.columns else 0
+            st.markdown(f"### 💵 총 염색금액: **{total_amount:,}원** (총 {len(rows)}건)")
+            
             col_map = {
                 "order_no": "발주번호", "dyeing_partner": "염색업체", "dyeing_in_date": "완료일",
                 "name": "제품명", "color": "색상", "stock": "수량", "roll_no": "롤번호",

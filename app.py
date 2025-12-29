@@ -1009,13 +1009,12 @@ elif menu == "제직현황":
         date_display = "block" if p_show_date else "none"
 
         style = f"""<style>
-            body { font-family: 'Malgun Gothic', sans-serif; padding: 20px; }
             @page {{ margin: {p_m_top}mm {p_m_right}mm {p_m_bottom}mm {p_m_left}mm; }}
             body {{ font-family: 'Malgun Gothic', sans-serif; padding: 0; margin: 0; }}
             table {{ width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: {p_body_size}px; }}
             th, td {{ border: 1px solid #444; padding: {p_padding}px; text-align: left; }}
-            th { background-color: #f0f0f0; text-align: center; font-weight: bold; }
-            .header { text-align: center; margin-bottom: 10px; }
+            th {{ background-color: #f0f0f0; text-align: center; font-weight: bold; }}
+            .header {{ text-align: center; margin-bottom: 10px; }}
             .header h2 {{ font-size: {p_title_size}px; margin: 0; }}
             .sub-header {{ text-align: {date_align}; font-size: {p_date_size}px; color: #555; margin-bottom: 10px; display: {date_display}; }}
             .section-title {{ font-size: {p_body_size + 2}px; font-weight: bold; margin-top: 20px; margin-bottom: 5px; border-bottom: 2px solid #ddd; padding-bottom: 3px; }}
@@ -1411,6 +1410,7 @@ elif menu == "거래처관리":
 
     with tab1:
         with st.form("partner_form"):
+        with st.form("partner_form", clear_on_submit=True):
             c1, c2 = st.columns(2)
             p_type = c1.selectbox("거래처 구분", partner_types)
             p_name = c2.text_input("거래처명", placeholder="상호명 입력")

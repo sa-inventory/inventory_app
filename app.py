@@ -1180,72 +1180,201 @@ elif menu == "염색현황":
     st.header("🎨 염색 현황")
     st.info("제직이 완료된 건을 염색 공장에서 작업하고 봉제 단계로 넘깁니다.")
 
-    tab1, tab2 = st.tabs(["🏭 염색 작업 관리", "📋 염색 내역 조회"])
+    tab_dye_wait, tab_dye_ing, tab_dye_done = st.tabs(["📋 염색 대기 목록", "🏭 염색중 목록", "✅ 염색 완료 목록"])
 
-    with tab1:
-        # '제직완료' (염색대기) 또는 '염색중' 상태인 건만 가져오기
-        docs = db.collection("inventory").where("status", "in", ["제직완료", "염색중"]).stream()
+    # 염색 업체 목록 가져오기
+    dyeing_partners = get_partners("염색업체")
+
+    # --- 1. 염색 대기 탭 ---
+    with tab_dye_wait:
+        st.subheader("염색 대기 목록 (제직완료)")
+        docs = db.collection("inventory").where("status", "==", "제직완료").stream()
+        rows = []
+        for doc in docs:
+            d = doc.to_dict()
+            d['id'] = doc.id
+            rows.append(d)
         
+        # 날짜순 정렬
+        rows.sort(key=lambda x: x.get('date', datetime.datetime.max))
+
+        if rows:
+            df = pd.DataFrame(rows)
+            if 'date' in df.columns:
+                df['date'] = df['date'].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isnull(x) and hasattr(x, 'strftime') else x)
+            
+            col_map = {
+                "order_no": "발주번호", "customer": "발주처", "name": "제품명", 
+                "color": "색상", "stock": "수량", "weight": "중량(g)", 
+                "prod_weight_kg": "제직중량(kg)", "roll_no": "롤번호", "date": "접수일"
+            }
+            display_cols = ["order_no", "roll_no", "customer", "name", "color", "stock", "weight", "prod_weight_kg", "date"]
+            final_cols = [c for c in display_cols if c in df.columns]
+            
+            st.write("🔽 염색 출고할 항목을 선택하세요.")
+            selection = st.dataframe(df[final_cols].rename(columns=col_map), use_container_width=True, on_select="rerun", selection_mode="single-row", key="df_dye_wait")
+            
+            if selection.selection.rows:
+                idx = selection.selection.rows[0]
+                sel_row = df.iloc[idx]
+                sel_id = sel_row['id']
+                
+                st.divider()
+                st.markdown(f"### 🚚 염색 출고 정보 입력: **{sel_row['name']}**")
+                
+                with st.form("dyeing_start_form"):
+                    c1, c2 = st.columns(2)
+                    d_date = c1.date_input("염색출고일", datetime.date.today())
+                    d_partner = c2.selectbox("염색업체", dyeing_partners if dyeing_partners else ["직접입력"])
+                    
+                    c3, c4 = st.columns(2)
+                    # 기본값으로 제직 생산 중량 사용
+                    def_weight = float(sel_row.get('prod_weight_kg', 0))
+                    d_weight = c3.number_input("출고중량(kg)", value=def_weight, step=0.1, format="%.1f")
+                    d_note = c4.text_input("염색사항(비고)")
+                    
+                    if st.form_submit_button("염색 출고 (작업시작)"):
+                        db.collection("inventory").document(sel_id).update({
+                            "status": "염색중",
+                            "dyeing_out_date": str(d_date),
+                            "dyeing_partner": d_partner,
+                            "dyeing_out_weight": d_weight,
+                            "dyeing_note": d_note
+                        })
+                        st.success("염색중 상태로 변경되었습니다.")
+                        st.rerun()
+        else:
+            st.info("염색 대기 중인 건이 없습니다.")
+
+    # --- 2. 염색중 탭 ---
+    with tab_dye_ing:
+        st.subheader("염색중 목록")
+        docs = db.collection("inventory").where("status", "==", "염색중").stream()
         rows = []
         for doc in docs:
             d = doc.to_dict()
             d['id'] = doc.id
             rows.append(d)
             
-        rows.sort(key=lambda x: x['date'])
-        
         if rows:
-            for item in rows:
-                with st.container():
-                    c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 1, 2])
-                    
-                    status_color = "red" if item['status'] == "염색중" else "orange"
-                    c1.markdown(f"**[{item['status']}]** :{status_color}[{item.get('order_no', '-')}]")
-                    if item.get('roll_no'):
-                        c1.caption(f"Roll No: {item.get('roll_no')}")
-                    c1.write(f"📅 {item['date'].strftime('%Y-%m-%d')}")
-                    
-                    c2.write(f"**{item['customer']}**")
-                    c2.write(f"{item['name']}")
-                    
-                    c3.write(f"{item['color']} / {item['stock']}장")
-                    c3.write(f"{item['weight']}g")
-                    
-                    with c4.expander("🖨️ 지시서"):
-                        st.markdown(f"""
-                        <div style="border:1px solid #000; padding:10px; font-size:12px;">
-                            <h3 style="text-align:center; margin:0;">염 색 지 시 서</h3>
-                            <hr>
-                            <p><strong>발주번호:</strong> {item.get('order_no')}</p>
-                            <p><strong>발 주 처:</strong> {item['customer']}</p>
-                            <p><strong>제 품 명:</strong> {item['name']}</p>
-                            <p><strong>색    상:</strong> {item['color']}</p>
-                            <p><strong>수    량:</strong> {item['stock']}장</p>
-                            <p><strong>중    량:</strong> {item['weight']}g</p>
-                            <p><strong>납품요청일:</strong> {item['delivery_req_date']}</p>
-                            <p><strong>특이사항:</strong> {item.get('note', '-')}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        st.caption("Ctrl+P로 인쇄")
-
-                    if item['status'] == "제직완료":
-                        if c5.button("염색 시작 ➡️", key=f"dye_start_{item['id']}"):
-                            db.collection("inventory").document(item['id']).update({"status": "염색중"})
-                            st.rerun()
-                    elif item['status'] == "염색중":
-                        if c5.button("염색 완료 (봉제로) ➡️", key=f"dye_end_{item['id']}"):
-                            db.collection("inventory").document(item['id']).update({
-                                "status": "봉제",
-                                "dyeing_end_time": datetime.datetime.now()
+            df = pd.DataFrame(rows)
+            col_map = {
+                "order_no": "발주번호", "dyeing_partner": "염색업체", "dyeing_out_date": "출고일",
+                "name": "제품명", "color": "색상", "stock": "수량", "dyeing_out_weight": "출고중량(kg)",
+                "roll_no": "롤번호"
+            }
+            display_cols = ["dyeing_out_date", "dyeing_partner", "order_no", "roll_no", "name", "color", "stock", "dyeing_out_weight"]
+            final_cols = [c for c in display_cols if c in df.columns]
+            
+            st.write("🔽 관리할 항목을 선택하세요.")
+            selection = st.dataframe(df[final_cols].rename(columns=col_map), use_container_width=True, on_select="rerun", selection_mode="single-row", key="df_dye_ing")
+            
+            if selection.selection.rows:
+                idx = selection.selection.rows[0]
+                sel_row = df.iloc[idx]
+                sel_id = sel_row['id']
+                
+                st.divider()
+                st.markdown(f"### ⚙️ 작업 관리: **{sel_row['name']}**")
+                
+                tab_act1, tab_act2 = st.tabs(["✅ 염색 완료 처리", "🛠️ 정보 수정 / 취소"])
+                
+                with tab_act1:
+                    with st.form("dyeing_complete_form"):
+                        st.write("염색 완료 정보를 입력하세요.")
+                        d_in_date = st.date_input("염색완료일(입고일)", datetime.date.today())
+                        
+                        if st.form_submit_button("염색 완료 (봉제대기로 이동)"):
+                            db.collection("inventory").document(sel_id).update({
+                                "status": "염색완료",
+                                "dyeing_in_date": str(d_in_date)
                             })
+                            st.success("염색이 완료되었습니다.")
+                            st.rerun()
+                            
+                with tab_act2:
+                    with st.form("dyeing_edit_form"):
+                        st.write("출고 정보를 수정합니다.")
+                        c1, c2 = st.columns(2)
+                        e_date = c1.date_input("염색출고일", datetime.datetime.strptime(sel_row['dyeing_out_date'], "%Y-%m-%d").date() if sel_row.get('dyeing_out_date') else datetime.date.today())
+                        e_partner = c2.selectbox("염색업체", dyeing_partners if dyeing_partners else ["직접입력"], index=dyeing_partners.index(sel_row['dyeing_partner']) if sel_row.get('dyeing_partner') in dyeing_partners else 0)
+                        
+                        c3, c4 = st.columns(2)
+                        e_weight = c3.number_input("출고중량(kg)", value=float(sel_row.get('dyeing_out_weight', 0)), step=0.1, format="%.1f")
+                        e_note = c4.text_input("염색사항", value=sel_row.get('dyeing_note', ''))
+                        
+                        if st.form_submit_button("수정 저장"):
+                            db.collection("inventory").document(sel_id).update({
+                                "dyeing_out_date": str(e_date),
+                                "dyeing_partner": e_partner,
+                                "dyeing_out_weight": e_weight,
+                                "dyeing_note": e_note
+                            })
+                            st.success("수정되었습니다.")
                             st.rerun()
                     
-                    st.divider()
+                    st.markdown("#### 🚫 작업 취소")
+                    if st.button("염색 취소 (대기로 되돌리기)", type="primary"):
+                        db.collection("inventory").document(sel_id).update({
+                            "status": "제직완료"
+                        })
+                        st.success("취소되었습니다.")
+                        st.rerun()
         else:
-            st.info("현재 염색 대기 중이거나 작업 중인 건이 없습니다.")
+            st.info("현재 염색 중인 작업이 없습니다.")
 
-    with tab2:
-        st.write("염색 공정 내역 조회 (추후 구현)")
+    # --- 3. 염색 완료 탭 ---
+    with tab_dye_done:
+        st.subheader("염색 완료 목록")
+        docs = db.collection("inventory").where("status", "==", "염색완료").stream()
+        rows = []
+        for doc in docs:
+            d = doc.to_dict()
+            d['id'] = doc.id
+            rows.append(d)
+            
+        if rows:
+            df = pd.DataFrame(rows)
+            col_map = {
+                "order_no": "발주번호", "dyeing_partner": "염색업체", "dyeing_in_date": "완료일",
+                "name": "제품명", "color": "색상", "stock": "수량", "roll_no": "롤번호"
+            }
+            display_cols = ["dyeing_in_date", "dyeing_partner", "order_no", "roll_no", "name", "color", "stock"]
+            final_cols = [c for c in display_cols if c in df.columns]
+            
+            st.write("🔽 수정하거나 취소할 항목을 선택하세요.")
+            selection = st.dataframe(df[final_cols].rename(columns=col_map), use_container_width=True, on_select="rerun", selection_mode="single-row", key="df_dye_done")
+            
+            if selection.selection.rows:
+                idx = selection.selection.rows[0]
+                sel_row = df.iloc[idx]
+                sel_id = sel_row['id']
+                
+                st.divider()
+                st.markdown(f"### 🛠️ 완료 정보 수정: **{sel_row['name']}**")
+                
+                c1, c2 = st.columns(2)
+                with c1:
+                    with st.form("dyeing_done_edit"):
+                        new_in_date = st.date_input("염색완료일", datetime.datetime.strptime(sel_row['dyeing_in_date'], "%Y-%m-%d").date() if sel_row.get('dyeing_in_date') else datetime.date.today())
+                        if st.form_submit_button("수정 저장"):
+                            db.collection("inventory").document(sel_id).update({
+                                "dyeing_in_date": str(new_in_date)
+                            })
+                            st.success("수정되었습니다.")
+                            st.rerun()
+                
+                with c2:
+                    st.write("🚫 **완료 취소**")
+                    st.warning("상태를 다시 '염색중'으로 되돌립니다.")
+                    if st.button("완료 취소 (염색중으로 복귀)", type="primary"):
+                        db.collection("inventory").document(sel_id).update({
+                            "status": "염색중"
+                        })
+                        st.success("복귀되었습니다.")
+                        st.rerun()
+        else:
+            st.info("염색 완료된 내역이 없습니다.")
 
 elif menu == "봉제현황":
     st.header("🪡 봉제 현황")
@@ -1254,8 +1383,8 @@ elif menu == "봉제현황":
     tab1, tab2 = st.tabs(["🏭 봉제 작업 관리", "📋 봉제 내역 조회"])
     
     with tab1:
-        # '봉제' (대기) 또는 '봉제중' 상태
-        docs = db.collection("inventory").where("status", "in", ["봉제", "봉제중"]).stream()
+        # '염색완료' (봉제대기) 또는 '봉제', '봉제중' 상태
+        docs = db.collection("inventory").where("status", "in", ["염색완료", "봉제", "봉제중"]).stream()
         rows = []
         for doc in docs:
             d = doc.to_dict()
@@ -1288,7 +1417,7 @@ elif menu == "봉제현황":
                         </div>
                         """, unsafe_allow_html=True)
                         
-                    if item['status'] == "봉제":
+                    if item['status'] in ["염색완료", "봉제"]:
                         if c5.button("봉제 시작 ➡️", key=f"sew_start_{item['id']}"):
                             db.collection("inventory").document(item['id']).update({"status": "봉제중"})
                             st.rerun()

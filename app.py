@@ -738,8 +738,12 @@ elif menu == "제직현황":
         rows = []
         for doc in docs:
             d = doc.to_dict()
+            d['id'] = doc.id
             rows.append(d)
         
+        # 최신순 정렬
+        rows.sort(key=lambda x: x.get('weaving_end_time', datetime.datetime.min), reverse=True)
+
         if rows:
             df = pd.DataFrame(rows)
             if 'weaving_end_time' in df.columns:
@@ -749,12 +753,71 @@ elif menu == "제직현황":
                 "order_no": "발주번호", "machine_no": "제직기", "weaving_end_time": "완료시간",
                 "customer": "발주처", "name": "제품명", 
                 "real_stock": "생산매수", "real_weight": "중량(g)", 
-                "prod_weight_kg": "생산중량(kg)", "avg_weight": "평균중량(g)"
+                "prod_weight_kg": "생산중량(kg)", "avg_weight": "평균중량(g)",
+                "roll_no": "롤번호"
             }
-            display_cols = ["weaving_end_time", "machine_no", "order_no", "customer", "name", "real_stock", "real_weight", "prod_weight_kg", "avg_weight"]
+            display_cols = ["weaving_end_time", "machine_no", "order_no", "roll_no", "customer", "name", "real_stock", "real_weight", "prod_weight_kg", "avg_weight"]
             final_cols = [c for c in display_cols if c in df.columns]
             
-            st.dataframe(df[final_cols].rename(columns=col_map), use_container_width=True, hide_index=True)
+            st.write("🔽 수정하거나 취소할 항목을 선택하세요.")
+            selection = st.dataframe(
+                df[final_cols].rename(columns=col_map), 
+                use_container_width=True, 
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                key="df_done"
+            )
+
+            if selection.selection.rows:
+                idx = selection.selection.rows[0]
+                sel_row = df.iloc[idx]
+                sel_id = sel_row['id']
+                
+                st.divider()
+                st.markdown(f"### 🛠️ 제직 결과 수정: **{sel_row['name']} ({sel_row.get('roll_no', '?')}번 롤)**")
+                
+                with st.form("edit_weaving_done"):
+                    c1, c2 = st.columns(2)
+                    new_real_weight = c1.number_input("중량(g)", value=int(sel_row.get('real_weight', 0)), step=1, format="%d")
+                    new_real_stock = c2.number_input("생산매수(장)", value=int(sel_row.get('real_stock', 0)), step=1, format="%d")
+                    
+                    c3, c4 = st.columns(2)
+                    new_prod_kg = c3.number_input("생산중량(kg)", value=int(sel_row.get('prod_weight_kg', 0)), step=1, format="%d")
+                    new_avg_weight = c4.number_input("평균중량(g)", value=int(sel_row.get('avg_weight', 0)), step=1, format="%d")
+                    
+                    if st.form_submit_button("수정 저장"):
+                        db.collection("inventory").document(sel_id).update({
+                            "real_weight": new_real_weight,
+                            "real_stock": new_real_stock,
+                            "stock": new_real_stock, # 이후 공정을 위해 재고 수량도 함께 업데이트
+                            "prod_weight_kg": new_prod_kg,
+                            "avg_weight": new_avg_weight
+                        })
+                        st.success("수정되었습니다.")
+                        st.rerun()
+                
+                st.markdown("#### 🚫 제직 완료 취소 (삭제)")
+                st.warning("이 롤 데이터를 삭제하고, 제직중 상태로 되돌립니다.")
+                if st.button("🗑️ 이 롤 삭제하기 (취소)", type="primary"):
+                    parent_id = sel_row.get('parent_id')
+                    
+                    # 1. 현재 롤 문서 삭제
+                    db.collection("inventory").document(sel_id).delete()
+                    
+                    # 2. 부모 문서(제직중인 건) 상태 업데이트
+                    if parent_id:
+                        # 남은 형제 롤 개수 확인
+                        siblings = db.collection("inventory").where("parent_id", "==", parent_id).where("status", "==", "제직완료").stream()
+                        cnt = sum(1 for _ in siblings)
+                        
+                        db.collection("inventory").document(parent_id).update({
+                            "completed_rolls": cnt,
+                            "status": "제직중" # 마스터 완료 상태였더라도 다시 제직중으로 복귀
+                        })
+                    
+                    st.success("삭제되었습니다. 제직중 목록에서 다시 작업할 수 있습니다.")
+                    st.rerun()
         else:
             st.info("제직 완료된 내역이 없습니다.")
 

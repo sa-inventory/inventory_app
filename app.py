@@ -1289,10 +1289,10 @@ elif menu == "염색현황":
                     # 기본값으로 출고 중량 사용
                     def_weight = float(sel_row.get('dyeing_out_weight', 0)) if not pd.isna(sel_row.get('dyeing_out_weight')) else 0.0
                     d_weight = c3.number_input("입고중량(kg)", value=def_weight, step=0.1, format="%.1f")
-                    d_price = c4.number_input("염색단가(원)", min_value=0, step=10)
+                    d_price = c4.number_input("염색단가(원)", min_value=0, step=1)
                     
                     d_amount = int(d_weight * d_price)
-                    st.info(f"💰 **염색금액 합계**: {d_amount:,}원 ( {d_weight}kg × {d_price}원 )")
+                    st.info(f"💰 **염색금액 합계**: {d_amount:,}원 ( {d_weight:.1f}kg × {d_price:,}원 )")
                     
                     if st.button("염색 완료 (봉제대기로 이동)"):
                         db.collection("inventory").document(sel_id).update({
@@ -1420,7 +1420,7 @@ elif menu == "염색현황":
                         new_weight = c_e2.number_input("입고중량(kg)", value=float(sel_row.get('dyeing_in_weight', 0)) if not pd.isna(sel_row.get('dyeing_in_weight')) else 0.0, step=0.1, format="%.1f")
                         
                         c_e3, c_e4 = st.columns(2)
-                        new_price = c_e3.number_input("단가(원)", value=int(sel_row.get('dyeing_unit_price', 0)) if not pd.isna(sel_row.get('dyeing_unit_price')) else 0, step=10)
+                        new_price = c_e3.number_input("단가(원)", value=int(sel_row.get('dyeing_unit_price', 0)) if not pd.isna(sel_row.get('dyeing_unit_price')) else 0, step=1)
                         
                         if st.form_submit_button("수정 저장"):
                             new_amount = int(new_weight * new_price)

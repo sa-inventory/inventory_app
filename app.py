@@ -1288,8 +1288,8 @@ elif menu == "염색현황":
                     c3, c4 = st.columns(2)
                     # 기본값으로 출고 중량 사용
                     def_weight = float(sel_row.get('dyeing_out_weight', 0)) if not pd.isna(sel_row.get('dyeing_out_weight')) else 0.0
-                    d_weight = c3.number_input("입고중량(kg)", value=def_weight, step=0.1, format="%.1f")
-                    d_price = c4.number_input("염색단가(원)", min_value=0, step=1)
+                    d_weight = c3.number_input("입고중량(kg)", value=def_weight, step=10, format="%.1f")
+                    d_price = c4.number_input("염색단가(원)", min_value=0, step=10)
                     
                     d_amount = int(d_weight * d_price)
                     st.info(f"💰 **염색금액 합계**: {d_amount:,}원 ( {d_weight:.1f}kg × {d_price:,}원 )")

@@ -1281,15 +1281,30 @@ elif menu == "염색현황":
                 
                 with tab_act1:
                     with st.form("dyeing_complete_form"):
-                        st.write("염색 완료 정보를 입력하세요.")
-                        d_in_date = st.date_input("염색완료일(입고일)", datetime.date.today())
+                        st.write("염색 완료(입고) 정보를 입력하세요.")
+                        c1, c2 = st.columns(2)
+                        d_in_date = c1.date_input("염색완료일(입고일)", datetime.date.today())
+                        d_stock = c2.number_input("입고수량(장)", value=int(sel_row.get('stock', 0)), step=10)
+                        
+                        c3, c4 = st.columns(2)
+                        # 기본값으로 출고 중량 사용
+                        def_weight = float(sel_row.get('dyeing_out_weight', 0)) if not pd.isna(sel_row.get('dyeing_out_weight')) else 0.0
+                        d_weight = c3.number_input("입고중량(kg)", value=def_weight, step=0.1, format="%.1f")
+                        d_price = c4.number_input("염색단가(원)", min_value=0, step=10)
+                        
+                        st.caption("※ 염색금액 = 입고중량 × 염색단가")
                         
                         if st.form_submit_button("염색 완료 (봉제대기로 이동)"):
+                            d_amount = int(d_weight * d_price)
                             db.collection("inventory").document(sel_id).update({
                                 "status": "염색완료",
-                                "dyeing_in_date": str(d_in_date)
+                                "dyeing_in_date": str(d_in_date),
+                                "stock": d_stock,
+                                "dyeing_in_weight": d_weight,
+                                "dyeing_unit_price": d_price,
+                                "dyeing_amount": d_amount
                             })
-                            st.success("염색이 완료되었습니다.")
+                            st.success(f"염색이 완료되었습니다. (금액: {d_amount:,}원)")
                             st.rerun()
                             
                 with tab_act2:
@@ -1337,9 +1352,10 @@ elif menu == "염색현황":
             df = pd.DataFrame(rows)
             col_map = {
                 "order_no": "발주번호", "dyeing_partner": "염색업체", "dyeing_in_date": "완료일",
-                "name": "제품명", "color": "색상", "stock": "수량", "roll_no": "롤번호"
+                "name": "제품명", "color": "색상", "stock": "수량", "roll_no": "롤번호",
+                "dyeing_in_weight": "입고중량(kg)", "dyeing_unit_price": "단가", "dyeing_amount": "금액"
             }
-            display_cols = ["dyeing_in_date", "dyeing_partner", "order_no", "roll_no", "name", "color", "stock"]
+            display_cols = ["dyeing_in_date", "dyeing_partner", "order_no", "roll_no", "name", "color", "stock", "dyeing_in_weight", "dyeing_unit_price", "dyeing_amount"]
             final_cols = [c for c in display_cols if c in df.columns]
             
             st.write("🔽 수정하거나 취소할 항목을 선택하세요.")
@@ -1356,10 +1372,24 @@ elif menu == "염색현황":
                 c1, c2 = st.columns(2)
                 with c1:
                     with st.form("dyeing_done_edit"):
+                        st.write("입고 정보 수정")
                         new_in_date = st.date_input("염색완료일", datetime.datetime.strptime(sel_row['dyeing_in_date'], "%Y-%m-%d").date() if sel_row.get('dyeing_in_date') else datetime.date.today())
+                        
+                        c_e1, c_e2 = st.columns(2)
+                        new_stock = c_e1.number_input("입고수량(장)", value=int(sel_row.get('stock', 0)), step=10)
+                        new_weight = c_e2.number_input("입고중량(kg)", value=float(sel_row.get('dyeing_in_weight', 0)) if not pd.isna(sel_row.get('dyeing_in_weight')) else 0.0, step=0.1, format="%.1f")
+                        
+                        c_e3, c_e4 = st.columns(2)
+                        new_price = c_e3.number_input("단가(원)", value=int(sel_row.get('dyeing_unit_price', 0)) if not pd.isna(sel_row.get('dyeing_unit_price')) else 0, step=10)
+                        
                         if st.form_submit_button("수정 저장"):
+                            new_amount = int(new_weight * new_price)
                             db.collection("inventory").document(sel_id).update({
-                                "dyeing_in_date": str(new_in_date)
+                                "dyeing_in_date": str(new_in_date),
+                                "stock": new_stock,
+                                "dyeing_in_weight": new_weight,
+                                "dyeing_unit_price": new_price,
+                                "dyeing_amount": new_amount
                             })
                             st.success("수정되었습니다.")
                             st.rerun()

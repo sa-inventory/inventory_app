@@ -874,6 +874,147 @@ elif menu == "제직현황":
         else:
             st.info("제직 완료된 내역이 없습니다.")
 
+    # --- 4. 작업일지 탭 ---
+    with tab_worklog:
+        st.subheader("작업일지 작성 및 조회")
+        
+        # Part 1: 일지 작성
+        with st.expander("➕ 작업일지 작성하기", expanded=True):
+            with st.form("work_log_form"):
+                c1, c2, c3 = st.columns(3)
+                log_date = c1.date_input("작업일자", datetime.date.today())
+                shift = c2.radio("근무조", ["주간", "야간"], horizontal=True)
+                author = c3.text_input("작성자")
+
+                c1, c2 = st.columns(2)
+                # 제직기 목록 가져오기
+                m_options = [f"{m['machine_no']}:{m['name']}" for m in machines_data]
+                machine_selection = c1.selectbox("관련 제직기", ["전체"] + m_options)
+                log_time = c2.time_input("작성시간", datetime.datetime.now().time())
+                
+                content = st.text_area("작업 내용")
+                
+                handover_label = "야간근무자 전달사항" if shift == "주간" else "주간근무자 전달사항"
+                handover_notes = st.text_area(handover_label, help="다음 근무조에게 전달할 내용을 입력하세요.")
+                
+                if st.form_submit_button("일지 저장"):
+                    log_dt = datetime.datetime.combine(log_date, log_time)
+                    machine_no_str = machine_selection.split(":")[0] if machine_selection != "전체" else "전체"
+                    
+                    # 1. 개별 로그 저장 (shift_logs 컬렉션)
+                    db.collection("shift_logs").add({
+                        "log_date": str(log_date),
+                        "shift": shift,
+                        "machine_no": machine_no_str,
+                        "log_time": log_dt,
+                        "content": content,
+                        "author": author
+                    })
+                    
+                    # 2. 전달사항 저장 (handover_notes 컬렉션)
+                    if handover_notes:
+                        note_key = "day_to_night_notes" if shift == "주간" else "night_to_day_notes"
+                        db.collection("handover_notes").document(str(log_date)).set({
+                            note_key: handover_notes
+                        }, merge=True)
+                    
+                    st.success("작업일지가 저장되었습니다.")
+                    st.rerun()
+
+        # Part 2: 일지 조회
+        st.divider()
+        st.subheader("일지 조회 및 출력")
+        
+        c1, c2 = st.columns([1, 3])
+        view_date = c1.date_input("조회할 날짜", datetime.date.today(), key="worklog_view_date")
+        
+        # 데이터 가져오기
+        log_docs = list(db.collection("shift_logs").where("log_date", "==", str(view_date)).order_by("log_time").stream())
+        notes_doc = db.collection("handover_notes").document(str(view_date)).get()
+        
+        day_logs = []
+        night_logs = []
+        for doc in log_docs:
+            log_data = doc.to_dict()
+            if log_data['shift'] == '주간':
+                day_logs.append(log_data)
+            else:
+                night_logs.append(log_data)
+        
+        notes_data = notes_doc.to_dict() if notes_doc.exists else {}
+        
+        # 화면 표시 & 인쇄용 HTML 생성
+        style = "<style>table { width: 100%; border-collapse: collapse; margin-bottom: 20px; } th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 12px; } th { background-color: #f2f2f2; text-align: center; } .header { text-align: center; margin-bottom: 20px; } .section-title { font-size: 14px; font-weight: bold; margin-top: 10px; margin-bottom: 5px; background-color: #eee; padding: 5px; } .note-box { border: 1px solid #ccc; padding: 10px; min-height: 50px; margin-bottom: 20px; }</style>"
+        html_content = f"<html><head><title>작업일지 - {view_date}</title>{style}</head><body><div class='header'><h2>작업 일지 ({view_date})</h2></div>"
+        
+        # 주간 섹션
+        st.markdown("#### ☀️ 주간 작업")
+        html_content += "<div class='section-title'>☀️ 주간 작업</div>"
+        if day_logs:
+            df_day = pd.DataFrame(day_logs)
+            df_day['log_time'] = df_day['log_time'].apply(lambda x: x.strftime('%H:%M') if hasattr(x, 'strftime') else str(x)[11:16])
+            st.dataframe(df_day[['log_time', 'machine_no', 'content', 'author']].rename(columns={'log_time':'시간','machine_no':'호기','content':'내용','author':'작성자'}), hide_index=True, use_container_width=True)
+            html_content += df_day[['log_time', 'machine_no', 'content', 'author']].rename(columns={'log_time':'시간','machine_no':'호기','content':'내용','author':'작성자'}).to_html(index=False, border=1)
+        else:
+            st.info("기록 없음")
+            html_content += "<p>기록 없음</p>"
+            
+        st.markdown("##### 📝 야간근무자 전달사항")
+        d_note = notes_data.get('day_to_night_notes', '-')
+        st.warning(d_note)
+        html_content += f"<div class='section-title'>📝 야간근무자 전달사항</div><div class='note-box'>{d_note}</div>"
+
+        st.divider()
+
+        # 야간 섹션
+        st.markdown("#### 🌙 야간 작업")
+        html_content += "<div class='section-title'>🌙 야간 작업</div>"
+        if night_logs:
+            df_night = pd.DataFrame(night_logs)
+            df_night['log_time'] = df_night['log_time'].apply(lambda x: x.strftime('%H:%M') if hasattr(x, 'strftime') else str(x)[11:16])
+            st.dataframe(df_night[['log_time', 'machine_no', 'content', 'author']].rename(columns={'log_time':'시간','machine_no':'호기','content':'내용','author':'작성자'}), hide_index=True, use_container_width=True)
+            html_content += df_night[['log_time', 'machine_no', 'content', 'author']].rename(columns={'log_time':'시간','machine_no':'호기','content':'내용','author':'작성자'}).to_html(index=False, border=1)
+        else:
+            st.info("기록 없음")
+            html_content += "<p>기록 없음</p>"
+
+        st.markdown("##### 📝 주간근무자 전달사항")
+        n_note = notes_data.get('night_to_day_notes', '-')
+        st.warning(n_note)
+        html_content += f"<div class='section-title'>📝 주간근무자 전달사항</div><div class='note-box'>{n_note}</div>"
+        html_content += "</body></html>"
+        
+        with c2:
+            st.download_button("🖨️ 작업일지 인쇄 (HTML)", data=html_content, file_name=f"작업일지_{view_date}.html", mime="text/html")
+
+    # --- 5. 생산일지 탭 ---
+    with tab_prodlog:
+        st.subheader("일일 생산일지 조회")
+        
+        c1, c2 = st.columns([1, 3])
+        prod_date = c1.date_input("조회일자", datetime.date.today(), key="prodlog_view_date")
+        
+        start_dt = datetime.datetime.combine(prod_date, datetime.time.min)
+        end_dt = datetime.datetime.combine(prod_date, datetime.time.max)
+        
+        docs = db.collection("inventory").where("status", "==", "제직완료").where("weaving_end_time", ">=", start_dt).where("weaving_end_time", "<=", end_dt).stream()
+        rows = [d.to_dict() for d in docs]
+        
+        if rows:
+            df = pd.DataFrame(rows)
+            df['weaving_end_time'] = df['weaving_end_time'].apply(lambda x: x.strftime('%H:%M') if not pd.isnull(x) and hasattr(x, 'strftime') else x)
+            col_map = {"order_no": "발주번호", "machine_no": "제직기", "weaving_end_time": "완료시간", "customer": "발주처", "name": "제품명", "real_stock": "생산매수", "real_weight": "중량(g)", "prod_weight_kg": "생산중량(kg)", "avg_weight": "평균중량(g)", "roll_no": "롤번호"}
+            display_cols = ["weaving_end_time", "machine_no", "order_no", "roll_no", "customer", "name", "real_stock", "real_weight", "prod_weight_kg", "avg_weight"]
+            final_cols = [c for c in display_cols if c in df.columns]
+            df_display = df[final_cols].rename(columns=col_map)
+            st.markdown(f"### 📄 {prod_date} 생산일지")
+            st.dataframe(df_display, hide_index=True, use_container_width=True)
+            print_html = f"<html><head><title>{prod_date} 생산일지</title><style>body {{ font-family: sans-serif; }} table {{ width: 100%; border-collapse: collapse; }} th, td {{ border: 1px solid #ddd; padding: 8px; text-align: center; }} th {{ background-color: #f2f2f2; }} h2 {{ text-align: center; }}</style></head><body><h2>{prod_date} 생산일지</h2>{df_display.to_html(index=False)}</body></html>"
+            with c2:
+                st.download_button(label="🖨️ 생산일지 인쇄 (HTML)", data=print_html, file_name=f"생산일지_{prod_date}.html", mime="text/html")
+        else:
+            st.info(f"{prod_date}에 완료된 생산 내역이 없습니다.")
+
 elif menu == "염색현황":
     st.header("🎨 염색 현황")
     st.info("제직이 완료된 건을 염색 공장에서 작업하고 봉제 단계로 넘깁니다.")

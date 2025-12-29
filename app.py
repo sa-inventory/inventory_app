@@ -1291,8 +1291,19 @@ elif menu == "염색현황":
                     d_weight = c3.number_input("입고중량(kg)", value=def_weight, step=0.1, format="%.1f")
                     d_price = c4.number_input("염색단가(원)", min_value=0, step=1)
                     
-                    d_amount = int(d_weight * d_price)
-                    st.info(f"💰 **염색금액 합계**: {d_amount:,}원 ( {d_weight:.1f}kg × {d_price:,}원 )")
+                    d_vat_inc = st.checkbox("부가세 포함", value=False, key="dye_vat_check")
+                    
+                    base_calc = int(d_weight * d_price)
+                    if d_vat_inc:
+                        d_supply = int(base_calc / 1.1)
+                        d_vat = base_calc - d_supply
+                        d_total = base_calc
+                    else:
+                        d_supply = base_calc
+                        d_vat = int(base_calc * 0.1)
+                        d_total = base_calc + d_vat
+                    
+                    st.info(f"💰 **염색비용 합계**: {d_total:,}원 (공급가: {d_supply:,}원 / 부가세: {d_vat:,}원)")
                     
                     if st.button("염색 완료 (봉제대기로 이동)"):
                         db.collection("inventory").document(sel_id).update({
@@ -1301,9 +1312,12 @@ elif menu == "염색현황":
                             "stock": d_stock,
                             "dyeing_in_weight": d_weight,
                             "dyeing_unit_price": d_price,
-                            "dyeing_amount": d_amount
+                            "dyeing_amount": d_total,
+                            "dyeing_supply": d_supply,
+                            "dyeing_vat": d_vat,
+                            "vat_included": d_vat_inc
                         })
-                        st.success(f"염색이 완료되었습니다. (금액: {d_amount:,}원)")
+                        st.success(f"염색이 완료되었습니다. (합계: {d_total:,}원)")
                         st.rerun()
                             
                 with tab_act2:
@@ -1574,34 +1588,52 @@ elif menu == "봉제현황":
                 tab_act1, tab_act2 = st.tabs(["✅ 봉제 완료 처리", "🛠️ 정보 수정 / 취소"])
                 
                 with tab_act1:
-                    with st.form("sewing_complete_form"):
-                        c1, c2 = st.columns(2)
-                        s_end_date = c1.date_input("봉제완료일", datetime.date.today())
-                        s_real_stock = c2.number_input("완료수량(장)", value=int(sel_row.get('stock', 0)), step=10)
+                    st.write("봉제 완료 정보를 입력하세요.")
+                    c1, c2 = st.columns(2)
+                    s_end_date = c1.date_input("봉제완료일", datetime.date.today())
+                    s_real_stock = c2.number_input("완료수량(장)", value=int(sel_row.get('stock', 0)), step=10)
+                    
+                    # 외주봉제일 경우 단가/금액 입력
+                    s_price = 0
+                    s_total = 0
+                    s_supply = 0
+                    s_vat = 0
+                    s_vat_inc = False
+                    
+                    if sel_row.get('sewing_type') == "외주봉제":
+                        st.markdown("#### 💰 외주 가공비 정산")
+                        c3, c4 = st.columns(2)
+                        s_price = c3.number_input("봉제단가(원)", min_value=0, step=1)
+                        s_vat_inc = c4.checkbox("부가세 포함", value=False, key="sew_vat_check")
                         
-                        # 외주봉제일 경우 단가/금액 입력
-                        s_price = 0
-                        s_amount = 0
-                        if sel_row.get('sewing_type') == "외주봉제":
-                            st.markdown("#### 💰 외주 가공비 정산")
-                            c3, c4 = st.columns(2)
-                            s_price = c3.number_input("봉제단가(원)", min_value=0, step=1)
-                            s_amount = int(s_real_stock * s_price)
-                            st.info(f"**봉제금액 합계**: {s_amount:,}원")
-                        
-                        if st.form_submit_button("봉제 완료 (출고대기로 이동)"):
-                            updates = {
-                                "status": "봉제완료",
-                                "sewing_end_date": str(s_end_date),
-                                "stock": s_real_stock
-                            }
-                            if sel_row.get('sewing_type') == "외주봉제":
-                                updates["sewing_unit_price"] = s_price
-                                updates["sewing_amount"] = s_amount
+                        base_calc = int(s_real_stock * s_price)
+                        if s_vat_inc:
+                            s_supply = int(base_calc / 1.1)
+                            s_vat = base_calc - s_supply
+                            s_total = base_calc
+                        else:
+                            s_supply = base_calc
+                            s_vat = int(base_calc * 0.1)
+                            s_total = base_calc + s_vat
                             
-                            db.collection("inventory").document(sel_id).update(updates)
-                            st.success("봉제 완료 처리되었습니다.")
-                            st.rerun()
+                        st.info(f"**봉제비용 합계**: {s_total:,}원 (공급가: {s_supply:,}원 / 부가세: {s_vat:,}원)")
+                    
+                    if st.button("봉제 완료 (출고대기로 이동)"):
+                        updates = {
+                            "status": "봉제완료",
+                            "sewing_end_date": str(s_end_date),
+                            "stock": s_real_stock
+                        }
+                        if sel_row.get('sewing_type') == "외주봉제":
+                            updates["sewing_unit_price"] = s_price
+                            updates["sewing_amount"] = s_total
+                            updates["sewing_supply"] = s_supply
+                            updates["sewing_vat"] = s_vat
+                            updates["vat_included"] = s_vat_inc
+                        
+                        db.collection("inventory").document(sel_id).update(updates)
+                        st.success("봉제 완료 처리되었습니다.")
+                        st.rerun()
                             
                 with tab_act2:
                     with st.form("sewing_edit_form"):

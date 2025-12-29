@@ -106,6 +106,9 @@ with st.sidebar:
         if st.button("🏢 거래처관리", use_container_width=True):
             st.session_state["current_menu"] = "거래처관리"
             st.rerun()
+        if st.button("🏭 제직기관리", use_container_width=True):
+            st.session_state["current_menu"] = "제직기관리"
+            st.rerun()
         if st.button("📝 기초코드관리", use_container_width=True):
             st.session_state["current_menu"] = "기초코드관리"
             st.rerun()
@@ -1185,11 +1188,69 @@ elif menu == "거래처관리":
         else:
             st.info("등록된 거래처가 없습니다.")
 
+elif menu == "제직기관리":
+    st.header("🏭 제직기 관리")
+    
+    tab1, tab2 = st.tabs(["➕ 제직기 등록", "📋 제직기 목록"])
+    
+    with tab1:
+        st.subheader("제직기 등록 및 수정")
+        st.info("호기 번호가 같으면 기존 정보가 수정(덮어쓰기)됩니다.")
+        
+        with st.form("add_machine_form_new"):
+            c1, c2 = st.columns(2)
+            new_no = c1.number_input("호기 번호 (No.)", min_value=1, step=1, help="정렬 순서 및 고유 ID로 사용됩니다.")
+            new_name = c2.text_input("제직기 명칭", placeholder="예: 1호대")
+            c3, c4 = st.columns(2)
+            new_model = c3.text_input("모델명")
+            new_note = c4.text_input("특이사항/메모")
+            
+            if st.form_submit_button("저장"):
+                db.collection("machines").document(str(new_no)).set({
+                    "machine_no": new_no,
+                    "name": new_name,
+                    "model": new_model,
+                    "note": new_note
+                })
+                st.success("저장되었습니다.")
+                st.rerun()
+
+    with tab2:
+        st.subheader("제직기 목록")
+        machines_ref = db.collection("machines").order_by("machine_no")
+        m_docs = list(machines_ref.stream())
+        m_list = [d.to_dict() for d in m_docs]
+        
+        if not m_list:
+            st.warning("등록된 제직기가 없습니다.")
+            if st.button("기본 제직기(1~9호대) 자동 생성"):
+                for i in range(1, 10):
+                    db.collection("machines").document(str(i)).set({
+                        "machine_no": i,
+                        "name": f"{i}호대",
+                        "model": "",
+                        "note": ""
+                    })
+                st.success("기본 제직기가 생성되었습니다.")
+                st.rerun()
+        else:
+            st.dataframe(pd.DataFrame(m_list), use_container_width=True, hide_index=True)
+            
+            st.divider()
+            st.subheader("🗑️ 제직기 삭제")
+            del_targets = st.multiselect("삭제할 제직기를 선택하세요", [f"{m['machine_no']}:{m['name']}" for m in m_list])
+            if st.button("선택한 제직기 삭제"):
+                for target in del_targets:
+                    del_id = target.split(":")[0]
+                    db.collection("machines").document(del_id).delete()
+                st.success("삭제되었습니다.")
+                st.rerun()
+
 elif menu == "기초코드관리":
     st.header("⚙️ 기초 코드 관리")
     st.info("콤보박스에 표시될 항목들을 관리합니다.")
     
-    code_tabs = st.tabs(["제직 타입", "거래처 구분", "🏭 제직기 관리"])
+    code_tabs = st.tabs(["제직 타입", "거래처 구분"])
     
     # 코드 관리용 함수
     def manage_code(code_key, default_list, label):
@@ -1214,59 +1275,6 @@ elif menu == "기초코드관리":
 
     with code_tabs[0]: manage_code("weaving_types", ["30수 연사", "40수 코마사", "무지", "자카드", "기타"], "제직 타입")
     with code_tabs[1]: manage_code("partner_types", ["발주처", "염색업체", "봉제업체", "배송업체", "기타"], "거래처 구분")
-    
-    with code_tabs[2]:
-        st.subheader("제직기 설정")
-        st.caption("제직현황에 표시될 제직기 목록을 관리합니다.")
-        
-        # 목록 조회
-        machines_ref = db.collection("machines").order_by("machine_no")
-        m_docs = list(machines_ref.stream())
-        m_list = [d.to_dict() for d in m_docs]
-        
-        if not m_list:
-            st.warning("등록된 제직기가 없습니다.")
-            if st.button("기본 제직기(1~9호대) 자동 생성"):
-                for i in range(1, 10):
-                    db.collection("machines").document(str(i)).set({
-                        "machine_no": i,
-                        "name": f"{i}호대",
-                        "model": "",
-                        "note": ""
-                    })
-                st.success("기본 제직기가 생성되었습니다.")
-                st.rerun()
-        else:
-            st.dataframe(pd.DataFrame(m_list), use_container_width=True, hide_index=True)
-            
-        st.divider()
-        st.write("➕ 제직기 추가 / 수정")
-        with st.form("add_machine_form"):
-            c1, c2 = st.columns(2)
-            new_no = c1.number_input("호기 번호 (No.)", min_value=1, step=1, help="정렬 순서 및 고유 ID로 사용됩니다.")
-            new_name = c2.text_input("제직기 명칭", placeholder="예: 1호대")
-            c3, c4 = st.columns(2)
-            new_model = c3.text_input("모델명")
-            new_note = c4.text_input("특이사항/메모")
-            
-            if st.form_submit_button("저장"):
-                db.collection("machines").document(str(new_no)).set({
-                    "machine_no": new_no,
-                    "name": new_name,
-                    "model": new_model,
-                    "note": new_note
-                })
-                st.success("저장되었습니다.")
-                st.rerun()
-        
-        if m_list:
-            st.write("🗑️ 제직기 삭제")
-            del_target = st.selectbox("삭제할 제직기 선택", [f"{m['machine_no']}:{m['name']}" for m in m_list])
-            if st.button("삭제"):
-                del_id = del_target.split(":")[0]
-                db.collection("machines").document(del_id).delete()
-                st.success("삭제되었습니다.")
-                st.rerun()
 
 else:
     st.header(f"🏗️ {menu}")

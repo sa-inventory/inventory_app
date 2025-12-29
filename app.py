@@ -884,7 +884,7 @@ elif menu == "제직현황":
                 c1, c2, c3 = st.columns(3)
                 log_date = c1.date_input("작업일자", datetime.date.today())
                 shift = c2.radio("근무조", ["주간", "야간"], horizontal=True)
-                author = c3.text_input("작성자")
+                author = c3.text_input("작성자", value=st.session_state.get("role", ""))
 
                 c1, c2 = st.columns(2)
                 # 제직기 목록 가져오기
@@ -929,7 +929,9 @@ elif menu == "제직현황":
         view_date = c1.date_input("조회할 날짜", datetime.date.today(), key="worklog_view_date")
         
         # 데이터 가져오기
-        log_docs = list(db.collection("shift_logs").where("log_date", "==", str(view_date)).order_by("log_time").stream())
+        # Firestore 복합 인덱스 오류 방지를 위해 order_by 제거 후 Python에서 정렬
+        log_docs = list(db.collection("shift_logs").where("log_date", "==", str(view_date)).stream())
+        log_docs.sort(key=lambda x: x.to_dict().get('log_time', datetime.datetime.min))
         notes_doc = db.collection("handover_notes").document(str(view_date)).get()
         
         day_logs = []
@@ -1009,9 +1011,22 @@ elif menu == "제직현황":
             df_display = df[final_cols].rename(columns=col_map)
             st.markdown(f"### 📄 {prod_date} 생산일지")
             st.dataframe(df_display, hide_index=True, use_container_width=True)
+            
+            # 엑셀 다운로드 준비
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                df_display.to_excel(writer, index=False)
+                
             print_html = f"<html><head><title>{prod_date} 생산일지</title><style>body {{ font-family: sans-serif; }} table {{ width: 100%; border-collapse: collapse; }} th, td {{ border: 1px solid #ddd; padding: 8px; text-align: center; }} th {{ background-color: #f2f2f2; }} h2 {{ text-align: center; }}</style></head><body><h2>{prod_date} 생산일지</h2>{df_display.to_html(index=False)}</body></html>"
             with c2:
-                st.download_button(label="🖨️ 생산일지 인쇄 (HTML)", data=print_html, file_name=f"생산일지_{prod_date}.html", mime="text/html")
+                c2_1, c2_2 = st.columns(2)
+                c2_1.download_button(label="🖨️ 인쇄 (HTML)", data=print_html, file_name=f"생산일지_{prod_date}.html", mime="text/html")
+                c2_2.download_button(
+                    label="💾 엑셀 다운로드",
+                    data=buffer.getvalue(),
+                    file_name=f"생산일지_{prod_date}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
         else:
             st.info(f"{prod_date}에 완료된 생산 내역이 없습니다.")
 
@@ -1040,6 +1055,8 @@ elif menu == "염색현황":
                     
                     status_color = "red" if item['status'] == "염색중" else "orange"
                     c1.markdown(f"**[{item['status']}]** :{status_color}[{item.get('order_no', '-')}]")
+                    if item.get('roll_no'):
+                        c1.caption(f"Roll No: {item.get('roll_no')}")
                     c1.write(f"📅 {item['date'].strftime('%Y-%m-%d')}")
                     
                     c2.write(f"**{item['customer']}**")

@@ -1409,7 +1409,6 @@ elif menu == "거래처관리":
     partner_types = get_common_codes("partner_types", ["발주처", "염색업체", "봉제업체", "배송업체", "기타"])
 
     with tab1:
-        with st.form("partner_form"):
         with st.form("partner_form", clear_on_submit=True):
             c1, c2 = st.columns(2)
             p_type = c1.selectbox("거래처 구분", partner_types)

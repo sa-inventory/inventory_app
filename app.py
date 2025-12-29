@@ -987,7 +987,18 @@ elif menu == "제직현황":
         html_content += "</body></html>"
         
         with c2:
-            st.download_button("🖨️ 작업일지 인쇄 (HTML)", data=html_content, file_name=f"작업일지_{view_date}.html", mime="text/html")
+            if st.button("🖨️ 작업일지 인쇄 미리보기"):
+                print_view = html_content.replace("</body>", """
+                    <div class="no-print" style="text-align:center; margin-top:20px; margin-bottom:20px;">
+                        <button onclick="window.print()" style="padding:10px 20px; font-size:16px; cursor:pointer; background-color:#4CAF50; color:white; border:none; border-radius:4px;">🖨️ 인쇄하기</button>
+                    </div>
+                    <style>
+                        @media print { .no-print { display: none; } }
+                        body { margin: 0; padding: 20px; }
+                    </style>
+                    </body>
+                """)
+                st.components.v1.html(print_view, height=800, scrolling=True)
 
     # --- 5. 생산일지 탭 ---
     with tab_prodlog:
@@ -1028,7 +1039,20 @@ elif menu == "제직현황":
             print_html = f"<html><head><title>{prod_date} 생산일지</title><style>body {{ font-family: sans-serif; }} table {{ width: 100%; border-collapse: collapse; }} th, td {{ border: 1px solid #ddd; padding: 8px; text-align: center; }} th {{ background-color: #f2f2f2; }} h2 {{ text-align: center; }}</style></head><body><h2>{prod_date} 생산일지</h2>{df_display.to_html(index=False)}</body></html>"
             with c2:
                 c2_1, c2_2 = st.columns(2)
-                c2_1.download_button(label="🖨️ 인쇄 (HTML)", data=print_html, file_name=f"생산일지_{prod_date}.html", mime="text/html")
+                
+                if c2_1.button("🖨️ 인쇄 미리보기"):
+                    print_view = print_html.replace("</body>", """
+                        <div class="no-print" style="text-align:center; margin-top:20px; margin-bottom:20px;">
+                            <button onclick="window.print()" style="padding:10px 20px; font-size:16px; cursor:pointer; background-color:#4CAF50; color:white; border:none; border-radius:4px;">🖨️ 인쇄하기</button>
+                        </div>
+                        <style>
+                            @media print { .no-print { display: none; } }
+                            body { margin: 0; padding: 20px; }
+                        </style>
+                        </body>
+                    """)
+                    st.components.v1.html(print_view, height=800, scrolling=True)
+
                 c2_2.download_button(
                     label="💾 엑셀 다운로드",
                     data=buffer.getvalue(),

@@ -1450,60 +1450,231 @@ elif menu == "봉제현황":
     st.header("🪡 봉제 현황")
     st.info("염색이 완료된 원단을 봉제하여 완제품으로 만듭니다.")
     
-    tab1, tab2 = st.tabs(["🏭 봉제 작업 관리", "📋 봉제 내역 조회"])
+    tab_sew_wait, tab_sew_ing, tab_sew_done = st.tabs(["📋 봉제 대기 목록", "🪡 봉제중 목록", "✅ 봉제 완료 목록"])
     
-    with tab1:
-        # '염색완료' (봉제대기) 또는 '봉제', '봉제중' 상태
-        docs = db.collection("inventory").where("status", "in", ["염색완료", "봉제", "봉제중"]).stream()
+    sewing_partners = get_partners("봉제업체")
+    
+    # --- 1. 봉제 대기 탭 ---
+    with tab_sew_wait:
+        st.subheader("봉제 대기 목록 (염색완료)")
+        docs = db.collection("inventory").where("status", "==", "염색완료").stream()
         rows = []
         for doc in docs:
             d = doc.to_dict()
             d['id'] = doc.id
             rows.append(d)
+        
+        # 날짜순 정렬
         rows.sort(key=lambda x: x.get('date', datetime.datetime.max))
         
         if rows:
-            for item in rows:
-                with st.container():
-                    c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 1, 2])
-                    status_color = "red" if item['status'] == "봉제중" else "orange"
-                    c1.markdown(f"**[{item['status']}]** :{status_color}[{item.get('order_no', '-')}]")
-                    c1.write(f"📅 {item.get('date', datetime.date.today()).strftime('%Y-%m-%d')}")
-                    
-                    c2.write(f"**{item.get('customer')}**")
-                    c2.write(f"{item.get('name')}")
-                    
-                    c3.write(f"{item.get('color')} / {item.get('stock')}장")
-                    
-                    with c4.expander("🖨️ 지시서"):
-                        st.markdown(f"""
-                        <div style="border:1px solid #000; padding:10px; font-size:12px;">
-                            <h3 style="text-align:center; margin:0;">봉 제 지 시 서</h3>
-                            <hr>
-                            <p><strong>발주번호:</strong> {item.get('order_no')}</p>
-                            <p><strong>제 품 명:</strong> {item['name']}</p>
-                            <p><strong>색상/수량:</strong> {item['color']} / {item['stock']}장</p>
-                            <p><strong>특이사항:</strong> {item.get('note', '-')}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        
-                    if item['status'] in ["염색완료", "봉제"]:
-                        if c5.button("봉제 시작 ➡️", key=f"sew_start_{item['id']}"):
-                            db.collection("inventory").document(item['id']).update({"status": "봉제중"})
-                            st.rerun()
-                    elif item['status'] == "봉제중":
-                        if c5.button("봉제 완료 (출고대기) ➡️", key=f"sew_end_{item['id']}"):
-                            db.collection("inventory").document(item['id']).update({
-                                "status": "출고대기",
-                                "sewing_end_time": datetime.datetime.now()
-                            })
-                            st.rerun()
-                    st.divider()
-        else:
-            st.info("봉제 대기 중이거나 작업 중인 건이 없습니다.")
+            df = pd.DataFrame(rows)
+            if 'date' in df.columns:
+                df['date'] = df['date'].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isnull(x) and hasattr(x, 'strftime') else x)
             
-    with tab2:
-        st.write("봉제 내역 조회 (추후 구현)")
+            col_map = {
+                "order_no": "발주번호", "customer": "발주처", "name": "제품명", 
+                "color": "색상", "stock": "수량(장)", "dyeing_partner": "염색처", "date": "접수일"
+            }
+            display_cols = ["order_no", "customer", "name", "color", "stock", "dyeing_partner", "date"]
+            final_cols = [c for c in display_cols if c in df.columns]
+            
+            st.write("🔽 봉제 작업할 항목을 선택하세요.")
+            selection = st.dataframe(df[final_cols].rename(columns=col_map), use_container_width=True, on_select="rerun", selection_mode="single-row", key="df_sew_wait")
+            
+            if selection.selection.rows:
+                idx = selection.selection.rows[0]
+                sel_row = df.iloc[idx]
+                sel_id = sel_row['id']
+                current_stock = int(sel_row.get('stock', 0))
+                
+                st.divider()
+                st.markdown(f"### 🧵 봉제 작업 시작: **{sel_row['name']}**")
+                
+                with st.form("sewing_start_form"):
+                    c1, c2 = st.columns(2)
+                    s_date = c1.date_input("봉제시작일", datetime.date.today())
+                    s_type = c2.radio("작업 구분", ["자체봉제", "외주봉제"], horizontal=True)
+                    
+                    c3, c4 = st.columns(2)
+                    s_partner = c3.selectbox("봉제업체", sewing_partners if sewing_partners else ["직접입력"], disabled=(s_type=="자체봉제"))
+                    s_qty = c4.number_input("작업 수량(장)", min_value=1, max_value=current_stock, value=current_stock, step=10, help="일부 수량만 작업하려면 숫자를 줄이세요.")
+                    
+                    if st.form_submit_button("봉제 시작"):
+                        # 수량 분할 로직
+                        if s_qty < current_stock:
+                            # 1. 분할된 새 문서 생성 (작업분)
+                            doc_snapshot = db.collection("inventory").document(sel_id).get()
+                            new_doc_data = doc_snapshot.to_dict().copy()
+                            new_doc_data['stock'] = s_qty
+                            new_doc_data['status'] = "봉제중"
+                            new_doc_data['sewing_type'] = s_type
+                            new_doc_data['sewing_start_date'] = str(s_date)
+                            if s_type == "외주봉제":
+                                new_doc_data['sewing_partner'] = s_partner
+                            else:
+                                new_doc_data['sewing_partner'] = "자체"
+                            
+                            db.collection("inventory").add(new_doc_data)
+                            
+                            # 2. 원본 문서 업데이트 (잔여분)
+                            db.collection("inventory").document(sel_id).update({
+                                "stock": current_stock - s_qty
+                            })
+                            st.success(f"{s_qty}장 분할하여 봉제 작업을 시작합니다. (잔여: {current_stock - s_qty}장)")
+                        else:
+                            # 전체 작업
+                            updates = {
+                                "status": "봉제중",
+                                "sewing_type": s_type,
+                                "sewing_start_date": str(s_date)
+                            }
+                            if s_type == "외주봉제":
+                                updates['sewing_partner'] = s_partner
+                            else:
+                                updates['sewing_partner'] = "자체"
+                                
+                            db.collection("inventory").document(sel_id).update(updates)
+                            st.success("봉제 작업을 시작합니다.")
+                        
+                        st.rerun()
+        else:
+            st.info("봉제 대기 중인 건이 없습니다.")
+            
+    # --- 2. 봉제중 탭 ---
+    with tab_sew_ing:
+        st.subheader("봉제중 목록")
+        docs = db.collection("inventory").where("status", "==", "봉제중").stream()
+        rows = []
+        for doc in docs:
+            d = doc.to_dict()
+            d['id'] = doc.id
+            rows.append(d)
+            
+        if rows:
+            df = pd.DataFrame(rows)
+            col_map = {
+                "order_no": "발주번호", "sewing_partner": "봉제처", "sewing_type": "구분",
+                "name": "제품명", "color": "색상", "stock": "수량", "sewing_start_date": "시작일"
+            }
+            display_cols = ["sewing_start_date", "sewing_type", "sewing_partner", "order_no", "name", "color", "stock"]
+            final_cols = [c for c in display_cols if c in df.columns]
+            
+            st.write("🔽 완료 처리할 항목을 선택하세요.")
+            selection = st.dataframe(df[final_cols].rename(columns=col_map), use_container_width=True, on_select="rerun", selection_mode="single-row", key="df_sew_ing")
+            
+            if selection.selection.rows:
+                idx = selection.selection.rows[0]
+                sel_row = df.iloc[idx]
+                sel_id = sel_row['id']
+                
+                st.divider()
+                st.markdown(f"### ✅ 봉제 완료 처리: **{sel_row['name']}**")
+                
+                with st.form("sewing_complete_form"):
+                    c1, c2 = st.columns(2)
+                    s_end_date = c1.date_input("봉제완료일", datetime.date.today())
+                    s_real_stock = c2.number_input("완료수량(장)", value=int(sel_row.get('stock', 0)), step=10)
+                    
+                    # 외주봉제일 경우 단가/금액 입력
+                    s_price = 0
+                    s_amount = 0
+                    if sel_row.get('sewing_type') == "외주봉제":
+                        st.markdown("#### 💰 외주 가공비 정산")
+                        c3, c4 = st.columns(2)
+                        s_price = c3.number_input("봉제단가(원)", min_value=0, step=1)
+                        s_amount = int(s_real_stock * s_price)
+                        st.info(f"**봉제금액 합계**: {s_amount:,}원")
+                    
+                    if st.form_submit_button("봉제 완료 (출고대기로 이동)"):
+                        updates = {
+                            "status": "봉제완료",
+                            "sewing_end_date": str(s_end_date),
+                            "stock": s_real_stock
+                        }
+                        if sel_row.get('sewing_type') == "외주봉제":
+                            updates["sewing_unit_price"] = s_price
+                            updates["sewing_amount"] = s_amount
+                        
+                        db.collection("inventory").document(sel_id).update(updates)
+                        st.success("봉제 완료 처리되었습니다.")
+                        st.rerun()
+        else:
+            st.info("현재 봉제 중인 작업이 없습니다.")
+
+    # --- 3. 봉제 완료 탭 ---
+    with tab_sew_done:
+        st.subheader("봉제 완료 목록")
+        
+        # 검색 및 엑셀 다운로드
+        with st.form("search_sew_done"):
+            c1, c2 = st.columns([2, 1])
+            today = datetime.date.today()
+            s_date = c1.date_input("조회 기간 (완료일)", [today - datetime.timedelta(days=30), today])
+            s_partner = c2.text_input("봉제업체 검색")
+            st.form_submit_button("🔍 조회")
+            
+        # 날짜 범위 계산
+        if len(s_date) == 2:
+            start_dt = datetime.datetime.combine(s_date[0], datetime.time.min)
+            end_dt = datetime.datetime.combine(s_date[1], datetime.time.max)
+        else:
+            start_dt = datetime.datetime.combine(s_date[0], datetime.time.min)
+            end_dt = datetime.datetime.combine(s_date[0], datetime.time.max)
+            
+        docs = db.collection("inventory").where("status", "==", "봉제완료").stream()
+        rows = []
+        for doc in docs:
+            d = doc.to_dict()
+            
+            # 날짜 필터
+            s_end = d.get('sewing_end_date')
+            if s_end:
+                try:
+                    s_end_obj = datetime.datetime.strptime(s_end, "%Y-%m-%d")
+                    if not (start_dt <= s_end_obj <= end_dt): continue
+                except: continue
+            else: continue
+            
+            # 업체 필터
+            if s_partner and s_partner not in d.get('sewing_partner', ''):
+                continue
+                
+            rows.append(d)
+            
+        rows.sort(key=lambda x: x.get('sewing_end_date', ''), reverse=True)
+        
+        if rows:
+            df = pd.DataFrame(rows)
+            
+            # 금액 합계 (외주봉제만)
+            total_amount = df['sewing_amount'].sum() if 'sewing_amount' in df.columns else 0
+            st.markdown(f"### 💵 외주봉제 총 금액: **{total_amount:,}원**")
+            
+            col_map = {
+                "order_no": "발주번호", "sewing_partner": "봉제처", "sewing_end_date": "완료일",
+                "name": "제품명", "color": "색상", "stock": "수량", "sewing_type": "구분",
+                "sewing_unit_price": "단가", "sewing_amount": "금액"
+            }
+            display_cols = ["sewing_end_date", "sewing_type", "sewing_partner", "order_no", "name", "color", "stock", "sewing_unit_price", "sewing_amount"]
+            final_cols = [c for c in display_cols if c in df.columns]
+            
+            df_display = df[final_cols].rename(columns=col_map)
+            st.dataframe(df_display, use_container_width=True, hide_index=True)
+            
+            # 엑셀 다운로드
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                df_display.to_excel(writer, index=False)
+                
+            st.download_button(
+                label="💾 엑셀 다운로드",
+                data=buffer.getvalue(),
+                file_name=f"봉제완료내역_{today}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        else:
+            st.info("조회된 봉제 완료 내역이 없습니다.")
 
 elif menu == "출고현황":
     st.header("🚚 출고 현황")
@@ -1512,8 +1683,8 @@ elif menu == "출고현황":
     tab1, tab2 = st.tabs(["🚀 출고 대기 관리", "📋 출고 완료 내역 (명세서)"])
     
     with tab1:
-        # '출고대기' 상태
-        docs = db.collection("inventory").where("status", "==", "출고대기").stream()
+        # '봉제완료' (출고대기) 상태
+        docs = db.collection("inventory").where("status", "==", "봉제완료").stream()
         rows = []
         for doc in docs:
             d = doc.to_dict()

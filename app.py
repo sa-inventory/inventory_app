@@ -606,6 +606,12 @@ elif menu == "제직현황":
     # --- 2. 제직중 탭 ---
     with tab_weaving:
         st.subheader("제직중 목록")
+        
+        # [추가] 작업 결과 피드백 메시지 표시 (저장 후 리런되어도 메시지 유지)
+        if st.session_state.get("weaving_msg"):
+            st.success(st.session_state["weaving_msg"])
+            st.session_state["weaving_msg"] = None
+            
         docs = db.collection("inventory").where("status", "==", "제직중").stream()
         rows = []
         for doc in docs:
@@ -642,7 +648,12 @@ elif menu == "제직현황":
                 next_roll_no = cur_completed + 1
                 
                 st.divider()
-                st.markdown(f"### ✅ 제직 완료 처리: **{sel_row['name']}** ({next_roll_no} / {total_rolls} 롤)")
+                st.markdown(f"### ✅ 제직 완료 처리: **{sel_row['name']}**")
+                
+                if total_rolls > 1:
+                    st.info(f"📢 현재 **{total_rolls}롤 중 {next_roll_no}번째 롤** 작업 중입니다.")
+                else:
+                    st.info("📢 **단일 롤(1/1)** 작업 중입니다.")
                 
                 with st.form("weaving_complete_form"):
                     st.write("생산 실적을 입력하세요.")
@@ -700,13 +711,14 @@ elif menu == "제직현황":
                         # 마지막 롤이면 부모 문서는 '제직완료(Master)' 상태로 변경하여 목록에서 숨김
                         if next_roll_no >= total_rolls:
                             updates["status"] = "제직완료(Master)"
-                            msg = f"마지막 롤({next_roll_no}/{total_rolls}) 처리가 완료되었습니다."
+                            msg = f"🎉 마지막 롤({next_roll_no}/{total_rolls})까지 처리가 완료되었습니다!"
                         else:
-                            msg = f"{next_roll_no}번 롤 처리가 완료되었습니다. ({next_roll_no}/{total_rolls})"
+                            msg = f"✅ {next_roll_no}번 롤 처리가 완료되었습니다. 이어서 {next_roll_no + 1}번 롤을 입력해주세요."
                         
                         db.collection("inventory").document(sel_id).update(updates)
                         
-                        st.success(msg)
+                        # 메시지를 세션에 저장하여 리런 후에도 보이게 함
+                        st.session_state["weaving_msg"] = msg
                         st.rerun()
                 
                 if st.button("🚫 제직 취소 (대기로 되돌리기)", key="cancel_weaving"):

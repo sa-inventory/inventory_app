@@ -999,8 +999,16 @@ elif menu == "제직현황":
         start_dt = datetime.datetime.combine(prod_date, datetime.time.min)
         end_dt = datetime.datetime.combine(prod_date, datetime.time.max)
         
-        docs = db.collection("inventory").where("status", "==", "제직완료").where("weaving_end_time", ">=", start_dt).where("weaving_end_time", "<=", end_dt).stream()
-        rows = [d.to_dict() for d in docs]
+        # Firestore 인덱스 오류 방지를 위해 status만 쿼리하고 날짜는 파이썬에서 필터링
+        docs = db.collection("inventory").where("status", "==", "제직완료").stream()
+        rows = []
+        for doc in docs:
+            d = doc.to_dict()
+            w_end = d.get('weaving_end_time')
+            if w_end:
+                if w_end.tzinfo: w_end = w_end.replace(tzinfo=None)
+                if start_dt <= w_end <= end_dt:
+                    rows.append(d)
         
         if rows:
             df = pd.DataFrame(rows)

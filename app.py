@@ -558,6 +558,7 @@ elif menu == "제직현황":
             final_cols = [c for c in display_cols if c in df.columns]
             
             st.write("🔽 제직기를 배정할 항목을 선택하세요.")
+            # key="df_waiting" 추가로 사이드바 먹통 현상 해결
             selection = st.dataframe(df[final_cols].rename(columns=col_map), use_container_width=True, on_select="rerun", selection_mode="single-row", key="df_waiting")
             
             if selection.selection.rows:
@@ -624,6 +625,7 @@ elif menu == "제직현황":
             final_cols = [c for c in display_cols if c in df.columns]
             
             st.write("🔽 완료 처리할 항목을 선택하세요.")
+            # key="df_weaving" 추가
             selection = st.dataframe(df[final_cols].rename(columns=col_map), use_container_width=True, on_select="rerun", selection_mode="single-row", key="df_weaving")
             
             if selection.selection.rows:
@@ -640,13 +642,20 @@ elif menu == "제직현황":
                     end_date = c1.date_input("제직완료일", datetime.date.today())
                     end_time = c2.time_input("완료시간", datetime.datetime.now().time())
                     
+                    # 기본값 계산 (정수형 변환)
+                    base_weight = int(sel_row.get('weight', 0))
+                    base_stock = int(sel_row.get('stock', 0))
+                    def_prod_kg = int((base_weight * base_stock) / 1000) # kg 계산
+                    def_avg_weight = base_weight
+
                     c3, c4 = st.columns(2)
-                    real_weight = c3.number_input("중량(g)", value=int(sel_row.get('weight', 0)), step=10)
-                    real_stock = c4.number_input("생산매수(장)", value=int(sel_row.get('stock', 0)), step=10)
+                    # step=1, format="%d"로 소수점 제거 및 1단위 증감
+                    real_weight = c3.number_input("중량(g)", value=base_weight, step=1, format="%d")
+                    real_stock = c4.number_input("생산매수(장)", value=base_stock, step=1, format="%d")
                     
                     c5, c6 = st.columns(2)
-                    prod_weight_kg = c5.number_input("생산중량(kg)", min_value=0.0, step=0.1, format="%.1f")
-                    avg_weight = c6.number_input("평균중량(g)", min_value=0.0, step=0.1, format="%.1f")
+                    prod_weight_kg = c5.number_input("생산중량(kg)", value=def_prod_kg, step=1, format="%d")
+                    avg_weight = c6.number_input("평균중량(g)", value=def_avg_weight, step=1, format="%d")
                     
                     if st.form_submit_button("제직 완료 저장"):
                         end_dt = datetime.datetime.combine(end_date, end_time)

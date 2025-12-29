@@ -358,6 +358,13 @@ elif menu == "발주현황":
                 p_show_date = po_c5.checkbox("출력일시 표시", value=True)
                 p_date_pos = po_c6.selectbox("일시 위치", ["Right", "Left", "Center"], index=0)
                 p_date_size = po_c7.number_input("일시 글자 크기(px)", value=12, step=1)
+                
+                st.caption("페이지 여백 (mm)")
+                po_c8, po_c9, po_c10, po_c11 = st.columns(4)
+                p_m_top = po_c8.number_input("상단", value=15, step=1)
+                p_m_bottom = po_c9.number_input("하단", value=15, step=1)
+                p_m_left = po_c10.number_input("좌측", value=15, step=1)
+                p_m_right = po_c11.number_input("우측", value=15, step=1)
 
             # 인쇄 버튼 (HTML 생성 후 새 창 열기 방식 흉내)
             if btn_c2.button("🖨️ 인쇄 페이지 열기"):
@@ -371,6 +378,8 @@ elif menu == "발주현황":
                         <title>{p_title}</title>
                         <style>
                             body {{ font-family: 'Malgun Gothic', sans-serif; padding: 20px; }}
+                            @page {{ margin: {p_m_top}mm {p_m_right}mm {p_m_bottom}mm {p_m_left}mm; }}
+                            body {{ font-family: 'Malgun Gothic', sans-serif; padding: 0; margin: 0; }}
                             h2 {{ text-align: center; margin-bottom: 5px; font-size: {p_title_size}px; }}
                             .info {{ text-align: {date_align}; font-size: {p_date_size}px; margin-bottom: 10px; color: #555; display: {date_display}; }}
                             table {{ width: 100%; border-collapse: collapse; font-size: {p_body_size}px; }}
@@ -986,6 +995,13 @@ elif menu == "제직현황":
             p_show_date = po_c5.checkbox("출력일시 표시", value=True, key="wl_sd")
             p_date_pos = po_c6.selectbox("일시 위치", ["Right", "Left", "Center"], index=0, key="wl_dp")
             p_date_size = po_c7.number_input("일시 글자 크기(px)", value=12, step=1, key="wl_ds")
+            
+            st.caption("페이지 여백 (mm)")
+            po_c8, po_c9, po_c10, po_c11 = st.columns(4)
+            p_m_top = po_c8.number_input("상단", value=15, step=1, key="wl_mt")
+            p_m_bottom = po_c9.number_input("하단", value=15, step=1, key="wl_mb")
+            p_m_left = po_c10.number_input("좌측", value=15, step=1, key="wl_ml")
+            p_m_right = po_c11.number_input("우측", value=15, step=1, key="wl_mr")
 
         # 화면 표시 & 인쇄용 HTML 생성
         print_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -994,6 +1010,8 @@ elif menu == "제직현황":
 
         style = f"""<style>
             body { font-family: 'Malgun Gothic', sans-serif; padding: 20px; }
+            @page {{ margin: {p_m_top}mm {p_m_right}mm {p_m_bottom}mm {p_m_left}mm; }}
+            body {{ font-family: 'Malgun Gothic', sans-serif; padding: 0; margin: 0; }}
             table {{ width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: {p_body_size}px; }}
             th, td {{ border: 1px solid #444; padding: {p_padding}px; text-align: left; }}
             th { background-color: #f0f0f0; text-align: center; font-weight: bold; }
@@ -1107,6 +1125,13 @@ elif menu == "제직현황":
                 p_show_date = po_c5.checkbox("출력일시 표시", value=True, key="pl_sd")
                 p_date_pos = po_c6.selectbox("일시 위치", ["Right", "Left", "Center"], index=0, key="pl_dp")
                 p_date_size = po_c7.number_input("일시 글자 크기(px)", value=12, step=1, key="pl_ds")
+                
+                st.caption("페이지 여백 (mm)")
+                po_c8, po_c9, po_c10, po_c11 = st.columns(4)
+                p_m_top = po_c8.number_input("상단", value=15, step=1, key="pl_mt")
+                p_m_bottom = po_c9.number_input("하단", value=15, step=1, key="pl_mb")
+                p_m_left = po_c10.number_input("좌측", value=15, step=1, key="pl_ml")
+                p_m_right = po_c11.number_input("우측", value=15, step=1, key="pl_mr")
 
             print_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
             date_align = p_date_pos.lower()
@@ -1115,6 +1140,8 @@ elif menu == "제직현황":
             print_html = f"""<html><head><title>{p_title}</title>
             <style>
                 body {{ font-family: 'Malgun Gothic', sans-serif; padding: 20px; }}
+                @page {{ margin: {p_m_top}mm {p_m_right}mm {p_m_bottom}mm {p_m_left}mm; }}
+                body {{ font-family: 'Malgun Gothic', sans-serif; padding: 0; margin: 0; }}
                 h2 {{ text-align: center; margin-bottom: 5px; font-size: {p_title_size}px; }}
                 .info {{ text-align: {date_align}; font-size: {p_date_size}px; margin-bottom: 10px; color: #555; display: {date_display}; }}
                 table {{ width: 100%; border-collapse: collapse; font-size: {p_body_size}px; }}

@@ -595,7 +595,8 @@ elif menu == "제직현황":
                                 "status": "제직중",
                                 "machine_no": int(sel_m_no),
                                 "weaving_start_time": start_dt,
-                                "weaving_roll_count": s_roll
+                                "weaving_roll_count": s_roll,
+                                "completed_rolls": 0
                             })
                             st.success(f"{sel_m_no}호대에서 제직을 시작합니다.")
                             st.rerun()
@@ -617,6 +618,8 @@ elif menu == "제직현황":
             if 'weaving_start_time' in df.columns:
                 df['weaving_start_time'] = df['weaving_start_time'].apply(lambda x: x.strftime('%Y-%m-%d %H:%M') if not pd.isnull(x) and hasattr(x, 'strftime') else x)
             
+            # 진행률 표시를 위해 컬럼 확보
+            if 'completed_rolls' not in df.columns: df['completed_rolls'] = 0
             col_map = {
                 "order_no": "발주번호", "machine_no": "제직기", "weaving_start_time": "시작시간",
                 "customer": "발주처", "name": "제품명", "stock": "수량", "weaving_roll_count": "롤수"
@@ -633,8 +636,13 @@ elif menu == "제직현황":
                 sel_row = df.iloc[idx]
                 sel_id = sel_row['id']
                 
+                # 현재 진행 상황 계산
+                cur_completed = int(sel_row.get('completed_rolls', 0)) if not pd.isna(sel_row.get('completed_rolls')) else 0
+                total_rolls = int(sel_row.get('weaving_roll_count', 1)) if not pd.isna(sel_row.get('weaving_roll_count')) else 1
+                next_roll_no = cur_completed + 1
+                
                 st.divider()
-                st.markdown(f"### ✅ 제직 완료 처리: **{sel_row['name']}**")
+                st.markdown(f"### ✅ 제직 완료 처리: **{sel_row['name']}** ({next_roll_no} / {total_rolls} 롤)")
                 
                 with st.form("weaving_complete_form"):
                     st.write("생산 실적을 입력하세요.")
@@ -643,15 +651,19 @@ elif menu == "제직현황":
                     end_time = c2.time_input("완료시간", datetime.datetime.now().time())
                     
                     # 기본값 계산 (정수형 변환)
-                    base_weight = int(sel_row.get('weight', 0))
-                    base_stock = int(sel_row.get('stock', 0))
-                    def_prod_kg = int((base_weight * base_stock) / 1000) # kg 계산
+                    base_weight = int(sel_row.get('weight', 0)) if not pd.isna(sel_row.get('weight')) else 0
+                    total_stock = int(sel_row.get('stock', 0)) if not pd.isna(sel_row.get('stock')) else 0
+                    
+                    # 이번 롤의 예상 생산량 (전체수량 / 롤수)
+                    def_roll_stock = int(total_stock / total_rolls) if total_rolls > 0 else total_stock
+                    
+                    def_prod_kg = int((base_weight * def_roll_stock) / 1000) # kg 계산
                     def_avg_weight = base_weight
 
                     c3, c4 = st.columns(2)
                     # step=1, format="%d"로 소수점 제거 및 1단위 증감
                     real_weight = c3.number_input("중량(g)", value=base_weight, step=1, format="%d")
-                    real_stock = c4.number_input("생산매수(장)", value=base_stock, step=1, format="%d")
+                    real_stock = c4.number_input("생산매수(장)", value=def_roll_stock, step=1, format="%d")
                     
                     c5, c6 = st.columns(2)
                     prod_weight_kg = c5.number_input("생산중량(kg)", value=def_prod_kg, step=1, format="%d")
@@ -659,15 +671,42 @@ elif menu == "제직현황":
                     
                     if st.form_submit_button("제직 완료 저장"):
                         end_dt = datetime.datetime.combine(end_date, end_time)
-                        db.collection("inventory").document(sel_id).update({
-                            "status": "제직완료",
-                            "weaving_end_time": end_dt,
-                            "real_weight": real_weight,
-                            "real_stock": real_stock,
-                            "prod_weight_kg": prod_weight_kg,
-                            "avg_weight": avg_weight
-                        })
-                        st.success("제직이 완료되었습니다.")
+                        
+                        # 1. 롤 데이터 생성 (새 문서)
+                        # 부모 문서의 데이터를 가져와서 복사
+                        parent_doc = db.collection("inventory").document(sel_id).get().to_dict()
+                        new_roll_doc = parent_doc.copy()
+                        
+                        new_roll_doc['status'] = "제직완료"
+                        new_roll_doc['order_no'] = f"{parent_doc.get('order_no')}-{next_roll_no}" # 예: 2405001-1
+                        new_roll_doc['parent_id'] = sel_id
+                        new_roll_doc['roll_no'] = next_roll_no
+                        new_roll_doc['weaving_end_time'] = end_dt
+                        new_roll_doc['real_weight'] = real_weight
+                        new_roll_doc['real_stock'] = real_stock
+                        new_roll_doc['stock'] = real_stock # 중요: 이후 공정은 이 롤의 수량을 기준으로 함
+                        new_roll_doc['prod_weight_kg'] = prod_weight_kg
+                        new_roll_doc['avg_weight'] = avg_weight
+                        
+                        # 불필요한 필드 제거
+                        if 'completed_rolls' in new_roll_doc: del new_roll_doc['completed_rolls']
+                        if 'weaving_roll_count' in new_roll_doc: del new_roll_doc['weaving_roll_count']
+                        
+                        db.collection("inventory").add(new_roll_doc)
+                        
+                        # 2. 부모 문서 업데이트 (진행률 표시)
+                        updates = {"completed_rolls": next_roll_no}
+                        
+                        # 마지막 롤이면 부모 문서는 '제직완료(Master)' 상태로 변경하여 목록에서 숨김
+                        if next_roll_no >= total_rolls:
+                            updates["status"] = "제직완료(Master)"
+                            msg = f"마지막 롤({next_roll_no}/{total_rolls}) 처리가 완료되었습니다."
+                        else:
+                            msg = f"{next_roll_no}번 롤 처리가 완료되었습니다. ({next_roll_no}/{total_rolls})"
+                        
+                        db.collection("inventory").document(sel_id).update(updates)
+                        
+                        st.success(msg)
                         st.rerun()
                 
                 if st.button("🚫 제직 취소 (대기로 되돌리기)", key="cancel_weaving"):

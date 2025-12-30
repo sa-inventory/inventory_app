@@ -812,7 +812,10 @@ elif menu == "제직현황":
             start_dt = datetime.datetime.combine(s_date[0], datetime.time.min)
             end_dt = datetime.datetime.combine(s_date[0], datetime.time.max)
 
-        docs = db.collection("inventory").where("status", "==", "제직완료").stream()
+        # [수정] 다음 공정으로 넘어간 내역도 조회되도록 상태 조건 확대
+        # 제직완료 이후의 모든 상태 포함
+        target_statuses = ["제직완료", "제직완료(Master)", "염색중", "염색완료", "봉제중", "봉제완료", "출고완료"]
+        docs = db.collection("inventory").where("status", "in", target_statuses).stream()
         rows = []
         for doc in docs:
             d = doc.to_dict()
@@ -963,8 +966,22 @@ elif menu == "제직현황":
         st.divider()
         st.subheader("일지 조회 및 출력")
         
+        # [수정] 데이터가 있는 날짜 목록 가져오기
+        available_dates = set()
+        # 1. 작업일지 데이터 날짜
+        logs_ref = db.collection("shift_logs").stream()
+        for doc in logs_ref:
+            if doc.to_dict().get('log_date'):
+                available_dates.add(doc.to_dict().get('log_date'))
+        # 2. 전달사항 데이터 날짜 (문서 ID가 날짜)
+        notes_ref = db.collection("handover_notes").stream()
+        for doc in notes_ref:
+            available_dates.add(doc.id)
+            
+        sorted_dates = sorted(list(available_dates), reverse=True)
+        
         c1, c2 = st.columns([1, 3])
-        view_date = c1.date_input("조회할 날짜", datetime.date.today(), key="worklog_view_date")
+        view_date = c1.selectbox("조회할 날짜 선택", sorted_dates if sorted_dates else [str(datetime.date.today())], key="worklog_view_date")
         
         # 데이터 가져오기
         # Firestore 복합 인덱스 오류 방지를 위해 order_by 제거 후 Python에서 정렬
@@ -1080,14 +1097,31 @@ elif menu == "제직현황":
     with tab_prodlog:
         st.subheader("일일 생산일지 조회")
         
+        # [수정] 생산 실적이 있는 날짜 목록 가져오기
+        # 제직완료 이상 상태인 건들의 weaving_end_time 확인
+        target_statuses = ["제직완료", "제직완료(Master)", "염색중", "염색완료", "봉제중", "봉제완료", "출고완료"]
+        inv_ref = db.collection("inventory").where("status", "in", target_statuses).stream()
+        prod_dates = set()
+        for doc in inv_ref:
+            d = doc.to_dict()
+            w_end = d.get('weaving_end_time')
+            if w_end:
+                if isinstance(w_end, datetime.datetime):
+                    prod_dates.add(w_end.strftime("%Y-%m-%d"))
+                elif isinstance(w_end, str):
+                    prod_dates.add(w_end[:10])
+        
+        sorted_prod_dates = sorted(list(prod_dates), reverse=True)
+        
         c1, c2 = st.columns([1, 3])
-        prod_date = c1.date_input("조회일자", datetime.date.today(), key="prodlog_view_date")
+        prod_date_str = c1.selectbox("조회일자 선택", sorted_prod_dates if sorted_prod_dates else [str(datetime.date.today())], key="prodlog_view_date")
+        prod_date = datetime.datetime.strptime(prod_date_str, "%Y-%m-%d").date()
         
         start_dt = datetime.datetime.combine(prod_date, datetime.time.min)
         end_dt = datetime.datetime.combine(prod_date, datetime.time.max)
         
         # Firestore 인덱스 오류 방지를 위해 status만 쿼리하고 날짜는 파이썬에서 필터링
-        docs = db.collection("inventory").where("status", "==", "제직완료").stream()
+        docs = db.collection("inventory").where("status", "in", target_statuses).stream()
         rows = []
         for doc in docs:
             d = doc.to_dict()
@@ -1371,7 +1405,9 @@ elif menu == "염색현황":
             start_dt = datetime.datetime.combine(s_date[0], datetime.time.min)
             end_dt = datetime.datetime.combine(s_date[0], datetime.time.max)
 
-        docs = db.collection("inventory").where("status", "==", "염색완료").stream()
+        # [수정] 다음 공정으로 넘어간 내역도 조회되도록 상태 조건 확대
+        target_statuses = ["염색완료", "봉제중", "봉제완료", "출고완료"]
+        docs = db.collection("inventory").where("status", "in", target_statuses).stream()
         rows = []
         for doc in docs:
             d = doc.to_dict()
@@ -1684,7 +1720,9 @@ elif menu == "봉제현황":
             start_dt = datetime.datetime.combine(s_date[0], datetime.time.min)
             end_dt = datetime.datetime.combine(s_date[0], datetime.time.max)
             
-        docs = db.collection("inventory").where("status", "==", "봉제완료").stream()
+        # [수정] 다음 공정으로 넘어간 내역도 조회되도록 상태 조건 확대
+        target_statuses = ["봉제완료", "출고완료"]
+        docs = db.collection("inventory").where("status", "in", target_statuses).stream()
         rows = []
         for doc in docs:
             d = doc.to_dict()
@@ -2125,6 +2163,50 @@ elif menu == "제직기관리":
 elif menu == "기초코드관리":
     st.header("⚙️ 기초 코드 관리")
     st.info("콤보박스에 표시될 항목들을 관리합니다.")
+    
+    code_tabs = st.tabs(["제직 타입", "거래처 구분"])
+    
+    # 코드 관리용 함수
+    def manage_code(code_key, default_list, label):
+        current_list = get_common_codes(code_key, default_list)
+        
+        # 목록 표시 (데이터프레임 사용)
+        st.markdown(f"##### 📋 현재 등록된 {label}")
+        if current_list:
+            df = pd.DataFrame(current_list, columns=["명칭"])
+            st.dataframe(df, use_container_width=True, hide_index=True)
+        else:
+            st.info("등록된 항목이 없습니다.")
+        
+        st.divider()
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            st.write(f"**➕ {label} 추가**")
+            new_val = st.text_input(f"추가할 내용 입력", key=f"new_{code_key}")
+            if st.button(f"추가하기", key=f"btn_add_{code_key}"):
+                if new_val and new_val not in current_list:
+                    current_list.append(new_val)
+                    db.collection("settings").document("codes").set({code_key: current_list}, merge=True)
+                    st.success("추가되었습니다.")
+                    st.rerun()
+        
+        with c2:
+            st.write(f"**🗑️ {label} 삭제**")
+            del_val = st.selectbox(f"삭제할 항목 선택", ["선택하세요"] + current_list, key=f"del_{code_key}")
+            if st.button(f"삭제하기", key=f"btn_del_{code_key}"):
+                if del_val != "선택하세요":
+                    current_list.remove(del_val)
+                    db.collection("settings").document("codes").set({code_key: current_list}, merge=True)
+                    st.success("삭제되었습니다.")
+                    st.rerun()
+
+    with code_tabs[0]: manage_code("weaving_types", ["30수 연사", "40수 코마사", "무지", "자카드", "기타"], "제직 타입")
+    with code_tabs[1]: manage_code("partner_types", ["발주처", "염색업체", "봉제업체", "배송업체", "기타"], "거래처 구분")
+
+else:
+    st.header(f"🏗️ {menu}")
+    st.info(f"'{menu}' 기능은 추후 업데이트될 예정입니다.")
     
     code_tabs = st.tabs(["제직 타입", "거래처 구분"])
     

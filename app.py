@@ -2096,19 +2096,20 @@ elif menu == "제직기관리":
             
             if selection.selection.rows:
                 idx = selection.selection.rows[0]
-                sel_row = df.iloc[idx]
-                sel_id = sel_row['id']
+                # DataFrame 대신 원본 리스트 사용 (KeyError 방지)
+                sel_item = m_list[idx]
+                sel_id = sel_item['id']
                 
                 st.divider()
-                st.subheader(f"🛠️ 제직기 수정: {sel_row['name']}")
+                st.subheader(f"🛠️ 제직기 수정: {sel_item['name']}")
                 
                 with st.form("edit_machine_form"):
                     c1, c2 = st.columns(2)
-                    e_no = c1.number_input("호기 번호", value=int(sel_row['machine_no']), step=1, disabled=True)
-                    e_name = c2.text_input("명칭", value=sel_row['name'])
+                    e_no = c1.number_input("호기 번호", value=int(sel_item['machine_no']), step=1, disabled=True)
+                    e_name = c2.text_input("명칭", value=sel_item['name'])
                     c3, c4 = st.columns(2)
-                    e_model = c3.text_input("모델명", value=sel_row.get('model', ''))
-                    e_note = c4.text_input("비고", value=sel_row.get('note', ''))
+                    e_model = c3.text_input("모델명", value=sel_item.get('model', ''))
+                    e_note = c4.text_input("비고", value=sel_item.get('note', ''))
                     
                     if st.form_submit_button("수정 저장"):
                         db.collection("machines").document(sel_id).update({"name": e_name, "model": e_model, "note": e_note})

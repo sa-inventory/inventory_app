@@ -1688,6 +1688,7 @@ elif menu == "봉제현황":
         rows = []
         for doc in docs:
             d = doc.to_dict()
+            d['id'] = doc.id
             
             # 날짜 필터
             s_end = d.get('sewing_end_date')

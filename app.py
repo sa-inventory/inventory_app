@@ -2034,23 +2034,37 @@ elif menu == "기초코드관리":
     # 코드 관리용 함수
     def manage_code(code_key, default_list, label):
         current_list = get_common_codes(code_key, default_list)
-        st.write(f"현재 등록된 {label}: {', '.join(current_list)}")
         
-        new_val = st.text_input(f"추가할 {label}", key=f"new_{code_key}")
-        if st.button(f"추가", key=f"btn_add_{code_key}"):
-            if new_val and new_val not in current_list:
-                current_list.append(new_val)
-                db.collection("settings").document("codes").set({code_key: current_list}, merge=True)
-                st.success("추가되었습니다.")
-                st.rerun()
+        # 목록 표시 (데이터프레임 사용)
+        st.markdown(f"##### 📋 현재 등록된 {label}")
+        if current_list:
+            df = pd.DataFrame(current_list, columns=["명칭"])
+            st.dataframe(df, use_container_width=True, hide_index=True)
+        else:
+            st.info("등록된 항목이 없습니다.")
         
-        del_val = st.selectbox(f"삭제할 {label} 선택", ["선택하세요"] + current_list, key=f"del_{code_key}")
-        if st.button(f"삭제", key=f"btn_del_{code_key}"):
-            if del_val != "선택하세요":
-                current_list.remove(del_val)
-                db.collection("settings").document("codes").set({code_key: current_list}, merge=True)
-                st.success("삭제되었습니다.")
-                st.rerun()
+        st.divider()
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            st.write(f"**➕ {label} 추가**")
+            new_val = st.text_input(f"추가할 내용 입력", key=f"new_{code_key}")
+            if st.button(f"추가하기", key=f"btn_add_{code_key}"):
+                if new_val and new_val not in current_list:
+                    current_list.append(new_val)
+                    db.collection("settings").document("codes").set({code_key: current_list}, merge=True)
+                    st.success("추가되었습니다.")
+                    st.rerun()
+        
+        with c2:
+            st.write(f"**🗑️ {label} 삭제**")
+            del_val = st.selectbox(f"삭제할 항목 선택", ["선택하세요"] + current_list, key=f"del_{code_key}")
+            if st.button(f"삭제하기", key=f"btn_del_{code_key}"):
+                if del_val != "선택하세요":
+                    current_list.remove(del_val)
+                    db.collection("settings").document("codes").set({code_key: current_list}, merge=True)
+                    st.success("삭제되었습니다.")
+                    st.rerun()
 
     with code_tabs[0]: manage_code("weaving_types", ["30수 연사", "40수 코마사", "무지", "자카드", "기타"], "제직 타입")
     with code_tabs[1]: manage_code("partner_types", ["발주처", "염색업체", "봉제업체", "배송업체", "기타"], "거래처 구분")

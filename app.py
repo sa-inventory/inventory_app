@@ -2060,7 +2060,11 @@ elif menu == "제직기관리":
         st.subheader("제직기 목록")
         machines_ref = db.collection("machines").order_by("machine_no")
         m_docs = list(machines_ref.stream())
-        m_list = [d.to_dict() for d in m_docs]
+        m_list = []
+        for d in m_docs:
+            item = d.to_dict()
+            item['id'] = d.id
+            m_list.append(item)
         
         if not m_list:
             st.warning("등록된 제직기가 없습니다.")
@@ -2075,17 +2079,46 @@ elif menu == "제직기관리":
                 st.success("기본 제직기가 생성되었습니다.")
                 st.rerun()
         else:
-            st.dataframe(pd.DataFrame(m_list), use_container_width=True, hide_index=True)
+            df = pd.DataFrame(m_list)
+            col_map = {"machine_no": "호기", "name": "명칭", "model": "모델명", "note": "비고"}
             
-            st.divider()
-            st.subheader("🗑️ 제직기 삭제")
-            del_targets = st.multiselect("삭제할 제직기를 선택하세요", [f"{m['machine_no']}:{m['name']}" for m in m_list])
-            if st.button("선택한 제직기 삭제"):
-                for target in del_targets:
-                    del_id = target.split(":")[0]
-                    db.collection("machines").document(del_id).delete()
-                st.success("삭제되었습니다.")
-                st.rerun()
+            # 화면 표시용
+            df_display = df[["machine_no", "name", "model", "note"]].rename(columns=col_map)
+            
+            st.write("🔽 수정할 제직기를 선택하세요.")
+            selection = st.dataframe(df_display, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row", key="machine_list")
+            
+            # 엑셀 다운로드
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                df_display.to_excel(writer, index=False)
+            st.download_button(label="💾 엑셀 다운로드", data=buffer.getvalue(), file_name="제직기목록.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            
+            if selection.selection.rows:
+                idx = selection.selection.rows[0]
+                sel_row = df.iloc[idx]
+                sel_id = sel_row['id']
+                
+                st.divider()
+                st.subheader(f"🛠️ 제직기 수정: {sel_row['name']}")
+                
+                with st.form("edit_machine_form"):
+                    c1, c2 = st.columns(2)
+                    e_no = c1.number_input("호기 번호", value=int(sel_row['machine_no']), step=1, disabled=True)
+                    e_name = c2.text_input("명칭", value=sel_row['name'])
+                    c3, c4 = st.columns(2)
+                    e_model = c3.text_input("모델명", value=sel_row.get('model', ''))
+                    e_note = c4.text_input("비고", value=sel_row.get('note', ''))
+                    
+                    if st.form_submit_button("수정 저장"):
+                        db.collection("machines").document(sel_id).update({"name": e_name, "model": e_model, "note": e_note})
+                        st.success("수정되었습니다.")
+                        st.rerun()
+                
+                if st.button("🗑️ 이 제직기 삭제", type="primary"):
+                    db.collection("machines").document(sel_id).delete()
+                    st.success("삭제되었습니다.")
+                    st.rerun()
 
 elif menu == "기초코드관리":
     st.header("⚙️ 기초 코드 관리")

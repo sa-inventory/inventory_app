@@ -1948,7 +1948,69 @@ elif menu == "거래처관리":
                 "fax": "팩스", "email": "이메일", "address": "주소", 
                 "account": "계좌번호", "note": "비고"
             }
-            st.dataframe(df[all_cols].rename(columns=col_map), use_container_width=True)
+            
+            # 화면 표시용 (id 제외)
+            df_display = df[all_cols].rename(columns=col_map)
+            
+            st.write("🔽 수정할 거래처를 선택하세요.")
+            selection = st.dataframe(df_display, use_container_width=True, on_select="rerun", selection_mode="single-row", key="partner_list")
+            
+            # 엑셀 다운로드
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                df_display.to_excel(writer, index=False)
+            
+            st.download_button(
+                label="💾 엑셀 다운로드",
+                data=buffer.getvalue(),
+                file_name="거래처목록.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+            
+            # 선택 시 수정 폼 표시
+            if selection.selection.rows:
+                idx = selection.selection.rows[0]
+                sel_row = df.iloc[idx] # 화면용 df_display가 아닌 원본 df에서 가져옴 (id 포함)
+                sel_id = sel_row['id']
+                
+                st.divider()
+                st.subheader(f"🛠️ 거래처 수정: {sel_row['name']}")
+                
+                with st.form("edit_partner_form"):
+                    c1, c2 = st.columns(2)
+                    e_type = c1.selectbox("거래처 구분", partner_types, index=partner_types.index(sel_row['type']) if sel_row['type'] in partner_types else 0)
+                    e_name = c2.text_input("거래처명", value=sel_row['name'])
+                    
+                    c1, c2, c3 = st.columns(3)
+                    e_rep = c1.text_input("대표자명", value=sel_row['rep_name'])
+                    e_biz = c2.text_input("사업자번호", value=sel_row['biz_num'])
+                    e_item = c3.text_input("업태/종목", value=sel_row['item'])
+                    
+                    c1, c2, c3 = st.columns(3)
+                    e_phone = c1.text_input("전화번호", value=sel_row['phone'])
+                    e_fax = c2.text_input("팩스번호", value=sel_row['fax'])
+                    e_email = c3.text_input("이메일", value=sel_row['email'])
+                    
+                    e_addr = st.text_input("주소", value=sel_row['address'])
+                    e_acc = st.text_input("계좌번호", value=sel_row['account'])
+                    e_note = st.text_area("기타사항", value=sel_row['note'])
+                    
+                    if st.form_submit_button("수정 저장"):
+                        db.collection("partners").document(sel_id).update({
+                            "type": e_type,
+                            "name": e_name,
+                            "rep_name": e_rep,
+                            "biz_num": e_biz,
+                            "item": e_item,
+                            "phone": e_phone,
+                            "fax": e_fax,
+                            "email": e_email,
+                            "address": e_addr,
+                            "account": e_acc,
+                            "note": e_note
+                        })
+                        st.success("수정되었습니다.")
+                        st.rerun()
             
             # 2. 거래처 삭제 기능
             st.divider()

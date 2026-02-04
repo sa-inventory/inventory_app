@@ -98,19 +98,19 @@ with st.sidebar:
         if st.button("🚚 출고현황", use_container_width=True):
             st.session_state["current_menu"] = "출고현황"
             st.rerun()
-        if st.button("📦 현재고현황", use_container_width=True):
-            st.session_state["current_menu"] = "현재고현황"
-            st.rerun()
 
     with st.expander("⚙️ 기초정보관리", expanded=True):
+        if st.button("📦 제품 관리", use_container_width=True):
+            st.session_state["current_menu"] = "제품 관리"
+            st.rerun()
         if st.button("🏢 거래처관리", use_container_width=True):
             st.session_state["current_menu"] = "거래처관리"
             st.rerun()
         if st.button("🏭 제직기관리", use_container_width=True):
             st.session_state["current_menu"] = "제직기관리"
             st.rerun()
-        if st.button("📝 기초코드관리", use_container_width=True):
-            st.session_state["current_menu"] = "기초코드관리"
+        if st.button("📝 제품코드설정", use_container_width=True):
+            st.session_state["current_menu"] = "제품코드설정"
             st.rerun()
             
     menu = st.session_state["current_menu"]
@@ -136,38 +136,125 @@ def get_partners(partner_type=None):
         partners.append(p.get("name"))
     return partners
 
+# --- 공통 함수: 기초 코드 관리 UI ---
+
+# 이름-코드 쌍 관리 함수
+def manage_code_with_code(code_key, default_list, label):
+    current_list = get_common_codes(code_key, default_list)
+
+    st.markdown(f"##### 📋 현재 등록된 {label}")
+    # 이전 버전 호환을 위해 딕셔너리 형태만 필터링
+    current_list_dicts = [item for item in current_list if isinstance(item, dict)]
+    if current_list_dicts:
+        df = pd.DataFrame(current_list_dicts)
+        st.dataframe(df, use_container_width=True, hide_index=True, column_order=("name", "code"))
+    else:
+        st.info("등록된 항목이 없습니다.")
+
+    st.divider()
+
+    # 추가/수정
+    with st.expander(f"➕ {label} 추가/수정"):
+        st.caption("같은 '명칭'으로 저장하면 '코드'가 수정됩니다.")
+        with st.form(key=f"add_{code_key}"):
+            c1, c2 = st.columns(2)
+            new_name = c1.text_input("명칭", key=f"name_{code_key}")
+            new_code = c2.text_input("코드", key=f"code_{code_key}")
+            if st.form_submit_button("저장"):
+                if new_name and new_code:
+                    # 이름으로 기존 항목 찾기
+                    existing_item = next((item for item in current_list_dicts if item.get('name') == new_name), None)
+                    if existing_item:
+                        existing_item['code'] = new_code # 수정
+                    else:
+                        current_list_dicts.append({'name': new_name, 'code': new_code}) # 추가
+                    
+                    db.collection("settings").document("codes").set({code_key: current_list_dicts}, merge=True)
+                    st.success("저장되었습니다.")
+                    st.rerun()
+
+    # 삭제
+    with st.expander(f"🗑️ {label} 삭제"):
+        if current_list_dicts:
+            names_to_delete = [item['name'] for item in current_list_dicts]
+            del_name = st.selectbox("삭제할 명칭 선택", ["선택하세요"] + names_to_delete, key=f"del_{code_key}")
+            if st.button("삭제하기", key=f"btn_del_{code_key}"):
+                if del_name != "선택하세요":
+                    updated_list = [item for item in current_list_dicts if item['name'] != del_name]
+                    db.collection("settings").document("codes").set({code_key: updated_list}, merge=True)
+                    st.success("삭제되었습니다.")
+                    st.rerun()
+
+# 단순 리스트 관리 함수
+def manage_code(code_key, default_list, label):
+    current_list = get_common_codes(code_key, default_list)
+    st.markdown(f"##### 📋 현재 등록된 {label}")
+    if current_list: st.dataframe(pd.DataFrame(current_list, columns=["명칭"]), use_container_width=True, hide_index=True)
+    else: st.info("등록된 항목이 없습니다.")
+    st.divider()
+    c1, c2 = st.columns(2)
+    with c1:
+        new_val = st.text_input(f"추가할 {label} 입력", key=f"new_{code_key}")
+        if st.button(f"추가", key=f"btn_add_{code_key}"):
+            if new_val and new_val not in current_list:
+                current_list.append(new_val)
+                db.collection("settings").document("codes").set({code_key: current_list}, merge=True)
+                st.success("추가되었습니다."); st.rerun()
+    with c2:
+        del_val = st.selectbox(f"삭제할 {label} 선택", ["선택하세요"] + current_list, key=f"del_{code_key}")
+        if st.button(f"삭제", key=f"btn_del_{code_key}"):
+            if del_val != "선택하세요":
+                current_list.remove(del_val)
+                db.collection("settings").document("codes").set({code_key: current_list}, merge=True)
+                st.success("삭제되었습니다."); st.rerun()
+
 # 4. [메인 화면] 메뉴별 기능 구현
 if menu == "발주서접수":
     st.header("📑 발주서 접수")
-    st.info("신규 발주서를 시스템에 등록합니다.")
+    st.info("먼저 제품코드를 선택한 후, 신규 발주서를 시스템에 등록합니다.")
     
     if st.session_state["role"] == "admin":
-        # 기초 데이터 불러오기
-        weaving_types = get_common_codes("weaving_types", ["30수 연사", "40수 코마사", "무지", "자카드", "기타"])
-        customer_list = get_partners("발주처")
+        # --- 1. 제품 선택 ---
+        st.subheader("1. 제품 선택")
 
+        product_docs = list(db.collection("products").order_by("product_code").stream())
+        if not product_docs:
+            st.warning("등록된 제품이 없습니다. [기초정보관리 > 제품 관리] 메뉴에서 먼저 제품을 등록해주세요.")
+            st.stop()
+        
+        product_options = {}
+        for doc in product_docs:
+            p = doc.to_dict()
+            # 예: P0001: 30수 연사 / 150g / 40x80
+            display_name = f"{p['product_code']}: {p.get('product_type', p.get('weaving_type', ''))} / {p['yarn_type']} / {p['weight']}g / {p['size']}"
+            product_options[display_name] = p
+
+        selected_product_display = st.selectbox("등록할 제품을 선택하세요.", list(product_options.keys()))
+        
+        if not selected_product_display:
+            st.stop()
+
+        selected_product = product_options[selected_product_display]
+        st.success(f"선택된 제품코드: **{selected_product['product_code']}**")
+
+        # --- 2. 발주 정보 입력 ---
         with st.form("order_form", clear_on_submit=True):
-            st.subheader("기본 발주 정보")
+            st.subheader("2. 발주 상세 정보 입력")
+            
+            customer_list = get_partners("발주처")
+
             c1, c2, c3 = st.columns(3)
             order_date = c1.date_input("발주접수일", datetime.date.today(), format="YYYY-MM-DD")
-            # 거래처 목록이 없으면 텍스트 입력, 있으면 선택박스
             if customer_list:
                 customer = c2.selectbox("발주처 선택", customer_list)
             else:
                 customer = c2.text_input("발주처 (기초정보관리에서 거래처를 등록하세요)")
             delivery_req_date = c3.date_input("납품요청일", datetime.date.today() + datetime.timedelta(days=7), format="YYYY-MM-DD")
 
-            st.subheader("제품 상세 정보")
-            c1, c3, c4 = st.columns(3)
-            name = c1.text_input("제품명 (타올 종류)")
-            weaving_type = c3.selectbox("제직타입", weaving_types)
-            yarn_type = c4.text_input("사종", placeholder="예:30, 40")
-            
-            c1, c2, c3, c4 = st.columns(4)
-            color = c1.text_input("색상")
-            weight = c2.number_input("중량(g)", min_value=0, step=10)
-            size = c3.text_input("사이즈", placeholder="예: 40x80")
-            stock = c4.number_input("수량(장)", min_value=0, step=10)
+            c1, c2, c3 = st.columns(3)
+            name = c1.text_input("제품명 (고객사 요청 제품명)", help="고객사가 부르는 제품명을 입력하세요. 예: 프리미엄 호텔타올")
+            color = c2.text_input("색상")
+            stock = c3.number_input("수량(장)", min_value=0, step=10)
 
             st.subheader("납품 및 기타 정보")
             c1, c2, c3 = st.columns(3)
@@ -184,8 +271,8 @@ if menu == "발주서접수":
                     now = datetime.datetime.now()
                     prefix = now.strftime("%y%m") # 예: 2405
                     
-                    # 해당 월의 가장 마지막 발주번호 조회
-                    last_docs = db.collection("inventory")\
+                    # 해당 월의 가장 마지막 발주번호 조회 (orders 컬렉션에서)
+                    last_docs = db.collection("orders")\
                         .where("order_no", ">=", f"{prefix}000")\
                         .where("order_no", "<=", f"{prefix}999")\
                         .order_by("order_no", direction=firestore.Query.DESCENDING)\
@@ -206,16 +293,20 @@ if menu == "발주서접수":
 
                     # Firestore에 저장할 데이터 딕셔너리 생성
                     doc_data = {
+                        # 제품 마스터 정보 (Denormalized)
+                        "product_code": selected_product['product_code'],
+                        "product_type": selected_product.get('product_type', selected_product.get('weaving_type')), # 필드명 변경
+                        "yarn_type": selected_product.get('yarn_type'),
+                        "weight": selected_product['weight'],
+                        "size": selected_product['size'],
+                        
+                        # 주문 고유 정보
                         "order_no": order_no,
-                        "date": datetime.datetime.combine(order_date, datetime.time.min), # 날짜 형식을 datetime으로 변환
+                        "date": datetime.datetime.combine(order_date, datetime.time.min),
                         "customer": customer,
                         "delivery_req_date": str(delivery_req_date),
-                        "name": name,
-                        "weaving_type": weaving_type,
-                        "yarn_type": yarn_type,
+                        "name": name, # 고객사 제품명
                         "color": color,
-                        "weight": weight,
-                        "size": size,
                         "stock": stock,
                         "delivery_to": delivery_to,
                         "delivery_contact": delivery_contact,
@@ -223,7 +314,7 @@ if menu == "발주서접수":
                         "note": note,
                         "status": "발주접수" # 초기 상태
                     }
-                    db.collection("inventory").add(doc_data)
+                    db.collection("orders").add(doc_data) # 'orders' 컬렉션에 저장
                     st.success(f"발주번호 [{order_no}] 접수 완료!")
                     st.rerun()
                 else:
@@ -270,7 +361,7 @@ elif menu == "발주현황":
         start_date = datetime.datetime.combine(s_date_range[0], datetime.time.min)
         end_date = datetime.datetime.combine(s_date_range[1], datetime.time.max) if len(s_date_range) > 1 else datetime.datetime.combine(s_date_range[0], datetime.time.max)
 
-        docs = db.collection("inventory").where("date", ">=", start_date).where("date", "<=", end_date).order_by("date", direction=firestore.Query.DESCENDING).stream()
+        docs = db.collection("orders").where("date", ">=", start_date).where("date", "<=", end_date).order_by("date", direction=firestore.Query.DESCENDING).stream()
 
     # 데이터를 리스트로 변환
         rows = []
@@ -305,8 +396,8 @@ elif menu == "발주현황":
             
             # 컬럼명 한글 매핑
             col_map = {
-                "order_no": "발주번호", "status": "상태", "date": "접수일", "customer": "발주처",
-                "name": "제품명", "weaving_type": "제직타입",
+                "product_code": "제품코드", "order_no": "발주번호", "status": "상태", "date": "접수일", "customer": "발주처",
+                "name": "제품명", "product_type": "제품종류", "weaving_type": "제품종류(구)",
                 "yarn_type": "사종", "color": "색상", "weight": "중량",
                 "size": "사이즈", "stock": "수량",
                 "delivery_req_date": "납품요청일", "delivery_to": "납품처",
@@ -315,7 +406,7 @@ elif menu == "발주현황":
             }
 
             # 컬럼 순서 변경 (발주번호 -> 상태 -> 접수일 ...)
-            display_cols = ["order_no", "status", "date", "customer", "name", "stock", "weaving_type", "yarn_type", "color", "weight", "size", "delivery_req_date", "delivery_to", "delivery_contact", "delivery_address", "note"]
+            display_cols = ["product_code", "order_no", "status", "date", "customer", "name", "stock", "product_type", "weaving_type", "yarn_type", "color", "weight", "size", "delivery_req_date", "delivery_to", "delivery_contact", "delivery_address", "note"]
             final_cols = [c for c in display_cols if c in df.columns] # 실제 존재하는 컬럼만 선택
             
             # 화면 표시용 데이터프레임 (한글 컬럼 적용)
@@ -413,7 +504,8 @@ elif menu == "발주현황":
                 sel_id = sel_row['id']
                 
                 # 수정 폼을 위해 기초 데이터 다시 로드
-                weaving_types = get_common_codes("weaving_types", ["30수 연사", "무지", "기타"])
+                product_types_coded = get_common_codes("product_types", [])
+                product_type_names = [item['name'] for item in product_types_coded]
                 customer_list = get_partners("발주처")
 
                 with st.form("edit_order_form"):
@@ -432,7 +524,8 @@ elif menu == "발주현황":
                     e_stock = ec4.number_input("수량", value=int(sel_row['stock']), step=10)
 
                     ec5, ec6, ec7, ec8 = st.columns(4)
-                    e_weaving = ec5.selectbox("제직타입", weaving_types, index=weaving_types.index(sel_row['weaving_type']) if sel_row['weaving_type'] in weaving_types else 0)
+                    current_product_type = sel_row.get('product_type', sel_row.get('weaving_type'))
+                    e_product_type = ec5.selectbox("제품종류", product_type_names, index=product_type_names.index(current_product_type) if current_product_type in product_type_names else 0)
                     e_yarn = ec6.text_input("사종", value=sel_row.get('yarn_type', ''))
                     e_color = ec7.text_input("색상", value=sel_row.get('color', ''))
                     e_weight = ec8.number_input("중량", value=int(sel_row.get('weight', 0)), step=10)
@@ -448,12 +541,12 @@ elif menu == "발주현황":
                     e_del_addr = ec14.text_input("납품주소", value=sel_row.get('delivery_address', ''))
 
                     if st.form_submit_button("수정 저장"):
-                        db.collection("inventory").document(sel_id).update({
+                        db.collection("orders").document(sel_id).update({
                             "status": e_status, # 상태 변경 반영
                             "customer": e_customer,
                             "name": e_name,
                             "stock": e_stock,
-                            "weaving_type": e_weaving,
+                            "product_type": e_product_type,
                             "yarn_type": e_yarn,
                             "color": e_color,
                             "weight": e_weight,
@@ -476,7 +569,7 @@ elif menu == "발주현황":
                     st.warning("정말로 삭제하시겠습니까? (복구 불가)")
                     col_conf1, col_conf2 = st.columns(2)
                     if col_conf1.button("✅ 예, 삭제합니다", key="btn_del_yes"):
-                        db.collection("inventory").document(sel_id).delete()
+                        db.collection("orders").document(sel_id).delete()
                         st.session_state["delete_confirm_id"] = None
                         st.success("삭제되었습니다.")
                         st.rerun()
@@ -492,53 +585,6 @@ elif menu == "발주현황":
         st.write("조건을 설정하여 발주 내역을 조회합니다.")
 
         st.info("조회 기간을 선택하고 조회 버튼을 눌러주세요.")
-
-elif menu == "현재고현황":
-    st.header("📦 현재고 현황")
-
-    # 새로고침 버튼
-    if st.button("목록 새로고침"):
-        st.rerun()
-
-    # 데이터베이스에서 모든 데이터 가져오기
-    docs = list(db.collection("inventory").order_by("date", direction=firestore.Query.DESCENDING).stream())
-
-    if not docs:
-        st.info("아직 등록된 데이터가 없습니다.")
-
-    # 헤더
-    col1, col2, col3, col4 = st.columns([3, 1, 2, 2])
-    col1.write("**제품명 (구분)**")
-    col2.write("**수량**")
-    col3.write("**등록일**")
-    col4.write("**관리**")
-
-    for doc in docs:
-        item = doc.to_dict()
-        doc_id = doc.id
-        
-        with st.container():
-            c1, c2, c3, c4 = st.columns([3, 1, 2, 2])
-            c1.write(f"{item.get('name')}")
-            c2.write(f"{item.get('stock')}개")
-            c3.write(item.get('date').strftime("%Y-%m-%d") if item.get('date') else "")
-            
-            with c4:
-                if st.session_state["role"] == "admin":
-                    btn1, btn2, btn3 = st.columns(3)
-                    if btn1.button("➕", key=f"add_{doc_id}"):
-                        db.collection("inventory").document(doc_id).update({"stock": item.get('stock') + 1})
-                        st.rerun()
-                    if btn2.button("➖", key=f"sub_{doc_id}"):
-                        if item.get('stock', 0) > 0:
-                            db.collection("inventory").document(doc_id).update({"stock": item.get('stock') - 1})
-                            st.rerun()
-                    if btn3.button("🗑️", key=f"del_{doc_id}", help="삭제"):
-                        db.collection("inventory").document(doc_id).delete()
-                        st.rerun()
-                else:
-                    st.caption("조회 전용")
-        st.divider()
 
 elif menu == "제직현황":
     st.header("🧵 제직 현황")
@@ -557,7 +603,7 @@ elif menu == "제직현황":
     
     # 현재 가동 중인 제직기 정보 가져오기
     busy_machines = {}
-    running_docs = db.collection("inventory").where("status", "==", "제직중").stream()
+    running_docs = db.collection("orders").where("status", "==", "제직중").stream()
     for doc in running_docs:
         d = doc.to_dict()
         m_no = d.get("machine_no")
@@ -596,7 +642,7 @@ elif menu == "제직현황":
     with tab_waiting:
         st.subheader("제직 대기 목록")
         # '발주접수', '제직대기' 상태인 건 가져오기
-        docs = db.collection("inventory").where("status", "in", ["발주접수", "제직대기"]).stream()
+        docs = db.collection("orders").where("status", "in", ["발주접수", "제직대기"]).stream()
         rows = []
         for doc in docs:
             d = doc.to_dict()
@@ -611,10 +657,10 @@ elif menu == "제직현황":
             
             col_map = {
                 "order_no": "발주번호", "status": "상태", "customer": "발주처", "name": "제품명", 
-                "weaving_type": "제직타입", "yarn_type": "사종", "color": "색상", 
+                "product_type": "제품종류", "weaving_type": "제품종류(구)", "yarn_type": "사종", "color": "색상", 
                 "stock": "수량", "weight": "중량", "size": "사이즈", "date": "접수일"
             }
-            display_cols = ["order_no", "status", "customer", "name", "stock", "weaving_type", "yarn_type", "color", "weight", "size", "date"]
+            display_cols = ["order_no", "status", "customer", "name", "stock", "product_type", "weaving_type", "yarn_type", "color", "weight", "size", "date"]
             final_cols = [c for c in display_cols if c in df.columns]
             
             st.write("🔽 제직기를 배정할 항목을 선택하세요.")
@@ -652,7 +698,7 @@ elif menu == "제직현황":
                             st.error(f"⛔ 해당 제직기는 이미 작업 중입니다!")
                         else:
                             start_dt = datetime.datetime.combine(s_date, s_time)
-                            db.collection("inventory").document(sel_id).update({
+                            db.collection("orders").document(sel_id).update({
                                 "status": "제직중",
                                 "machine_no": int(sel_m_no),
                                 "weaving_start_time": start_dt,
@@ -673,7 +719,7 @@ elif menu == "제직현황":
             st.success(st.session_state["weaving_msg"])
             st.session_state["weaving_msg"] = None
             
-        docs = db.collection("inventory").where("status", "==", "제직중").stream()
+        docs = db.collection("orders").where("status", "==", "제직중").stream()
         rows = []
         for doc in docs:
             d = doc.to_dict()
@@ -746,7 +792,7 @@ elif menu == "제직현황":
                         
                         # 1. 롤 데이터 생성 (새 문서)
                         # 부모 문서의 데이터를 가져와서 복사
-                        parent_doc = db.collection("inventory").document(sel_id).get().to_dict()
+                        parent_doc = db.collection("orders").document(sel_id).get().to_dict()
                         new_roll_doc = parent_doc.copy()
                         
                         new_roll_doc['status'] = "제직완료"
@@ -764,7 +810,7 @@ elif menu == "제직현황":
                         if 'completed_rolls' in new_roll_doc: del new_roll_doc['completed_rolls']
                         if 'weaving_roll_count' in new_roll_doc: del new_roll_doc['weaving_roll_count']
                         
-                        db.collection("inventory").add(new_roll_doc)
+                        db.collection("orders").add(new_roll_doc)
                         
                         # 2. 부모 문서 업데이트 (진행률 표시)
                         updates = {"completed_rolls": next_roll_no}
@@ -776,14 +822,14 @@ elif menu == "제직현황":
                         else:
                             msg = f"✅ {next_roll_no}번 롤 처리가 완료되었습니다. 이어서 {next_roll_no + 1}번 롤을 입력해주세요."
                         
-                        db.collection("inventory").document(sel_id).update(updates)
+                        db.collection("orders").document(sel_id).update(updates)
                         
                         # 메시지를 세션에 저장하여 리런 후에도 보이게 함
                         st.session_state["weaving_msg"] = msg
                         st.rerun()
                 
                 if st.button("🚫 제직 취소 (대기로 되돌리기)", key="cancel_weaving"):
-                    db.collection("inventory").document(sel_id).update({
+                    db.collection("orders").document(sel_id).update({
                         "status": "발주접수",
                         "machine_no": firestore.DELETE_FIELD,
                         "weaving_start_time": firestore.DELETE_FIELD
@@ -815,7 +861,7 @@ elif menu == "제직현황":
         # [수정] 다음 공정으로 넘어간 내역도 조회되도록 상태 조건 확대
         # 제직완료 이후의 모든 상태 포함
         target_statuses = ["제직완료", "제직완료(Master)", "염색중", "염색완료", "봉제중", "봉제완료", "출고완료"]
-        docs = db.collection("inventory").where("status", "in", target_statuses).stream()
+        docs = db.collection("orders").where("status", "in", target_statuses).stream()
         rows = []
         for doc in docs:
             d = doc.to_dict()
@@ -881,7 +927,7 @@ elif menu == "제직현황":
                     new_avg_weight = c4.number_input("평균중량(g)", value=int(sel_row.get('avg_weight', 0)), step=1, format="%d")
                     
                     if st.form_submit_button("수정 저장"):
-                        db.collection("inventory").document(sel_id).update({
+                        db.collection("orders").document(sel_id).update({
                             "real_weight": new_real_weight,
                             "real_stock": new_real_stock,
                             "stock": new_real_stock, # 이후 공정을 위해 재고 수량도 함께 업데이트
@@ -897,15 +943,15 @@ elif menu == "제직현황":
                     parent_id = sel_row.get('parent_id')
                     
                     # 1. 현재 롤 문서 삭제
-                    db.collection("inventory").document(sel_id).delete()
+                    db.collection("orders").document(sel_id).delete()
                     
                     # 2. 부모 문서(제직중인 건) 상태 업데이트
                     if parent_id:
                         # 남은 형제 롤 개수 확인
-                        siblings = db.collection("inventory").where("parent_id", "==", parent_id).where("status", "==", "제직완료").stream()
+                        siblings = db.collection("orders").where("parent_id", "==", parent_id).where("status", "==", "제직완료").stream()
                         cnt = sum(1 for _ in siblings)
                         
-                        db.collection("inventory").document(parent_id).update({
+                        db.collection("orders").document(parent_id).update({
                             "completed_rolls": cnt,
                             "status": "제직중" # 마스터 완료 상태였더라도 다시 제직중으로 복귀
                         })
@@ -1100,7 +1146,7 @@ elif menu == "제직현황":
         # [수정] 생산 실적이 있는 날짜 목록 가져오기
         # 제직완료 이상 상태인 건들의 weaving_end_time 확인
         target_statuses = ["제직완료", "제직완료(Master)", "염색중", "염색완료", "봉제중", "봉제완료", "출고완료"]
-        inv_ref = db.collection("inventory").where("status", "in", target_statuses).stream()
+        inv_ref = db.collection("orders").where("status", "in", target_statuses).stream()
         prod_dates = set()
         for doc in inv_ref:
             d = doc.to_dict()
@@ -1121,7 +1167,7 @@ elif menu == "제직현황":
         end_dt = datetime.datetime.combine(prod_date, datetime.time.max)
         
         # Firestore 인덱스 오류 방지를 위해 status만 쿼리하고 날짜는 파이썬에서 필터링
-        docs = db.collection("inventory").where("status", "in", target_statuses).stream()
+        docs = db.collection("orders").where("status", "in", target_statuses).stream()
         rows = []
         for doc in docs:
             d = doc.to_dict()
@@ -1222,7 +1268,7 @@ elif menu == "염색현황":
     # --- 1. 염색 대기 탭 ---
     with tab_dye_wait:
         st.subheader("염색 대기 목록 (제직완료)")
-        docs = db.collection("inventory").where("status", "==", "제직완료").stream()
+        docs = db.collection("orders").where("status", "==", "제직완료").stream()
         rows = []
         for doc in docs:
             d = doc.to_dict()
@@ -1268,7 +1314,7 @@ elif menu == "염색현황":
                     d_note = c4.text_input("염색사항(비고)")
                     
                     if st.form_submit_button("염색 출고 (작업시작)"):
-                        db.collection("inventory").document(sel_id).update({
+                        db.collection("orders").document(sel_id).update({
                             "status": "염색중",
                             "dyeing_out_date": str(d_date),
                             "dyeing_partner": d_partner,
@@ -1283,7 +1329,7 @@ elif menu == "염색현황":
     # --- 2. 염색중 탭 ---
     with tab_dye_ing:
         st.subheader("염색중 목록")
-        docs = db.collection("inventory").where("status", "==", "염색중").stream()
+        docs = db.collection("orders").where("status", "==", "염색중").stream()
         rows = []
         for doc in docs:
             d = doc.to_dict()
@@ -1340,7 +1386,7 @@ elif menu == "염색현황":
                     st.info(f"💰 **염색비용 합계**: {d_total:,}원 (공급가: {d_supply:,}원 / 부가세: {d_vat:,}원)")
                     
                     if st.button("염색 완료 (봉제대기로 이동)"):
-                        db.collection("inventory").document(sel_id).update({
+                        db.collection("orders").document(sel_id).update({
                             "status": "염색완료",
                             "dyeing_in_date": str(d_in_date),
                             "stock": d_stock,
@@ -1366,7 +1412,7 @@ elif menu == "염색현황":
                         e_note = c4.text_input("염색사항", value=sel_row.get('dyeing_note', ''))
                         
                         if st.form_submit_button("수정 저장"):
-                            db.collection("inventory").document(sel_id).update({
+                            db.collection("orders").document(sel_id).update({
                                 "dyeing_out_date": str(e_date),
                                 "dyeing_partner": e_partner,
                                 "dyeing_out_weight": e_weight,
@@ -1377,7 +1423,7 @@ elif menu == "염색현황":
                     
                     st.markdown("#### 🚫 작업 취소")
                     if st.button("염색 취소 (대기로 되돌리기)", type="primary"):
-                        db.collection("inventory").document(sel_id).update({
+                        db.collection("orders").document(sel_id).update({
                             "status": "제직완료"
                         })
                         st.success("취소되었습니다.")
@@ -1407,7 +1453,7 @@ elif menu == "염색현황":
 
         # [수정] 다음 공정으로 넘어간 내역도 조회되도록 상태 조건 확대
         target_statuses = ["염색완료", "봉제중", "봉제완료", "출고완료"]
-        docs = db.collection("inventory").where("status", "in", target_statuses).stream()
+        docs = db.collection("orders").where("status", "in", target_statuses).stream()
         rows = []
         for doc in docs:
             d = doc.to_dict()
@@ -1474,7 +1520,7 @@ elif menu == "염색현황":
                         
                         if st.form_submit_button("수정 저장"):
                             new_amount = int(new_weight * new_price)
-                            db.collection("inventory").document(sel_id).update({
+                            db.collection("orders").document(sel_id).update({
                                 "dyeing_in_date": str(new_in_date),
                                 "stock": new_stock,
                                 "dyeing_in_weight": new_weight,
@@ -1488,7 +1534,7 @@ elif menu == "염색현황":
                     st.write("🚫 **완료 취소**")
                     st.warning("상태를 다시 '염색중'으로 되돌립니다.")
                     if st.button("완료 취소 (염색중으로 복귀)", type="primary"):
-                        db.collection("inventory").document(sel_id).update({
+                        db.collection("orders").document(sel_id).update({
                             "status": "염색중"
                         })
                         st.success("복귀되었습니다.")
@@ -1507,7 +1553,7 @@ elif menu == "봉제현황":
     # --- 1. 봉제 대기 탭 ---
     with tab_sew_wait:
         st.subheader("봉제 대기 목록 (염색완료)")
-        docs = db.collection("inventory").where("status", "==", "염색완료").stream()
+        docs = db.collection("orders").where("status", "==", "염색완료").stream()
         rows = []
         for doc in docs:
             d = doc.to_dict()
@@ -1554,7 +1600,7 @@ elif menu == "봉제현황":
                     # 수량 분할 로직
                     if s_qty < current_stock:
                         # 1. 분할된 새 문서 생성 (작업분)
-                        doc_snapshot = db.collection("inventory").document(sel_id).get()
+                        doc_snapshot = db.collection("orders").document(sel_id).get()
                         new_doc_data = doc_snapshot.to_dict().copy()
                         new_doc_data['stock'] = s_qty
                         new_doc_data['status'] = "봉제중"
@@ -1565,10 +1611,10 @@ elif menu == "봉제현황":
                         else:
                             new_doc_data['sewing_partner'] = "자체"
                         
-                        db.collection("inventory").add(new_doc_data)
+                        db.collection("orders").add(new_doc_data)
                         
                         # 2. 원본 문서 업데이트 (잔여분)
-                        db.collection("inventory").document(sel_id).update({
+                        db.collection("orders").document(sel_id).update({
                             "stock": current_stock - s_qty
                         })
                         st.success(f"{s_qty}장 분할하여 봉제 작업을 시작합니다. (잔여: {current_stock - s_qty}장)")
@@ -1584,7 +1630,7 @@ elif menu == "봉제현황":
                         else:
                             updates['sewing_partner'] = "자체"
                             
-                        db.collection("inventory").document(sel_id).update(updates)
+                        db.collection("orders").document(sel_id).update(updates)
                         st.success("봉제 작업을 시작합니다.")
                     
                     st.rerun()
@@ -1594,7 +1640,7 @@ elif menu == "봉제현황":
     # --- 2. 봉제중 탭 ---
     with tab_sew_ing:
         st.subheader("봉제중 목록")
-        docs = db.collection("inventory").where("status", "==", "봉제중").stream()
+        docs = db.collection("orders").where("status", "==", "봉제중").stream()
         rows = []
         for doc in docs:
             d = doc.to_dict()
@@ -1667,7 +1713,7 @@ elif menu == "봉제현황":
                             updates["sewing_vat"] = s_vat
                             updates["vat_included"] = s_vat_inc
                         
-                        db.collection("inventory").document(sel_id).update(updates)
+                        db.collection("orders").document(sel_id).update(updates)
                         st.success("봉제 완료 처리되었습니다.")
                         st.rerun()
                             
@@ -1686,13 +1732,13 @@ elif menu == "봉제현황":
                                 "sewing_type": e_type,
                                 "sewing_partner": "자체" if e_type == "자체봉제" else e_partner
                             }
-                            db.collection("inventory").document(sel_id).update(updates)
+                            db.collection("orders").document(sel_id).update(updates)
                             st.success("수정되었습니다.")
                             st.rerun()
                     
                     st.markdown("#### 🚫 작업 취소")
                     if st.button("봉제 취소 (대기로 되돌리기)", type="primary"):
-                        db.collection("inventory").document(sel_id).update({
+                        db.collection("orders").document(sel_id).update({
                             "status": "염색완료"
                         })
                         st.success("취소되었습니다.")
@@ -1722,7 +1768,7 @@ elif menu == "봉제현황":
             
         # [수정] 다음 공정으로 넘어간 내역도 조회되도록 상태 조건 확대
         target_statuses = ["봉제완료", "출고완료"]
-        docs = db.collection("inventory").where("status", "in", target_statuses).stream()
+        docs = db.collection("orders").where("status", "in", target_statuses).stream()
         rows = []
         for doc in docs:
             d = doc.to_dict()
@@ -1806,13 +1852,13 @@ elif menu == "봉제현황":
                                 updates["sewing_unit_price"] = new_price
                                 updates["sewing_amount"] = int(new_stock * new_price)
                                 
-                            db.collection("inventory").document(sel_id).update(updates)
+                            db.collection("orders").document(sel_id).update(updates)
                             st.success("수정되었습니다.")
                             st.rerun()
                 with c2:
                     st.write("🚫 **완료 취소**")
                     if st.button("완료 취소 (봉제중으로 복귀)", type="primary"):
-                        db.collection("inventory").document(sel_id).update({"status": "봉제중"})
+                        db.collection("orders").document(sel_id).update({"status": "봉제중"})
                         st.success("복귀되었습니다.")
                         st.rerun()
         else:
@@ -1826,7 +1872,7 @@ elif menu == "출고현황":
     
     with tab1:
         # '봉제완료' (출고대기) 상태
-        docs = db.collection("inventory").where("status", "==", "봉제완료").stream()
+        docs = db.collection("orders").where("status", "==", "봉제완료").stream()
         rows = []
         for doc in docs:
             d = doc.to_dict()
@@ -1846,7 +1892,7 @@ elif menu == "출고현황":
                     with c4:
                         ship_method = st.selectbox("출고방법", ["택배", "화물", "용차", "직배송", "기타"], key=f"sm_{item['id']}")
                         if st.button("🚀 출고 완료 처리", key=f"ship_{item['id']}"):
-                            db.collection("inventory").document(item['id']).update({
+                            db.collection("orders").document(item['id']).update({
                                 "status": "출고완료",
                                 "shipping_date": datetime.datetime.now(),
                                 "shipping_method": ship_method
@@ -1859,7 +1905,7 @@ elif menu == "출고현황":
 
     with tab2:
         # '출고완료' 상태 조회
-        docs = db.collection("inventory").where("status", "==", "출고완료").stream()
+        docs = db.collection("orders").where("status", "==", "출고완료").stream()
         rows = []
         for doc in docs:
             d = doc.to_dict()
@@ -1898,7 +1944,7 @@ elif menu == "출고현황":
                                 </tr>
                                 <tr>
                                     <td style="border:1px solid #333; padding:10px;">{item.get('name')}</td>
-                                    <td style="border:1px solid #333; padding:10px;">{item.get('weaving_type')}</td>
+                                    <td style="border:1px solid #333; padding:10px;">{item.get('product_type', item.get('weaving_type', ''))}</td>
                                     <td style="border:1px solid #333; padding:10px;">{item.get('stock')} 장</td>
                                     <td style="border:1px solid #333; padding:10px;">{item.get('note', '')}</td>
                                 </tr>
@@ -1912,10 +1958,120 @@ elif menu == "출고현황":
         else:
             st.info("출고 완료된 내역이 없습니다.")
 
+elif menu == "제품 관리":
+    st.header("📦 제품 마스터 관리")
+    st.info("제품의 고유한 특성(제품종류, 사종, 중량, 사이즈)을 조합하여 제품 코드를 생성하고 관리합니다.")
+
+    # 제품종류, 사종 기초 코드 가져오기
+    product_types_coded = get_common_codes("product_types", [])
+    yarn_types_coded = get_common_codes("yarn_types_coded", [])
+
+    tab1, tab2 = st.tabs(["➕ 제품 등록", "📋 제품 목록"])
+
+    with tab1:
+        st.subheader("신규 제품 등록")
+
+        if not product_types_coded or not yarn_types_coded:
+            st.warning("제품 코드 생성을 위한 기초 코드가 등록되지 않았습니다.\n\n[기초정보관리 > 제품코드설정] 메뉴에서 '제품 종류'와 '사종'을 먼저 등록해주세요.")
+            st.stop()
+
+        with st.form("product_form", clear_on_submit=True):
+            # UI에 표시할 이름 목록
+            product_type_names = [item['name'] for item in product_types_coded]
+            yarn_type_names = [item['name'] for item in yarn_types_coded]
+
+            c1, c2 = st.columns(2)
+            p_product_type_name = c1.selectbox("제품종류", product_type_names)
+            p_yarn_type_name = c2.selectbox("사종", yarn_type_names)
+
+            c3, c4 = st.columns(2)
+            p_weight = c3.number_input("중량(g)", min_value=0, step=10)
+            p_size = c4.text_input("사이즈", placeholder="예: 40x80")
+
+            submitted = st.form_submit_button("제품 등록")
+            if submitted:
+                if p_product_type_name and p_yarn_type_name and p_weight > 0 and p_size:
+                    # 선택된 이름으로 코드 찾기
+                    product_type_code = next((item['code'] for item in product_types_coded if item['name'] == p_product_type_name), "")
+                    yarn_type_code = next((item['code'] for item in yarn_types_coded if item['name'] == p_yarn_type_name), "")
+
+                    # 중량 포맷 (3자리, 0으로 채움)
+                    weight_code = f"{p_weight:03d}"
+
+                    # 사이즈 포맷 (숫자만 추출)
+                    import re
+                    size_code = re.sub(r'\D', '', p_size)
+
+                    if not all([product_type_code, yarn_type_code, weight_code, size_code]):
+                        st.error("제품 코드 생성에 필요한 정보가 부족합니다. 기초코드 관리를 확인해주세요.")
+                    else:
+                        # 제품코드 조합
+                        product_code = f"{product_type_code}{yarn_type_code}{weight_code}{size_code}"
+
+                        # Firestore에 이미 존재하는 코드인지 확인
+                        if db.collection("products").document(product_code).get().exists:
+                            st.error(f"이미 존재하는 제품코드입니다: {product_code}")
+                        else:
+                            product_data = {
+                                "product_code": product_code,
+                                "product_type": p_product_type_name, # 필드명 변경
+                                "yarn_type": p_yarn_type_name,
+                                "weight": p_weight,
+                                "size": p_size,
+                                "created_at": datetime.datetime.now()
+                            }
+                            db.collection("products").document(product_code).set(product_data)
+                            st.success(f"신규 제품코드 [{product_code}]가 등록되었습니다.")
+                            st.rerun()
+                else:
+                    st.error("모든 필드를 올바르게 입력해주세요.")
+
+    with tab2:
+        st.subheader("등록된 제품 목록")
+        # created_at 필드가 없는 과거 데이터(P0001 등)도 모두 조회하기 위해 정렬 조건 제거
+        product_docs = list(db.collection("products").stream())
+        if product_docs:
+            products_data = [doc.to_dict() for doc in product_docs]
+            df_products = pd.DataFrame(products_data)
+            
+            col_map = {
+                "product_code": "제품코드", "product_type": "제품종류", "yarn_type": "사종",
+                "weight": "중량(g)", "size": "사이즈", "created_at": "등록일"
+            }
+            
+            if 'created_at' in df_products.columns:
+                # 최신순 정렬 (등록일이 있는 경우)
+                df_products = df_products.sort_values(by='created_at', ascending=False)
+                df_products['created_at'] = df_products['created_at'].apply(lambda x: x.strftime('%Y-%m-%d') if hasattr(x, 'strftime') else x)
+                # NaT (Not a Time) 값이 있어도 오류가 나지 않도록 pd.notna()로 확인
+                df_products['created_at'] = df_products['created_at'].apply(lambda x: x.strftime('%Y-%m-%d') if pd.notna(x) else None)
+
+            # 구버전 데이터 호환
+            if "weaving_type" in df_products.columns and "product_type" not in df_products.columns:
+                df_products.rename(columns={"weaving_type": "product_type"}, inplace=True)
+
+            display_cols = ["product_code", "product_type", "yarn_type", "weight", "size", "created_at"]
+            final_cols = [c for c in display_cols if c in df_products.columns] # 실제 존재하는 컬럼만 선택
+            df_display = df_products[final_cols].rename(columns=col_map)
+            
+            st.dataframe(df_display, use_container_width=True, hide_index=True)
+            
+            # 삭제 기능
+            st.divider()
+            st.subheader("🗑️ 제품 삭제")
+            del_code = st.selectbox("삭제할 제품코드 선택", df_products["product_code"].tolist())
+            if st.button("선택한 제품 삭제", type="primary"):
+                # TODO: 해당 제품코드를 사용하는 주문이 있는지 확인하는 로직 추가하면 좋음
+                db.collection("products").document(del_code).delete()
+                st.success(f"제품코드 [{del_code}]가 삭제되었습니다.")
+                st.rerun()
+        else:
+            st.info("등록된 제품이 없습니다.")
+
 elif menu == "거래처관리":
     st.header("🏢 거래처 관리")
     
-    tab1, tab2 = st.tabs(["➕ 거래처 등록", "📋 거래처 목록"])
+    tab1, tab2, tab3 = st.tabs(["➕ 거래처 등록", "📋 거래처 목록", "⚙️ 거래처 구분 관리"])
     
     # 기초 코드에서 거래처 구분 가져오기
     partner_types = get_common_codes("partner_types", ["발주처", "염색업체", "봉제업체", "배송업체", "기타"])
@@ -2068,6 +2224,11 @@ elif menu == "거래처관리":
         else:
             st.info("등록된 거래처가 없습니다.")
 
+    with tab3:
+        st.subheader("거래처 구분 관리")
+        st.info("거래처 등록 시 사용할 구분을 관리합니다.")
+        manage_code("partner_types", partner_types, "거래처 구분")
+
 elif menu == "제직기관리":
     st.header("🏭 제직기 관리")
     
@@ -2159,50 +2320,33 @@ elif menu == "제직기관리":
                     db.collection("machines").document(sel_id).delete()
                     st.success("삭제되었습니다.")
                     st.rerun()
+elif menu == "제품코드설정":
+    st.header("📝 제품코드 설정")
+    st.info("제품 코드 생성을 위한 각 부분의 코드 및 포맷을 설정합니다.")
 
-elif menu == "기초코드관리":
-    st.header("⚙️ 기초 코드 관리")
-    st.info("콤보박스에 표시될 항목들을 관리합니다.")
-    
-    code_tabs = st.tabs(["제직 타입", "거래처 구분"])
-    
-    # 코드 관리용 함수
-    def manage_code(code_key, default_list, label):
-        current_list = get_common_codes(code_key, default_list)
-        
-        # 목록 표시 (데이터프레임 사용)
-        st.markdown(f"##### 📋 현재 등록된 {label}")
-        if current_list:
-            df = pd.DataFrame(current_list, columns=["명칭"])
-            st.dataframe(df, use_container_width=True, hide_index=True)
-        else:
-            st.info("등록된 항목이 없습니다.")
-        
-        st.divider()
-        
-        c1, c2 = st.columns(2)
-        with c1:
-            st.write(f"**➕ {label} 추가**")
-            new_val = st.text_input(f"추가할 내용 입력", key=f"new_{code_key}")
-            if st.button(f"추가하기", key=f"btn_add_{code_key}"):
-                if new_val and new_val not in current_list:
-                    current_list.append(new_val)
-                    db.collection("settings").document("codes").set({code_key: current_list}, merge=True)
-                    st.success("추가되었습니다.")
-                    st.rerun()
-        
-        with c2:
-            st.write(f"**🗑️ {label} 삭제**")
-            del_val = st.selectbox(f"삭제할 항목 선택", ["선택하세요"] + current_list, key=f"del_{code_key}")
-            if st.button(f"삭제하기", key=f"btn_del_{code_key}"):
-                if del_val != "선택하세요":
-                    current_list.remove(del_val)
-                    db.collection("settings").document("codes").set({code_key: current_list}, merge=True)
-                    st.success("삭제되었습니다.")
-                    st.rerun()
+    tab1, tab2, tab3 = st.tabs(["제품 종류", "사종", "기타 포맷 설정"])
 
-    with code_tabs[0]: manage_code("weaving_types", ["30수 연사", "40수 코마사", "무지", "자카드", "기타"], "제직 타입")
-    with code_tabs[1]: manage_code("partner_types", ["발주처", "염색업체", "봉제업체", "배송업체", "기타"], "거래처 구분")
+    with tab1:
+        manage_code_with_code("product_types", [{'name': '세면타올', 'code': 'A'}, {'name': '바스타올', 'code': 'B'}, {'name': '핸드타올', 'code': 'H'}, {'name': '발매트', 'code': 'M'}, {'name': '스포츠타올', 'code': 'S'}], "제품 종류")
+    
+    with tab2:
+        manage_code_with_code("yarn_types_coded", [{'name': '20수', 'code': '20S'}, {'name': '30수', 'code': '30S'}], "사종")
+
+    with tab3:
+        st.subheader("중량 및 사이즈 코드 포맷")
+        st.markdown("""
+        제품 코드에 사용되는 중량과 사이즈는 아래 규칙에 따라 자동으로 변환됩니다.
+        이 설정은 **[제품 관리]** 메뉴에서 제품 등록 시 적용됩니다.
+
+        - **중량(g)**: 입력된 숫자를 **3자리**로 맞춥니다. (앞을 0으로 채움)
+          - 예: `90` -> `090`, `170` -> `170`
+        - **사이즈**: 입력된 문자열에서 **숫자만 추출**하여 합칩니다.
+          - 예: `40x80` -> `4080`, `34 * 78` -> `3478`
+        
+        ---
+        *현재 이 포맷 규칙은 UI에서 변경할 수 없으며, 코드에 고정되어 있습니다.*
+        *변경이 필요할 경우 개발자에게 문의해주세요.*
+        """)
 
 else:
     st.header(f"🏗️ {menu}")

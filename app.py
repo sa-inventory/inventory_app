@@ -2255,11 +2255,6 @@ elif menu == "제품 관리":
                 }
                 db.collection("products").document(product_code).set(product_data)
                 st.session_state["product_reg_msg"] = f"✅ 신규 제품코드 [{product_code}]가 성공적으로 등록되었습니다."
-                # 콤보박스 초기화를 위해 세션 상태 값 변경
-                st.session_state["reg_pt"] = "선택하세요"
-                st.session_state["reg_yt"] = "선택하세요"
-                st.session_state["reg_wt"] = "선택하세요"
-                st.session_state["reg_sz"] = "선택하세요"
                 # 콤보박스 초기화를 위해 리셋 플래그 설정
                 st.session_state["trigger_reset"] = True
                 st.rerun()

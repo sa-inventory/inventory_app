@@ -458,21 +458,28 @@ elif menu == "발주현황":
     st.header("📊 발주 현황")
     st.write("조건을 설정하여 발주 내역을 조회하고 관리합니다.")
 
+    # 메뉴 첫 진입 시 기본 검색 조건 설정
+    if "search_performed" not in st.session_state:
+        st.session_state["search_performed"] = True
+        today = datetime.date.today()
+        st.session_state["search_date_range"] = [today - datetime.timedelta(days=30), today]
+        st.session_state["search_filter_status_new"] = []
+        st.session_state["search_filter_customer"] = ""
+
     with st.form("search_form"):
         c1, c2, c3 = st.columns(3)
-        # 날짜 범위 선택 (기본값: 최근 30일)
-        today = datetime.date.today()
-        date_range = c1.date_input("조회 기간", [today - datetime.timedelta(days=30), today], format="YYYY-MM-DD")
+        # 날짜 범위 선택 (기본값: 세션에 저장된 값 사용)
+        date_range = c1.date_input("조회 기간", st.session_state.get("search_date_range"), format="YYYY-MM-DD")
         # 상세 공정 상태 목록 추가
         status_options = ["발주접수", "제직대기", "제직중", "제직완료", "염색출고", "염색중", "염색완료", "봉제중", "봉제완료", "출고완료"]
         
         # 초기값: 이전에 검색한 값이 있으면 유지, 없으면 빈 리스트 (전체 조회)
-        default_status = st.session_state.get("search_filter_status_new", [])
+        default_status = st.session_state.get("search_filter_status_new")
         # 에러 방지: 현재 옵션에 있는 값만 필터링 (코드가 바뀌었을 때를 대비)
         valid_default = [x for x in default_status if x in status_options]
         
         filter_status = c2.multiselect("진행 상태 (비워두면 전체)", status_options, default=valid_default)
-        filter_customer = c3.text_input("발주처 검색")
+        filter_customer = c3.text_input("발주처 검색", value=st.session_state.get("search_filter_customer"))
         
         search_btn = st.form_submit_button("🔍 조회하기")
 
@@ -482,6 +489,7 @@ elif menu == "발주현황":
         st.session_state["search_date_range"] = date_range
         st.session_state["search_filter_status_new"] = filter_status
         st.session_state["search_filter_customer"] = filter_customer
+        st.rerun()
 
     if st.session_state.get("search_performed"):
         # 저장된 검색 조건 사용
@@ -713,10 +721,6 @@ elif menu == "발주현황":
 
         else:
             st.info("해당 기간에 조회된 데이터가 없습니다.")
-    else:
-        st.write("조건을 설정하여 발주 내역을 조회합니다.")
-
-        st.info("조회 기간을 선택하고 조회 버튼을 눌러주세요.")
 
 elif menu == "제직현황":
     st.header("🧵 제직 현황")

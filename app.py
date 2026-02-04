@@ -283,6 +283,16 @@ if menu == "발주서접수":
     if "order_success_msg" in st.session_state:
         st.success(st.session_state["order_success_msg"])
         del st.session_state["order_success_msg"]
+        
+    # [수정] 발주 등록 후 초기화 로직
+    if st.session_state.get("trigger_order_reset"):
+        st.session_state["filter_pt"] = "전체"
+        st.session_state["filter_yt"] = "전체"
+        st.session_state["filter_wt"] = "전체"
+        st.session_state["filter_sz"] = "전체"
+        if "order_product_select" in st.session_state:
+            del st.session_state["order_product_select"]
+        del st.session_state["trigger_order_reset"]
 
     if st.session_state["role"] == "admin":
         # --- 1. 제품 선택 ---
@@ -321,10 +331,10 @@ if menu == "발주서접수":
                     return ["전체"] + sorted(values)
                 return ["전체"]
             
-            s_type = f1.selectbox("제품종류", get_options("product_type"))
-            s_yarn = f2.selectbox("사종", get_options("yarn_type"))
-            s_weight = f3.selectbox("중량", get_options("weight"))
-            s_size = f4.selectbox("사이즈", get_options("size"))
+            s_type = f1.selectbox("제품종류", get_options("product_type"), key="filter_pt")
+            s_yarn = f2.selectbox("사종", get_options("yarn_type"), key="filter_yt")
+            s_weight = f3.selectbox("중량", get_options("weight"), key="filter_wt")
+            s_size = f4.selectbox("사이즈", get_options("size"), key="filter_sz")
 
         # 필터링 적용
         df_filtered = df_products.copy()
@@ -437,6 +447,7 @@ if menu == "발주서접수":
                     db.collection("orders").add(doc_data) # 'orders' 컬렉션에 저장
                     st.success(f"발주번호 [{order_no}] 접수 완료!")
                     st.session_state["order_success_msg"] = f"✅ 발주번호 [{order_no}]가 성공적으로 등록되었습니다."
+                    st.session_state["trigger_order_reset"] = True
                     st.rerun()
                 else:
                     st.error("제품명과 발주처는 필수 입력 항목입니다.")

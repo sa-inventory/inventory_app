@@ -2164,6 +2164,14 @@ elif menu == "제품 관리":
         if "product_reg_msg" in st.session_state:
             st.success(st.session_state["product_reg_msg"])
             del st.session_state["product_reg_msg"]
+            
+        # [수정] 콤보박스 초기화 로직 (위젯 생성 전에 실행해야 함)
+        if st.session_state.get("trigger_reset"):
+            st.session_state["reg_pt"] = "선택하세요"
+            st.session_state["reg_yt"] = "선택하세요"
+            st.session_state["reg_wt"] = "선택하세요"
+            st.session_state["reg_sz"] = "선택하세요"
+            del st.session_state["trigger_reset"]
 
         # 기초 코드가 없어도 폼은 보여주되, 경고 메시지 표시
         missing_codes = []
@@ -2252,6 +2260,8 @@ elif menu == "제품 관리":
                 st.session_state["reg_yt"] = "선택하세요"
                 st.session_state["reg_wt"] = "선택하세요"
                 st.session_state["reg_sz"] = "선택하세요"
+                # 콤보박스 초기화를 위해 리셋 플래그 설정
+                st.session_state["trigger_reset"] = True
                 st.rerun()
 
 elif menu == "거래처관리":

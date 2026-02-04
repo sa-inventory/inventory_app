@@ -1965,68 +1965,13 @@ elif menu == "제품 관리":
     # 제품종류, 사종 기초 코드 가져오기
     product_types_coded = get_common_codes("product_types", [])
     yarn_types_coded = get_common_codes("yarn_types_coded", [])
+    weight_codes = get_common_codes("weight_codes", [])
+    size_codes = get_common_codes("size_codes", [])
 
-    tab1, tab2 = st.tabs(["➕ 제품 등록", "📋 제품 목록"])
+    # 탭 순서 변경: 목록이 먼저 나오도록 수정
+    tab1, tab2 = st.tabs(["📋 제품 목록", "➕ 제품 등록"])
 
     with tab1:
-        st.subheader("신규 제품 등록")
-
-        if not product_types_coded or not yarn_types_coded:
-            st.warning("제품 코드 생성을 위한 기초 코드가 등록되지 않았습니다.\n\n[기초정보관리 > 제품코드설정] 메뉴에서 '제품 종류'와 '사종'을 먼저 등록해주세요.")
-            st.stop()
-
-        with st.form("product_form", clear_on_submit=True):
-            # UI에 표시할 이름 목록
-            product_type_names = [item['name'] for item in product_types_coded]
-            yarn_type_names = [item['name'] for item in yarn_types_coded]
-
-            c1, c2 = st.columns(2)
-            p_product_type_name = c1.selectbox("제품종류", product_type_names)
-            p_yarn_type_name = c2.selectbox("사종", yarn_type_names)
-
-            c3, c4 = st.columns(2)
-            p_weight = c3.number_input("중량(g)", min_value=0, step=10)
-            p_size = c4.text_input("사이즈", placeholder="예: 40x80")
-
-            submitted = st.form_submit_button("제품 등록")
-            if submitted:
-                if p_product_type_name and p_yarn_type_name and p_weight > 0 and p_size:
-                    # 선택된 이름으로 코드 찾기
-                    product_type_code = next((item['code'] for item in product_types_coded if item['name'] == p_product_type_name), "")
-                    yarn_type_code = next((item['code'] for item in yarn_types_coded if item['name'] == p_yarn_type_name), "")
-
-                    # 중량 포맷 (3자리, 0으로 채움)
-                    weight_code = f"{p_weight:03d}"
-
-                    # 사이즈 포맷 (숫자만 추출)
-                    import re
-                    size_code = re.sub(r'\D', '', p_size)
-
-                    if not all([product_type_code, yarn_type_code, weight_code, size_code]):
-                        st.error("제품 코드 생성에 필요한 정보가 부족합니다. 기초코드 관리를 확인해주세요.")
-                    else:
-                        # 제품코드 조합
-                        product_code = f"{product_type_code}{yarn_type_code}{weight_code}{size_code}"
-
-                        # Firestore에 이미 존재하는 코드인지 확인
-                        if db.collection("products").document(product_code).get().exists:
-                            st.error(f"이미 존재하는 제품코드입니다: {product_code}")
-                        else:
-                            product_data = {
-                                "product_code": product_code,
-                                "product_type": p_product_type_name, # 필드명 변경
-                                "yarn_type": p_yarn_type_name,
-                                "weight": p_weight,
-                                "size": p_size,
-                                "created_at": datetime.datetime.now()
-                            }
-                            db.collection("products").document(product_code).set(product_data)
-                            st.success(f"신규 제품코드 [{product_code}]가 등록되었습니다.")
-                            st.rerun()
-                else:
-                    st.error("모든 필드를 올바르게 입력해주세요.")
-
-    with tab2:
         st.subheader("등록된 제품 목록")
         # created_at 필드가 없는 과거 데이터(P0001 등)도 모두 조회하기 위해 정렬 조건 제거
         product_docs = list(db.collection("products").stream())
@@ -2040,11 +1985,12 @@ elif menu == "제품 관리":
             }
             
             if 'created_at' in df_products.columns:
+                # datetime 객체로 변환 (에러 발생 시 NaT 처리)
+                df_products['created_at'] = pd.to_datetime(df_products['created_at'], errors='coerce')
                 # 최신순 정렬 (등록일이 있는 경우)
                 df_products = df_products.sort_values(by='created_at', ascending=False)
-                df_products['created_at'] = df_products['created_at'].apply(lambda x: x.strftime('%Y-%m-%d') if hasattr(x, 'strftime') else x)
-                # NaT (Not a Time) 값이 있어도 오류가 나지 않도록 pd.notna()로 확인
-                df_products['created_at'] = df_products['created_at'].apply(lambda x: x.strftime('%Y-%m-%d') if pd.notna(x) else None)
+                # 문자열 포맷팅 (NaT는 빈 문자열로)
+                df_products['created_at'] = df_products['created_at'].dt.strftime('%Y-%m-%d').fillna('')
 
             # 구버전 데이터 호환
             if "weaving_type" in df_products.columns and "product_type" not in df_products.columns:
@@ -2067,6 +2013,67 @@ elif menu == "제품 관리":
                 st.rerun()
         else:
             st.info("등록된 제품이 없습니다.")
+
+    with tab2:
+        st.subheader("신규 제품 등록")
+
+        if not product_types_coded or not yarn_types_coded or not weight_codes or not size_codes:
+            st.warning("제품 코드 생성을 위한 기초 코드가 등록되지 않았습니다.\n\n[기초정보관리 > 제품코드설정] 메뉴에서 '제품 종류', '사종', '중량', '사이즈'를 모두 등록해주세요.")
+            st.stop()
+
+        with st.form("product_form", clear_on_submit=True):
+            # UI에 표시할 이름 목록
+            product_type_names = [item['name'] for item in product_types_coded]
+            yarn_type_names = [item['name'] for item in yarn_types_coded]
+            weight_names = [item['name'] for item in weight_codes]
+            size_names = [item['name'] for item in size_codes]
+
+            c1, c2 = st.columns(2)
+            p_product_type_name = c1.selectbox("제품종류", product_type_names)
+            p_yarn_type_name = c2.selectbox("사종", yarn_type_names)
+
+            c3, c4 = st.columns(2)
+            p_weight_name = c3.selectbox("중량", weight_names)
+            p_size_name = c4.selectbox("사이즈", size_names)
+
+            submitted = st.form_submit_button("제품 등록")
+            if submitted:
+                if p_product_type_name and p_yarn_type_name and p_weight_name and p_size_name:
+                    # 선택된 이름으로 코드 찾기
+                    product_type_code = next((item['code'] for item in product_types_coded if item['name'] == p_product_type_name), "")
+                    yarn_type_code = next((item['code'] for item in yarn_types_coded if item['name'] == p_yarn_type_name), "")
+                    weight_code = next((item['code'] for item in weight_codes if item['name'] == p_weight_name), "")
+                    size_code = next((item['code'] for item in size_codes if item['name'] == p_size_name), "")
+
+                    if not all([product_type_code, yarn_type_code, weight_code, size_code]):
+                        st.error("코드 정보를 찾을 수 없습니다. 기초코드 관리를 확인해주세요.")
+                    else:
+                        # 제품코드 조합
+                        product_code = f"{product_type_code}{yarn_type_code}{weight_code}{size_code}"
+
+                        # Firestore에 이미 존재하는 코드인지 확인
+                        if db.collection("products").document(product_code).get().exists:
+                            st.error(f"이미 존재하는 제품코드입니다: {product_code}")
+                        else:
+                            # 중량은 계산을 위해 숫자로 변환하여 저장 (코드값이 숫자라고 가정)
+                            try:
+                                weight_val = int(weight_code)
+                            except:
+                                weight_val = 0
+
+                            product_data = {
+                                "product_code": product_code,
+                                "product_type": p_product_type_name,
+                                "yarn_type": p_yarn_type_name,
+                                "weight": weight_val, # 계산용 숫자 (코드값 사용)
+                                "size": p_size_name,  # 표시용 이름
+                                "created_at": datetime.datetime.now()
+                            }
+                            db.collection("products").document(product_code).set(product_data)
+                            st.success(f"신규 제품코드 [{product_code}]가 등록되었습니다.")
+                            st.rerun()
+                else:
+                    st.error("모든 항목을 선택해주세요.")
 
 elif menu == "거래처관리":
     st.header("🏢 거래처 관리")
@@ -2324,7 +2331,7 @@ elif menu == "제품코드설정":
     st.header("📝 제품코드 설정")
     st.info("제품 코드 생성을 위한 각 부분의 코드 및 포맷을 설정합니다.")
 
-    tab1, tab2, tab3 = st.tabs(["제품 종류", "사종", "기타 포맷 설정"])
+    tab1, tab2, tab3, tab4 = st.tabs(["제품 종류", "사종", "중량", "사이즈"])
 
     with tab1:
         manage_code_with_code("product_types", [{'name': '세면타올', 'code': 'A'}, {'name': '바스타올', 'code': 'B'}, {'name': '핸드타올', 'code': 'H'}, {'name': '발매트', 'code': 'M'}, {'name': '스포츠타올', 'code': 'S'}], "제품 종류")
@@ -2333,20 +2340,10 @@ elif menu == "제품코드설정":
         manage_code_with_code("yarn_types_coded", [{'name': '20수', 'code': '20S'}, {'name': '30수', 'code': '30S'}], "사종")
 
     with tab3:
-        st.subheader("중량 및 사이즈 코드 포맷")
-        st.markdown("""
-        제품 코드에 사용되는 중량과 사이즈는 아래 규칙에 따라 자동으로 변환됩니다.
-        이 설정은 **[제품 관리]** 메뉴에서 제품 등록 시 적용됩니다.
+        manage_code_with_code("weight_codes", [], "중량")
 
-        - **중량(g)**: 입력된 숫자를 **3자리**로 맞춥니다. (앞을 0으로 채움)
-          - 예: `90` -> `090`, `170` -> `170`
-        - **사이즈**: 입력된 문자열에서 **숫자만 추출**하여 합칩니다.
-          - 예: `40x80` -> `4080`, `34 * 78` -> `3478`
-        
-        ---
-        *현재 이 포맷 규칙은 UI에서 변경할 수 없으며, 코드에 고정되어 있습니다.*
-        *변경이 필요할 경우 개발자에게 문의해주세요.*
-        """)
+    with tab4:
+        manage_code_with_code("size_codes", [], "사이즈")
 
 else:
     st.header(f"🏗️ {menu}")

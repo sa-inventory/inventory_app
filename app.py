@@ -136,6 +136,27 @@ def get_partners(partner_type=None):
         partners.append(p.get("name"))
     return partners
 
+# --- [NEW] 공통 함수: 기초 코드가 제품에 사용되었는지 확인 ---
+@st.cache_data(ttl=60) # 1분 동안 결과 캐싱
+def is_basic_code_used(code_key, name, code):
+    """지정된 기초 코드가 'products' 컬렉션에서 사용되었는지 확인합니다."""
+    query = None
+    if code_key == "product_types":
+        query = db.collection("products").where("product_type", "==", name).limit(1)
+    elif code_key == "yarn_types_coded":
+        query = db.collection("products").where("yarn_type", "==", name).limit(1)
+    elif code_key == "size_codes":
+        query = db.collection("products").where("size", "==", name).limit(1)
+    elif code_key == "weight_codes":
+        try:
+            # 'weight' 필드는 숫자로 저장되어 있으므로 코드를 숫자로 변환하여 쿼리
+            weight_val = int(code)
+            query = db.collection("products").where("weight", "==", weight_val).limit(1)
+        except (ValueError, TypeError):
+            return False # 코드가 숫자가 아니면 사용될 수 없음
+    
+    return len(list(query.stream())) > 0 if query else False
+
 # --- 공통 함수: 기초 코드 관리 UI ---
 
 # 이름-코드 쌍 관리 함수
@@ -146,44 +167,89 @@ def manage_code_with_code(code_key, default_list, label):
     # 이전 버전 호환을 위해 딕셔너리 형태만 필터링
     current_list_dicts = [item for item in current_list if isinstance(item, dict)]
     if current_list_dicts:
-        df = pd.DataFrame(current_list_dicts)
-        st.dataframe(df, use_container_width=True, hide_index=True, column_order=("name", "code"))
+        # 코드 기준 오름차순 정렬
+        current_list_dicts.sort(key=lambda x: x.get('code', ''))
+        df = pd.DataFrame(current_list_dicts, columns=['name', 'code'])
     else:
-        st.info("등록된 항목이 없습니다.")
+        df = pd.DataFrame(columns=['name', 'code'])
+
+    selection = st.dataframe(
+        df,
+        use_container_width=True,
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
+        key=f"df_{code_key}"
+    )
 
     st.divider()
 
-    # 추가/수정
-    with st.expander(f"➕ {label} 추가/수정"):
-        st.caption("같은 '명칭'으로 저장하면 '코드'가 수정됩니다.")
-        with st.form(key=f"add_{code_key}"):
-            c1, c2 = st.columns(2)
-            new_name = c1.text_input("명칭", key=f"name_{code_key}")
-            new_code = c2.text_input("코드", key=f"code_{code_key}")
-            if st.form_submit_button("저장"):
-                if new_name and new_code:
-                    # 이름으로 기존 항목 찾기
-                    existing_item = next((item for item in current_list_dicts if item.get('name') == new_name), None)
-                    if existing_item:
-                        existing_item['code'] = new_code # 수정
-                    else:
-                        current_list_dicts.append({'name': new_name, 'code': new_code}) # 추가
-                    
-                    db.collection("settings").document("codes").set({code_key: current_list_dicts}, merge=True)
-                    st.success("저장되었습니다.")
-                    st.rerun()
+    # --- 수정 / 삭제 (항목 선택 시) ---
+    if selection.selection.rows:
+        idx = selection.selection.rows[0]
+        sel_row = df.iloc[idx]
+        sel_name = sel_row['name']
+        sel_code = sel_row['code']
 
-    # 삭제
-    with st.expander(f"🗑️ {label} 삭제"):
-        if current_list_dicts:
-            names_to_delete = [item['name'] for item in current_list_dicts]
-            del_name = st.selectbox("삭제할 명칭 선택", ["선택하세요"] + names_to_delete, key=f"del_{code_key}")
-            if st.button("삭제하기", key=f"btn_del_{code_key}"):
-                if del_name != "선택하세요":
-                    updated_list = [item for item in current_list_dicts if item['name'] != del_name]
-                    db.collection("settings").document("codes").set({code_key: updated_list}, merge=True)
-                    st.success("삭제되었습니다.")
-                    st.rerun()
+        is_used = is_basic_code_used(code_key, sel_name, sel_code)
+
+        if is_used:
+            st.subheader(f"ℹ️ '{sel_name}' 정보")
+            st.warning("이 항목은 제품 등록에 사용되어 수정 및 삭제가 불가능합니다.")
+            st.text_input("명칭", value=sel_name, disabled=True)
+            st.text_input("코드", value=sel_code, disabled=True)
+        else:
+            # 수정 폼
+            with st.form(key=f"edit_{code_key}"):
+                st.subheader(f"🛠️ '{sel_name}' 수정")
+                new_name = st.text_input("명칭", value=sel_name)
+                new_code = st.text_input("코드", value=sel_code)
+
+                if st.form_submit_button("수정 저장"):
+                    if new_name and new_code:
+                        # 새 명칭이 다른 항목에서 이미 사용 중인지 확인
+                        is_name_taken = any(item.get('name') == new_name for item in current_list_dicts if item.get('name') != sel_name)
+                        if is_name_taken:
+                            st.error(f"'{new_name}'은(는) 이미 존재하는 명칭입니다.")
+                        else:
+                            for item in current_list_dicts:
+                                if item.get('name') == sel_name: # 기존 이름으로 항목 찾기
+                                    item['name'] = new_name # 이름 업데이트
+                                    item['code'] = new_code # 코드 업데이트
+                                    break
+                            db.collection("settings").document("codes").set({code_key: current_list_dicts}, merge=True)
+                            st.success("수정되었습니다.")
+                            st.rerun()
+
+            # 삭제 기능
+            st.subheader(f"🗑️ '{sel_name}' 삭제")
+            if st.button("이 항목 삭제하기", type="primary", key=f"del_btn_{code_key}"):
+                updated_list = [item for item in current_list_dicts if item['name'] != sel_name]
+                db.collection("settings").document("codes").set({code_key: updated_list}, merge=True)
+                st.success("삭제되었습니다.")
+                st.rerun()
+
+    # --- 추가 (항목 미선택 시) ---
+    else:
+        st.subheader(f"➕ 신규 {label} 추가")
+        if not df.empty:
+            st.info("목록에서 항목을 선택하면 수정 또는 삭제할 수 있습니다.")
+
+        with st.form(key=f"add_{code_key}", clear_on_submit=True):
+            c1, c2 = st.columns(2)
+            new_name = c1.text_input("명칭")
+            new_code = c2.text_input("코드")
+            if st.form_submit_button("추가"):
+                if new_name and new_code:
+                    if any(item.get('name') == new_name for item in current_list_dicts):
+                        st.error("이미 존재하는 명칭입니다.")
+                    else:
+                        current_list_dicts.append({'name': new_name, 'code': new_code})
+                        db.collection("settings").document("codes").set({code_key: current_list_dicts}, merge=True)
+                        st.success("추가되었습니다.")
+                        st.rerun()
+                else:
+                    st.warning("명칭과 코드를 모두 입력해주세요.")
 
 # 단순 리스트 관리 함수
 def manage_code(code_key, default_list, label):
@@ -213,6 +279,11 @@ if menu == "발주서접수":
     st.header("📑 발주서 접수")
     st.info("먼저 제품코드를 선택한 후, 신규 발주서를 시스템에 등록합니다.")
     
+    # 발주 등록 성공 메시지 표시 (리런 후 유지)
+    if "order_success_msg" in st.session_state:
+        st.success(st.session_state["order_success_msg"])
+        del st.session_state["order_success_msg"]
+
     if st.session_state["role"] == "admin":
         # --- 1. 제품 선택 ---
         st.subheader("1. 제품 선택")
@@ -222,20 +293,69 @@ if menu == "발주서접수":
             st.warning("등록된 제품이 없습니다. [기초정보관리 > 제품 관리] 메뉴에서 먼저 제품을 등록해주세요.")
             st.stop()
         
-        product_options = {}
-        for doc in product_docs:
-            p = doc.to_dict()
-            # 예: P0001: 30수 연사 / 150g / 40x80
-            display_name = f"{p['product_code']}: {p.get('product_type', p.get('weaving_type', ''))} / {p['yarn_type']} / {p['weight']}g / {p['size']}"
-            product_options[display_name] = p
-
-        selected_product_display = st.selectbox("등록할 제품을 선택하세요.", list(product_options.keys()))
+        # 데이터프레임 변환
+        products_data = [doc.to_dict() for doc in product_docs]
+        df_products = pd.DataFrame(products_data)
         
-        if not selected_product_display:
+        # 구버전 데이터 호환
+        if "weaving_type" in df_products.columns and "product_type" not in df_products.columns:
+            df_products.rename(columns={"weaving_type": "product_type"}, inplace=True)
+
+        # 표시할 컬럼 설정
+        col_map = {
+            "product_code": "제품코드", "product_type": "제품종류", "yarn_type": "사종",
+            "weight": "중량(g)", "size": "사이즈"
+        }
+        display_cols = ["product_code", "product_type", "yarn_type", "weight", "size"]
+        final_cols = [c for c in display_cols if c in df_products.columns]
+
+        # 검색 필터 추가
+        with st.expander("🔍 제품 검색 필터", expanded=True):
+            f1, f2, f3, f4 = st.columns(4)
+            
+            # 필터 옵션 생성 (전체 + 고유값)
+            def get_options(col):
+                if col in df_products.columns:
+                    # None 값 처리 및 문자열 변환
+                    values = [str(x) for x in df_products[col].unique() if pd.notna(x)]
+                    return ["전체"] + sorted(values)
+                return ["전체"]
+            
+            s_type = f1.selectbox("제품종류", get_options("product_type"))
+            s_yarn = f2.selectbox("사종", get_options("yarn_type"))
+            s_weight = f3.selectbox("중량", get_options("weight"))
+            s_size = f4.selectbox("사이즈", get_options("size"))
+
+        # 필터링 적용
+        df_filtered = df_products.copy()
+        if s_type != "전체":
+            df_filtered = df_filtered[df_filtered['product_type'].astype(str) == s_type]
+        if s_yarn != "전체":
+            df_filtered = df_filtered[df_filtered['yarn_type'].astype(str) == s_yarn]
+        if s_weight != "전체":
+            df_filtered = df_filtered[df_filtered['weight'].astype(str) == s_weight]
+        if s_size != "전체":
+            df_filtered = df_filtered[df_filtered['size'].astype(str) == s_size]
+
+        st.write("🔽 발주할 제품을 목록에서 선택(클릭)하세요.")
+        selection = st.dataframe(
+            df_filtered[final_cols].rename(columns=col_map),
+            use_container_width=True,
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row",
+            key="order_product_select"
+        )
+
+        if not selection.selection.rows:
+            st.info("👆 위 목록에서 제품을 선택하면 발주 입력 폼이 나타납니다.")
             st.stop()
 
-        selected_product = product_options[selected_product_display]
-        st.success(f"선택된 제품코드: **{selected_product['product_code']}**")
+        idx = selection.selection.rows[0]
+        selected_product = df_filtered.iloc[idx].to_dict()
+        
+        st.divider()
+        st.success(f"선택된 제품: **{selected_product['product_code']}** ({selected_product.get('product_type', '')} / {selected_product.get('yarn_type', '')})")
 
         # --- 2. 발주 정보 입력 ---
         with st.form("order_form", clear_on_submit=True):
@@ -316,6 +436,7 @@ if menu == "발주서접수":
                     }
                     db.collection("orders").add(doc_data) # 'orders' 컬렉션에 저장
                     st.success(f"발주번호 [{order_no}] 접수 완료!")
+                    st.session_state["order_success_msg"] = f"✅ 발주번호 [{order_no}]가 성공적으로 등록되었습니다."
                     st.rerun()
                 else:
                     st.error("제품명과 발주처는 필수 입력 항목입니다.")
@@ -1963,8 +2084,11 @@ elif menu == "제품 관리":
     st.info("제품의 고유한 특성(제품종류, 사종, 중량, 사이즈)을 조합하여 제품 코드를 생성하고 관리합니다.")
 
     # 제품종류, 사종 기초 코드 가져오기
-    product_types_coded = get_common_codes("product_types", [])
-    yarn_types_coded = get_common_codes("yarn_types_coded", [])
+    # 기초코드설정 메뉴와 동일한 기본값 사용
+    default_product_types = [{'name': '세면타올', 'code': 'A'}, {'name': '바스타올', 'code': 'B'}, {'name': '핸드타올', 'code': 'H'}, {'name': '발매트', 'code': 'M'}, {'name': '스포츠타올', 'code': 'S'}]
+    default_yarn_types = [{'name': '20수', 'code': '20S'}, {'name': '30수', 'code': '30S'}]
+    product_types_coded = get_common_codes("product_types", default_product_types)
+    yarn_types_coded = get_common_codes("yarn_types_coded", default_yarn_types)
     weight_codes = get_common_codes("weight_codes", [])
     size_codes = get_common_codes("size_codes", [])
 
@@ -1987,8 +2111,6 @@ elif menu == "제품 관리":
             if 'created_at' in df_products.columns:
                 # datetime 객체로 변환 (에러 발생 시 NaT 처리)
                 df_products['created_at'] = pd.to_datetime(df_products['created_at'], errors='coerce')
-                # 최신순 정렬 (등록일이 있는 경우)
-                df_products = df_products.sort_values(by='created_at', ascending=False)
                 # 문자열 포맷팅 (NaT는 빈 문자열로)
                 df_products['created_at'] = df_products['created_at'].dt.strftime('%Y-%m-%d').fillna('')
 
@@ -1996,84 +2118,141 @@ elif menu == "제품 관리":
             if "weaving_type" in df_products.columns and "product_type" not in df_products.columns:
                 df_products.rename(columns={"weaving_type": "product_type"}, inplace=True)
 
+            # 제품코드 기준 오름차순 정렬
+            if 'product_code' in df_products.columns:
+                df_products = df_products.sort_values(by='product_code', ascending=True)
+
             display_cols = ["product_code", "product_type", "yarn_type", "weight", "size", "created_at"]
             final_cols = [c for c in display_cols if c in df_products.columns] # 실제 존재하는 컬럼만 선택
             df_display = df_products[final_cols].rename(columns=col_map)
             
-            st.dataframe(df_display, use_container_width=True, hide_index=True)
+            st.write("🔽 삭제할 제품을 선택(체크)하세요. (다중 선택 가능)")
+            selection = st.dataframe(
+                df_display, 
+                use_container_width=True, 
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="multi-row",
+                key="product_list_selection"
+            )
             
             # 삭제 기능
-            st.divider()
-            st.subheader("🗑️ 제품 삭제")
-            del_code = st.selectbox("삭제할 제품코드 선택", df_products["product_code"].tolist())
-            if st.button("선택한 제품 삭제", type="primary"):
-                # TODO: 해당 제품코드를 사용하는 주문이 있는지 확인하는 로직 추가하면 좋음
-                db.collection("products").document(del_code).delete()
-                st.success(f"제품코드 [{del_code}]가 삭제되었습니다.")
-                st.rerun()
+            if selection.selection.rows:
+                st.divider()
+                st.subheader("🗑️ 제품 삭제")
+                st.warning(f"선택한 {len(selection.selection.rows)}개의 제품을 삭제하시겠습니까?")
+                if st.button("선택한 제품 일괄 삭제", type="primary"):
+                    selected_indices = selection.selection.rows
+                    selected_rows = df_display.iloc[selected_indices]
+                    
+                    deleted_cnt = 0
+                    for idx, row in selected_rows.iterrows():
+                        p_code = row.get("제품코드")
+                        if p_code:
+                            db.collection("products").document(p_code).delete()
+                            deleted_cnt += 1
+                    
+                    st.success(f"{deleted_cnt}건의 제품이 삭제되었습니다.")
+                    st.rerun()
         else:
             st.info("등록된 제품이 없습니다.")
 
     with tab2:
         st.subheader("신규 제품 등록")
 
-        if not product_types_coded or not yarn_types_coded or not weight_codes or not size_codes:
-            st.warning("제품 코드 생성을 위한 기초 코드가 등록되지 않았습니다.\n\n[기초정보관리 > 제품코드설정] 메뉴에서 '제품 종류', '사종', '중량', '사이즈'를 모두 등록해주세요.")
-            st.stop()
+        # 등록 성공 알림 표시 (리런 후에도 유지)
+        if "product_reg_msg" in st.session_state:
+            st.success(st.session_state["product_reg_msg"])
+            del st.session_state["product_reg_msg"]
 
-        with st.form("product_form", clear_on_submit=True):
-            # UI에 표시할 이름 목록
-            product_type_names = [item['name'] for item in product_types_coded]
-            yarn_type_names = [item['name'] for item in yarn_types_coded]
-            weight_names = [item['name'] for item in weight_codes]
-            size_names = [item['name'] for item in size_codes]
+        # 기초 코드가 없어도 폼은 보여주되, 경고 메시지 표시
+        missing_codes = []
+        if not product_types_coded: missing_codes.append("제품 종류")
+        if not yarn_types_coded: missing_codes.append("사종")
+        if not weight_codes: missing_codes.append("중량")
+        if not size_codes: missing_codes.append("사이즈")
 
-            c1, c2 = st.columns(2)
-            p_product_type_name = c1.selectbox("제품종류", product_type_names)
-            p_yarn_type_name = c2.selectbox("사종", yarn_type_names)
+        if missing_codes:
+            st.warning(f"⚠️ 다음 기초 코드가 등록되지 않았습니다: {', '.join(missing_codes)}\n\n[기초정보관리 > 제품코드설정] 메뉴에서 해당 항목들을 먼저 등록해주세요.")
 
-            c3, c4 = st.columns(2)
-            p_weight_name = c3.selectbox("중량", weight_names)
-            p_size_name = c4.selectbox("사이즈", size_names)
+        # 코드 기준 오름차순 정렬
+        if product_types_coded:
+            product_types_coded.sort(key=lambda x: x.get('code', ''))
+        if yarn_types_coded:
+            yarn_types_coded.sort(key=lambda x: x.get('code', ''))
+        if weight_codes:
+            weight_codes.sort(key=lambda x: x.get('code', ''))
+        if size_codes:
+            size_codes.sort(key=lambda x: x.get('code', ''))
 
-            submitted = st.form_submit_button("제품 등록")
-            if submitted:
-                if p_product_type_name and p_yarn_type_name and p_weight_name and p_size_name:
-                    # 선택된 이름으로 코드 찾기
-                    product_type_code = next((item['code'] for item in product_types_coded if item['name'] == p_product_type_name), "")
-                    yarn_type_code = next((item['code'] for item in yarn_types_coded if item['name'] == p_yarn_type_name), "")
-                    weight_code = next((item['code'] for item in weight_codes if item['name'] == p_weight_name), "")
-                    size_code = next((item['code'] for item in size_codes if item['name'] == p_size_name), "")
+        # UI에 표시할 이름 목록 (기본값 '선택하세요' 추가)
+        product_type_names = ["선택하세요"] + ([item['name'] for item in product_types_coded] if product_types_coded else [])
+        yarn_type_names = ["선택하세요"] + ([item['name'] for item in yarn_types_coded] if yarn_types_coded else [])
+        weight_names = ["선택하세요"] + ([item['name'] for item in weight_codes] if weight_codes else [])
+        size_names = ["선택하세요"] + ([item['name'] for item in size_codes] if size_codes else [])
 
-                    if not all([product_type_code, yarn_type_code, weight_code, size_code]):
-                        st.error("코드 정보를 찾을 수 없습니다. 기초코드 관리를 확인해주세요.")
-                    else:
-                        # 제품코드 조합
-                        product_code = f"{product_type_code}{yarn_type_code}{weight_code}{size_code}"
+        c1, c2 = st.columns(2)
+        p_product_type_name = c1.selectbox("제품종류", product_type_names, key="reg_pt")
+        p_yarn_type_name = c2.selectbox("사종", yarn_type_names, key="reg_yt")
 
-                        # Firestore에 이미 존재하는 코드인지 확인
-                        if db.collection("products").document(product_code).get().exists:
-                            st.error(f"이미 존재하는 제품코드입니다: {product_code}")
-                        else:
-                            # 중량은 계산을 위해 숫자로 변환하여 저장 (코드값이 숫자라고 가정)
-                            try:
-                                weight_val = int(weight_code)
-                            except:
-                                weight_val = 0
+        c3, c4 = st.columns(2)
+        p_weight_name = c3.selectbox("중량", weight_names, key="reg_wt")
+        p_size_name = c4.selectbox("사이즈", size_names, key="reg_sz")
 
-                            product_data = {
-                                "product_code": product_code,
-                                "product_type": p_product_type_name,
-                                "yarn_type": p_yarn_type_name,
-                                "weight": weight_val, # 계산용 숫자 (코드값 사용)
-                                "size": p_size_name,  # 표시용 이름
-                                "created_at": datetime.datetime.now()
-                            }
-                            db.collection("products").document(product_code).set(product_data)
-                            st.success(f"신규 제품코드 [{product_code}]가 등록되었습니다.")
-                            st.rerun()
+        # 실시간 코드 조합 및 중복 확인
+        generated_code = ""
+        is_valid = False
+
+        if "선택하세요" not in [p_product_type_name, p_yarn_type_name, p_weight_name, p_size_name]:
+            # 코드 찾기
+            pt_code = next((item['code'] for item in product_types_coded if item['name'] == p_product_type_name), "")
+            yt_code = next((item['code'] for item in yarn_types_coded if item['name'] == p_yarn_type_name), "")
+            wt_code = next((item['code'] for item in weight_codes if item['name'] == p_weight_name), "")
+            sz_code = next((item['code'] for item in size_codes if item['name'] == p_size_name), "")
+            
+            if all([pt_code, yt_code, wt_code, sz_code]):
+                generated_code = f"{pt_code}{yt_code}{wt_code}{sz_code}"
+                
+                # 유효성 및 중복 확인
+                if len(generated_code) != 10:
+                    st.error(f"⚠️ 코드 길이가 10자리가 아닙니다. (현재 {len(generated_code)}자) - [제품코드설정]을 확인하세요.")
+                elif db.collection("products").document(generated_code).get().exists:
+                    st.error(f"🚫 이미 존재하는 제품코드입니다: **{generated_code}**")
                 else:
-                    st.error("모든 항목을 선택해주세요.")
+                    st.success(f"✅ 생성 예정 제품코드: **{generated_code}**")
+                    is_valid = True
+
+        if st.button("제품 등록", type="primary", disabled=not is_valid):
+            if missing_codes:
+                st.error(f"기초 코드가 누락되어 제품을 등록할 수 없습니다: {', '.join(missing_codes)}")
+            else:
+                product_code = generated_code
+                
+                # 중량은 계산을 위해 숫자로 변환하여 저장
+                weight_code = next((item['code'] for item in weight_codes if item['name'] == p_weight_name), "0")
+                
+                # 중량은 계산을 위해 숫자로 변환하여 저장 (코드값이 숫자라고 가정)
+                try:
+                    weight_val = int(weight_code)
+                except:
+                    weight_val = 0
+
+                product_data = {
+                    "product_code": product_code,
+                    "product_type": p_product_type_name,
+                    "yarn_type": p_yarn_type_name,
+                    "weight": weight_val, # 계산용 숫자 (코드값 사용)
+                    "size": p_size_name,  # 표시용 이름
+                    "created_at": datetime.datetime.now()
+                }
+                db.collection("products").document(product_code).set(product_data)
+                st.session_state["product_reg_msg"] = f"✅ 신규 제품코드 [{product_code}]가 성공적으로 등록되었습니다."
+                # 콤보박스 초기화를 위해 세션 상태 값 변경
+                st.session_state["reg_pt"] = "선택하세요"
+                st.session_state["reg_yt"] = "선택하세요"
+                st.session_state["reg_wt"] = "선택하세요"
+                st.session_state["reg_sz"] = "선택하세요"
+                st.rerun()
 
 elif menu == "거래처관리":
     st.header("🏢 거래처 관리")

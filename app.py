@@ -9,7 +9,16 @@ import io
 
 # 1. 화면 기본 설정 (제목 등)
 st.set_page_config(page_title="타올 생산 현황 관리", layout="wide")
-st.title("🏭 세안타올 생산관리 현황")
+
+# [수정] 상단 여백 축소 및 제목 스타일 변경
+st.markdown("""
+    <style>
+        /* 메인 영역 상단 여백 줄이기 (기본값은 약 6rem) */
+        .block-container {
+            padding-top: 3rem !important;
+        }
+    </style>
+""", unsafe_allow_html=True)
 
 # 2. 데이터베이스 연결 (아까 받은 열쇠 사용)
 # 이미 연결되어 있다면 건너뛰고, 안 되어 있을 때만 연결합니다.
@@ -67,6 +76,7 @@ if "logged_in" not in st.session_state:
 
 # 3. [왼쪽 사이드바] 상품 등록 기능
 with st.sidebar:
+    st.markdown("<h2 style='text-align: center; margin-bottom: 20px;'>🏭 세안타올<br>생산관리 현황</h2>", unsafe_allow_html=True)
     st.write(f"환영합니다, **{st.session_state['role']}**님!")
     # if st.button("로그아웃"):
     #     st.session_state["logged_in"] = False
@@ -277,8 +287,12 @@ def manage_code(code_key, default_list, label):
 # 4. [메인 화면] 메뉴별 기능 구현
 if menu == "발주서접수":
     st.header("📑 발주서 접수")
-    st.info("먼저 제품코드를 선택한 후, 신규 발주서를 시스템에 등록합니다.")
+    st.info("신규 발주서를 등록합니다. 개별 등록 또는 엑셀 일괄 업로드가 가능합니다.")
     
+    # [NEW] 데이터프레임 리셋을 위한 동적 키 초기화
+    if "order_df_key" not in st.session_state:
+        st.session_state["order_df_key"] = 0
+
     # 발주 등록 성공 메시지 표시 (리런 후 유지)
     if "order_success_msg" in st.session_state:
         st.success(st.session_state["order_success_msg"])
@@ -290,20 +304,18 @@ if menu == "발주서접수":
         st.session_state["filter_yt"] = "전체"
         st.session_state["filter_wt"] = "전체"
         st.session_state["filter_sz"] = "전체"
-        if "order_product_select" in st.session_state:
-            del st.session_state["order_product_select"]
+        # 키 값을 변경하여 강제로 선택 해제 (새로운 데이터프레임으로 인식)
+        st.session_state["order_df_key"] += 1
         del st.session_state["trigger_order_reset"]
 
     if st.session_state["role"] == "admin":
-        # --- 1. 제품 선택 ---
-        st.subheader("1. 제품 선택")
-
+        # 제품 목록 미리 가져오기 (공통 사용)
         product_docs = list(db.collection("products").order_by("product_code").stream())
         if not product_docs:
             st.warning("등록된 제품이 없습니다. [기초정보관리 > 제품 관리] 메뉴에서 먼저 제품을 등록해주세요.")
             st.stop()
         
-        # 데이터프레임 변환
+        # 데이터프레임 변환 (개별 접수용)
         products_data = [doc.to_dict() for doc in product_docs]
         df_products = pd.DataFrame(products_data)
         
@@ -311,146 +323,318 @@ if menu == "발주서접수":
         if "weaving_type" in df_products.columns and "product_type" not in df_products.columns:
             df_products.rename(columns={"weaving_type": "product_type"}, inplace=True)
 
-        # 표시할 컬럼 설정
-        col_map = {
-            "product_code": "제품코드", "product_type": "제품종류", "yarn_type": "사종",
-            "weight": "중량(g)", "size": "사이즈"
-        }
-        display_cols = ["product_code", "product_type", "yarn_type", "weight", "size"]
-        final_cols = [c for c in display_cols if c in df_products.columns]
+        tab1, tab2 = st.tabs(["📝 개별 접수", "📂 엑셀 일괄 업로드"])
+        tab1, tab2 = st.tabs(["📝 개별 접수", "🗑️ 발주내역삭제(엑셀업로드)"])
 
-        # 검색 필터 추가
-        with st.expander("🔍 제품 검색 필터", expanded=True):
-            f1, f2, f3, f4 = st.columns(4)
-            
-            # 필터 옵션 생성 (전체 + 고유값)
-            def get_options(col):
-                if col in df_products.columns:
-                    # None 값 처리 및 문자열 변환
-                    values = [str(x) for x in df_products[col].unique() if pd.notna(x)]
-                    return ["전체"] + sorted(values)
-                return ["전체"]
-            
-            s_type = f1.selectbox("제품종류", get_options("product_type"), key="filter_pt")
-            s_yarn = f2.selectbox("사종", get_options("yarn_type"), key="filter_yt")
-            s_weight = f3.selectbox("중량", get_options("weight"), key="filter_wt")
-            s_size = f4.selectbox("사이즈", get_options("size"), key="filter_sz")
+        with tab1:
+            # --- 1. 제품 선택 ---
+            st.subheader("1. 제품 선택")
 
-        # 필터링 적용
-        df_filtered = df_products.copy()
-        if s_type != "전체":
-            df_filtered = df_filtered[df_filtered['product_type'].astype(str) == s_type]
-        if s_yarn != "전체":
-            df_filtered = df_filtered[df_filtered['yarn_type'].astype(str) == s_yarn]
-        if s_weight != "전체":
-            df_filtered = df_filtered[df_filtered['weight'].astype(str) == s_weight]
-        if s_size != "전체":
-            df_filtered = df_filtered[df_filtered['size'].astype(str) == s_size]
+            # 표시할 컬럼 설정
+            col_map = {
+                "product_code": "제품코드", "product_type": "제품종류", "yarn_type": "사종",
+                "weight": "중량(g)", "size": "사이즈"
+            }
+            display_cols = ["product_code", "product_type", "yarn_type", "weight", "size"]
+            final_cols = [c for c in display_cols if c in df_products.columns]
 
-        st.write("🔽 발주할 제품을 목록에서 선택(클릭)하세요.")
-        selection = st.dataframe(
-            df_filtered[final_cols].rename(columns=col_map),
-            use_container_width=True,
-            hide_index=True,
-            on_select="rerun",
-            selection_mode="single-row",
-            key="order_product_select"
-        )
+            # 검색 필터 추가
+            with st.expander("🔍 제품 검색 필터", expanded=True):
+                f1, f2, f3, f4 = st.columns(4)
+                
+                # 필터 옵션 생성 (전체 + 고유값)
+                def get_options(col):
+                    if col in df_products.columns:
+                        # None 값 처리 및 문자열 변환
+                        values = [str(x) for x in df_products[col].unique() if pd.notna(x)]
+                        return ["전체"] + sorted(values)
+                    return ["전체"]
+                
+                s_type = f1.selectbox("제품종류", get_options("product_type"), key="filter_pt")
+                s_yarn = f2.selectbox("사종", get_options("yarn_type"), key="filter_yt")
+                s_weight = f3.selectbox("중량", get_options("weight"), key="filter_wt")
+                s_size = f4.selectbox("사이즈", get_options("size"), key="filter_sz")
 
-        if not selection.selection.rows:
-            st.info("👆 위 목록에서 제품을 선택하면 발주 입력 폼이 나타납니다.")
-            st.stop()
+            # 필터링 적용
+            df_filtered = df_products.copy()
+            if s_type != "전체":
+                df_filtered = df_filtered[df_filtered['product_type'].astype(str) == s_type]
+            if s_yarn != "전체":
+                df_filtered = df_filtered[df_filtered['yarn_type'].astype(str) == s_yarn]
+            if s_weight != "전체":
+                df_filtered = df_filtered[df_filtered['weight'].astype(str) == s_weight]
+            if s_size != "전체":
+                df_filtered = df_filtered[df_filtered['size'].astype(str) == s_size]
 
-        idx = selection.selection.rows[0]
-        selected_product = df_filtered.iloc[idx].to_dict()
-        
-        st.divider()
-        st.success(f"선택된 제품: **{selected_product['product_code']}** ({selected_product.get('product_type', '')} / {selected_product.get('yarn_type', '')})")
+            st.write("🔽 발주할 제품을 목록에서 선택(클릭)하세요.")
+            selection = st.dataframe(
+                df_filtered[final_cols].rename(columns=col_map),
+                use_container_width=True,
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                key=f"order_product_select_{st.session_state['order_df_key']}"
+            )
 
-        # --- 2. 발주 정보 입력 ---
-        with st.form("order_form", clear_on_submit=True):
-            st.subheader("2. 발주 상세 정보 입력")
-            
-            customer_list = get_partners("발주처")
-
-            c1, c2, c3 = st.columns(3)
-            order_date = c1.date_input("발주접수일", datetime.date.today(), format="YYYY-MM-DD")
-            if customer_list:
-                customer = c2.selectbox("발주처 선택", customer_list)
+            if not selection.selection.rows:
+                st.info("👆 위 목록에서 제품을 선택하면 발주 입력 폼이 나타납니다.")
             else:
-                customer = c2.text_input("발주처 (기초정보관리에서 거래처를 등록하세요)")
-            delivery_req_date = c3.date_input("납품요청일", datetime.date.today() + datetime.timedelta(days=7), format="YYYY-MM-DD")
+                idx = selection.selection.rows[0]
+                selected_product = df_filtered.iloc[idx].to_dict()
+                
+                st.divider()
+                st.success(f"선택된 제품: **{selected_product['product_code']}** ({selected_product.get('product_type', '')} / {selected_product.get('yarn_type', '')})")
 
-            c1, c2, c3 = st.columns(3)
-            name = c1.text_input("제품명 (고객사 요청 제품명)", help="고객사가 부르는 제품명을 입력하세요. 예: 프리미엄 호텔타올")
-            color = c2.text_input("색상")
-            stock = c3.number_input("수량(장)", min_value=0, step=10)
+                # --- 2. 발주 정보 입력 ---
+                with st.form("order_form", clear_on_submit=True):
+                    st.subheader("2. 발주 상세 정보 입력")
+                    
+                    customer_list = get_partners("발주처")
 
-            st.subheader("납품 및 기타 정보")
-            c1, c2, c3 = st.columns(3)
-            delivery_to = c1.text_input("납품처")
-            delivery_contact = c2.text_input("납품 연락처")
-            delivery_address = c3.text_input("납품 주소")
+                    c1, c2, c3 = st.columns(3)
+                    order_date = c1.date_input("발주접수일", datetime.date.today(), format="YYYY-MM-DD")
+                    if customer_list:
+                        customer = c2.selectbox("발주처 선택", customer_list)
+                    else:
+                        customer = c2.text_input("발주처 (기초정보관리에서 거래처를 등록하세요)")
+                    delivery_req_date = c3.date_input("납품요청일", datetime.date.today() + datetime.timedelta(days=7), format="YYYY-MM-DD")
+
+                    c1, c2, c3 = st.columns(3)
+                    name = c1.text_input("제품명 (고객사 요청 제품명)", help="고객사가 부르는 제품명을 입력하세요. 예: 프리미엄 호텔타올")
+                    color = c2.text_input("색상")
+                    stock = c3.number_input("수량(장)", min_value=0, step=10)
+
+                    st.subheader("납품 및 기타 정보")
+                    c1, c2, c3 = st.columns(3)
+                    delivery_to = c1.text_input("납품처")
+                    delivery_contact = c2.text_input("납품 연락처")
+                    delivery_address = c3.text_input("납품 주소")
+                    
+                    note = st.text_area("특이사항")
+                    
+                    submitted = st.form_submit_button("발주 등록")
+                    if submitted:
+                        if name and customer:
+                            # 발주번호 생성 로직 (YYMM + 3자리 일련번호, 예: 2505001)
+                            now = datetime.datetime.now()
+                            prefix = now.strftime("%y%m") # 예: 2405
+                            
+                            # 해당 월의 가장 마지막 발주번호 조회 (orders 컬렉션에서)
+                            last_docs = db.collection("orders")\
+                                .where("order_no", ">=", f"{prefix}000")\
+                                .where("order_no", "<=", f"{prefix}999")\
+                                .order_by("order_no", direction=firestore.Query.DESCENDING)\
+                                .limit(1)\
+                                .stream()
+                            
+                            last_seq = 0
+                            for doc in last_docs:
+                                last_val = doc.to_dict().get("order_no")
+                                if last_val and len(last_val) == 7:
+                                    try:
+                                        last_seq = int(last_val[-3:])
+                                    except:
+                                        pass
+                            
+                            new_seq = last_seq + 1
+                            order_no = f"{prefix}{new_seq:03d}"
+
+                            # Firestore에 저장할 데이터 딕셔너리 생성
+                            doc_data = {
+                                # 제품 마스터 정보 (Denormalized)
+                                "product_code": selected_product['product_code'],
+                                "product_type": selected_product.get('product_type', selected_product.get('weaving_type')), # 필드명 변경
+                                "yarn_type": selected_product.get('yarn_type'),
+                                "weight": selected_product['weight'],
+                                "size": selected_product['size'],
+                                
+                                # 주문 고유 정보
+                                "order_no": order_no,
+                                "date": datetime.datetime.combine(order_date, datetime.time.min),
+                                "customer": customer,
+                                "delivery_req_date": str(delivery_req_date),
+                                "name": name, # 고객사 제품명
+                                "color": color,
+                                "stock": stock,
+                                "delivery_to": delivery_to,
+                                "delivery_contact": delivery_contact,
+                                "delivery_address": delivery_address,
+                                "note": note,
+                                "status": "발주접수" # 초기 상태
+                            }
+                            db.collection("orders").add(doc_data) # 'orders' 컬렉션에 저장
+                            st.success(f"발주번호 [{order_no}] 접수 완료!")
+                            st.session_state["order_success_msg"] = f"✅ 발주번호 [{order_no}]가 성공적으로 등록되었습니다."
+                            st.session_state["trigger_order_reset"] = True
+                            st.rerun()
+                        else:
+                            st.error("제품명과 발주처는 필수 입력 항목입니다.")
+
+        with tab2:
+            st.subheader("엑셀 파일로 일괄 등록")
+            st.markdown("""
+            **업로드 규칙**
+            1. 아래 **양식 다운로드** 버튼을 눌러 엑셀 파일을 받으세요.
+            2. `제품코드`는 시스템에 등록된 코드와 정확히 일치해야 합니다.
+            3. `접수일자`와 `납품요청일`은 `YYYY-MM-DD` 형식으로 입력하세요.
+            """)
             
-            note = st.text_area("특이사항")
+            # 양식 다운로드
+            template_data = {
+                "접수일자": [datetime.date.today().strftime("%Y-%m-%d")],
+                "발주처": ["예시상사"],
+                "제품코드": ["A20S0904080"],
+                "제품명(고객용)": ["호텔타올"],
+                "색상": ["화이트"],
+                "수량": [100],
+                "납품요청일": [(datetime.date.today() + datetime.timedelta(days=7)).strftime("%Y-%m-%d")],
+                "납품처": ["서울시 강남구..."],
+                "납품연락처": ["010-0000-0000"],
+                "납품주소": ["서울시..."],
+                "비고": ["특이사항"]
+            }
+            df_template = pd.DataFrame(template_data)
             
-            submitted = st.form_submit_button("발주 등록")
-            if submitted:
-                if name and customer:
-                    # 발주번호 생성 로직 (YYMM + 3자리 일련번호, 예: 2505001)
-                    now = datetime.datetime.now()
-                    prefix = now.strftime("%y%m") # 예: 2405
-                    
-                    # 해당 월의 가장 마지막 발주번호 조회 (orders 컬렉션에서)
-                    last_docs = db.collection("orders")\
-                        .where("order_no", ">=", f"{prefix}000")\
-                        .where("order_no", "<=", f"{prefix}999")\
-                        .order_by("order_no", direction=firestore.Query.DESCENDING)\
-                        .limit(1)\
-                        .stream()
-                    
-                    last_seq = 0
-                    for doc in last_docs:
-                        last_val = doc.to_dict().get("order_no")
-                        if last_val and len(last_val) == 7:
-                            try:
-                                last_seq = int(last_val[-3:])
-                            except:
-                                pass
-                    
-                    new_seq = last_seq + 1
-                    order_no = f"{prefix}{new_seq:03d}"
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                df_template.to_excel(writer, index=False)
+                
+            st.download_button(
+                label="📥 업로드용 양식 다운로드",
+                data=buffer.getvalue(),
+                file_name="발주업로드양식.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+            
+            st.divider()
+            st.subheader("🗑️ 발주 내역 삭제 (다중 선택)")
+            st.info("삭제할 항목의 체크박스를 선택한 후 하단의 삭제 버튼을 누르세요.")
+            st.info("삭제할 항목을 선택(체크)한 후 하단의 삭제 버튼을 누르세요. (헤더의 체크박스로 전체 선택 가능)")
 
-                    # Firestore에 저장할 데이터 딕셔너리 생성
-                    doc_data = {
-                        # 제품 마스터 정보 (Denormalized)
-                        "product_code": selected_product['product_code'],
-                        "product_type": selected_product.get('product_type', selected_product.get('weaving_type')), # 필드명 변경
-                        "yarn_type": selected_product.get('yarn_type'),
-                        "weight": selected_product['weight'],
-                        "size": selected_product['size'],
+            # 삭제 대상 목록 가져오기
+            del_docs = list(db.collection("orders").order_by("date", direction=firestore.Query.DESCENDING).stream())
+            
+            if del_docs:
+                del_rows = []
+                for doc in del_docs:
+                    d = doc.to_dict()
+                    d['id'] = doc.id
+                    del_rows.append(d)
+                
+                df_del = pd.DataFrame(del_rows)
+
+                # 날짜 포맷
+                if 'date' in df_del.columns:
+                    df_del['date'] = df_del['date'].apply(lambda x: x.strftime('%Y-%m-%d') if hasattr(x, 'strftime') else x)
+
+                # 데이터프레임 표시 (다중 선택 활성화)
+                selection = st.dataframe(
+                    df_del,
+                    column_config={
+                        "id": None, # ID 숨김
+                        "order_no": "발주번호", "date": "접수일", "customer": "발주처",
+                        "name": "제품명", "stock": "수량", "status": "상태"
+                    },
+                    column_order=["order_no", "date", "customer", "name", "stock", "status"],
+                    hide_index=True,
+                    use_container_width=True,
+                    on_select="rerun",
+                    selection_mode="multi-row",
+                    key="del_orders_selection"
+                )
+                
+                # 선택된 행 삭제 처리
+                if selection.selection.rows:
+                    selected_indices = selection.selection.rows
+                    selected_rows = df_del.iloc[selected_indices]
+                    
+                    if st.button(f"🗑️ 선택한 {len(selected_rows)}건 영구 삭제", type="primary"):
+                        for idx, row in selected_rows.iterrows():
+                            db.collection("orders").document(row['id']).delete()
+                        st.success(f"{len(selected_rows)}건이 삭제되었습니다.")
+                        st.rerun()
+            else:
+                st.info("삭제할 발주 내역이 없습니다.")
+            
+            uploaded_file = st.file_uploader("엑셀 파일 업로드", type=["xlsx", "xls"])
+            
+            if uploaded_file:
+                try:
+                    df_upload = pd.read_excel(uploaded_file)
+                    st.write("데이터 미리보기:")
+                    st.dataframe(df_upload.head())
+                    
+                    if st.button("일괄 등록 시작", type="primary"):
+                        # 제품 코드 매핑을 위한 딕셔너리 생성
+                        product_map = {p['product_code']: p for p in products_data}
                         
-                        # 주문 고유 정보
-                        "order_no": order_no,
-                        "date": datetime.datetime.combine(order_date, datetime.time.min),
-                        "customer": customer,
-                        "delivery_req_date": str(delivery_req_date),
-                        "name": name, # 고객사 제품명
-                        "color": color,
-                        "stock": stock,
-                        "delivery_to": delivery_to,
-                        "delivery_contact": delivery_contact,
-                        "delivery_address": delivery_address,
-                        "note": note,
-                        "status": "발주접수" # 초기 상태
-                    }
-                    db.collection("orders").add(doc_data) # 'orders' 컬렉션에 저장
-                    st.success(f"발주번호 [{order_no}] 접수 완료!")
-                    st.session_state["order_success_msg"] = f"✅ 발주번호 [{order_no}]가 성공적으로 등록되었습니다."
-                    st.session_state["trigger_order_reset"] = True
-                    st.rerun()
-                else:
-                    st.error("제품명과 발주처는 필수 입력 항목입니다.")
+                        # 발주번호 생성을 위한 마지막 번호 조회
+                        now = datetime.datetime.now()
+                        prefix = now.strftime("%y%m")
+                        last_docs = db.collection("orders").where("order_no", ">=", f"{prefix}000").where("order_no", "<=", f"{prefix}999").order_by("order_no", direction=firestore.Query.DESCENDING).limit(1).stream()
+                        last_seq = 0
+                        for doc in last_docs:
+                            last_val = doc.to_dict().get("order_no")
+                            if last_val and len(last_val) == 7:
+                                try: last_seq = int(last_val[-3:])
+                                except: pass
+                        
+                        success_count = 0
+                        error_logs = []
+                        
+                        progress_bar = st.progress(0)
+                        
+                        for idx, row in df_upload.iterrows():
+                            p_code = str(row.get("제품코드", "")).strip()
+                            if p_code not in product_map:
+                                error_logs.append(f"{idx+2}행: 제품코드 '{p_code}'가 존재하지 않습니다.")
+                                continue
+                                
+                            product_info = product_map[p_code]
+                            last_seq += 1
+                            order_no = f"{prefix}{last_seq:03d}"
+                            
+                            # 날짜 처리
+                            try:
+                                reg_date = pd.to_datetime(row.get("접수일자", datetime.date.today())).to_pydatetime()
+                            except:
+                                reg_date = datetime.datetime.now()
+                                
+                            doc_data = {
+                                "product_code": p_code,
+                                "product_type": product_info.get('product_type', product_info.get('weaving_type')),
+                                "yarn_type": product_info.get('yarn_type'),
+                                "weight": product_info.get('weight'),
+                                "size": product_info.get('size'),
+                                
+                                "order_no": order_no,
+                                "date": reg_date,
+                                "customer": str(row.get("발주처", "")),
+                                "delivery_req_date": str(row.get("납품요청일", "")),
+                                "name": str(row.get("제품명(고객용)", "")),
+                                "color": str(row.get("색상", "")),
+                                "stock": int(row.get("수량", 0)),
+                                "delivery_to": str(row.get("납품처", "")),
+                                "delivery_contact": str(row.get("납품연락처", "")),
+                                "delivery_address": str(row.get("납품주소", "")),
+                                "note": str(row.get("비고", "")),
+                                "status": "발주접수"
+                            }
+                            
+                            db.collection("orders").add(doc_data)
+                            success_count += 1
+                            progress_bar.progress((idx + 1) / len(df_upload))
+                            
+                        if success_count > 0:
+                            st.success(f"✅ {success_count}건의 발주가 성공적으로 등록되었습니다.")
+                        
+                        if error_logs:
+                            st.error(f"⚠️ {len(error_logs)}건의 오류가 발생했습니다.")
+                            for log in error_logs:
+                                st.write(log)
+                                
+                except Exception as e:
+                    st.error(f"파일 처리 중 오류가 발생했습니다: {e}")
     else:
         st.info("관리자만 발주를 등록할 수 있습니다.")
 
@@ -596,6 +780,52 @@ elif menu == "발주현황":
                 p_m_bottom = po_c9.number_input("하단", value=15, step=1)
                 p_m_left = po_c10.number_input("좌측", value=15, step=1)
                 p_m_right = po_c11.number_input("우측", value=15, step=1)
+                
+                st.divider()
+                st.markdown("###### 📊 컬럼 및 스타일 설정")
+                # 컬럼 선택
+                # [수정] 인쇄 선택용 컬럼명을 한글로 변환
+                final_cols_kr = [col_map.get(c, c) for c in final_cols]
+                
+                # [NEW] 전체 선택/해제 기능
+                if "print_cols" not in st.session_state:
+                    st.session_state["print_cols"] = final_cols_kr
+                
+                def on_print_all_change():
+                    st.session_state["print_cols"] = final_cols_kr if st.session_state.get("chk_print_all") else []
+
+                st.checkbox("전체 선택 / 해제", value=True, key="chk_print_all", on_change=on_print_all_change)
+                p_selected_cols = st.multiselect("인쇄할 컬럼 선택", final_cols_kr, key="print_cols")
+                
+                # 스타일 설정
+                po_s1, po_s2 = st.columns(2)
+                p_nowrap = po_s1.checkbox("텍스트 줄바꿈 방지 (한 줄 표시)", value=False)
+                p_custom_width = po_s2.checkbox("컬럼 너비 직접 지정 (px)")
+                
+                p_widths = {}
+                if p_custom_width:
+                    # [NEW] 너비 설정 유지 (Persistence)
+                    if "print_col_widths" not in st.session_state:
+                        st.session_state["print_col_widths"] = {}
+                    
+                    # 현재 선택된 컬럼에 대한 데이터프레임 생성 (저장된 값 우선 사용)
+                    w_data = []
+                    for c in p_selected_cols:
+                        w = st.session_state["print_col_widths"].get(c, 100)
+                        w_data.append({"컬럼명": c, "너비": w})
+                    
+                    w_df = st.data_editor(
+                        pd.DataFrame(w_data),
+                        column_config={"너비": st.column_config.NumberColumn(min_value=10, max_value=500)},
+                        hide_index=True,
+                        use_container_width=True,
+                        key="print_width_editor"
+                    )
+                    
+                    # 에디터의 변경사항을 세션 상태에 저장
+                    current_widths = {row['컬럼명']: row['너비'] for row in w_df.to_dict('records')}
+                    st.session_state["print_col_widths"].update(current_widths)
+                    p_widths = current_widths
 
             # 인쇄 버튼 (HTML 생성 후 새 창 열기 방식 흉내)
             if btn_c2.button("🖨️ 인쇄 페이지 열기"):
@@ -603,6 +833,20 @@ elif menu == "발주현황":
                 date_align = p_date_pos.lower()
                 date_display = "block" if p_show_date else "none"
                 
+                # [수정] 선택된 컬럼만 필터링
+                print_df = df_display[p_selected_cols]
+                
+                # [수정] CSS 생성 (줄바꿈 방지 및 너비 지정)
+                custom_css = ""
+                if p_nowrap:
+                    custom_css += "td { white-space: nowrap; }\n"
+                
+                if p_custom_width and p_widths:
+                    for i, col in enumerate(p_selected_cols):
+                        w = p_widths.get(col, 100)
+                        # nth-child는 1부터 시작
+                        custom_css += f"table tr th:nth-child({i+1}), table tr td:nth-child({i+1}) {{ width: {w}px; min-width: {w}px; }}\n"
+
                 print_html = f"""
                     <html>
                     <head>
@@ -617,6 +861,7 @@ elif menu == "발주현황":
                             th, td {{ border: 1px solid #444; padding: {p_padding}px 4px; text-align: center; }}
                             th {{ background-color: #f0f0f0; font-weight: bold; }}
                             @media print {{ .no-print {{ display: none; }} }}
+                            {custom_css}
                         </style>
                     </head>
                     <body>
@@ -626,6 +871,7 @@ elif menu == "발주현황":
                             <button onclick="window.print()" style="padding:8px 15px; font-size:14px; cursor:pointer; background-color:#4CAF50; color:white; border:none; border-radius:4px;">🖨️ 인쇄하기</button>
                         </div>
                         {df_display.to_html(index=False, border=1)}
+                        {print_df.to_html(index=False, border=1)}
                     </body>
                     </html>
                 """
@@ -672,7 +918,17 @@ elif menu == "발주현황":
 
                     ec9, ec10, ec11 = st.columns(3)
                     e_size = ec9.text_input("사이즈", value=sel_row.get('size', ''))
-                    e_del_date = ec10.date_input("납품요청일", datetime.datetime.strptime(sel_row['delivery_req_date'], "%Y-%m-%d").date() if sel_row.get('delivery_req_date') else datetime.date.today(), format="YYYY-MM-DD")
+                    
+                    # [수정] 날짜 파싱 오류 방지 (시간 정보가 포함된 경우 처리)
+                    try:
+                        if sel_row.get('delivery_req_date'):
+                            default_date = pd.to_datetime(str(sel_row['delivery_req_date'])).date()
+                        else:
+                            default_date = datetime.date.today()
+                    except:
+                        default_date = datetime.date.today()
+                        
+                    e_del_date = ec10.date_input("납품요청일", default_date, format="YYYY-MM-DD")
                     e_note = ec11.text_input("특이사항", value=sel_row.get('note', ''))
                     
                     ec12, ec13, ec14 = st.columns(3)
@@ -2213,26 +2469,42 @@ elif menu == "제품 관리":
         yarn_type_names = ["선택하세요"] + ([item['name'] for item in yarn_types_coded] if yarn_types_coded else [])
         weight_names = ["선택하세요"] + ([item['name'] for item in weight_codes] if weight_codes else [])
         size_names = ["선택하세요"] + ([item['name'] for item in size_codes] if size_codes else [])
+        # [수정] UI에 표시할 목록 (명칭 + 코드)
+        def get_display_opts(items):
+            return ["선택하세요"] + ([f"{item['name']} ({item['code']})" for item in items] if items else [])
+
+        product_type_opts = get_display_opts(product_types_coded)
+        yarn_type_opts = get_display_opts(yarn_types_coded)
+        weight_opts = get_display_opts(weight_codes)
+        size_opts = get_display_opts(size_codes)
 
         c1, c2 = st.columns(2)
-        p_product_type_name = c1.selectbox("제품종류", product_type_names, key="reg_pt")
-        p_yarn_type_name = c2.selectbox("사종", yarn_type_names, key="reg_yt")
+        p_product_type_sel = c1.selectbox("제품종류", product_type_opts, key="reg_pt")
+        p_yarn_type_sel = c2.selectbox("사종", yarn_type_opts, key="reg_yt")
 
         c3, c4 = st.columns(2)
-        p_weight_name = c3.selectbox("중량", weight_names, key="reg_wt")
-        p_size_name = c4.selectbox("사이즈", size_names, key="reg_sz")
+        p_weight_sel = c3.selectbox("중량", weight_opts, key="reg_wt")
+        p_size_sel = c4.selectbox("사이즈", size_opts, key="reg_sz")
 
         # 실시간 코드 조합 및 중복 확인
         generated_code = ""
         is_valid = False
-
-        if "선택하세요" not in [p_product_type_name, p_yarn_type_name, p_weight_name, p_size_name]:
-            # 코드 찾기
-            pt_code = next((item['code'] for item in product_types_coded if item['name'] == p_product_type_name), "")
-            yt_code = next((item['code'] for item in yarn_types_coded if item['name'] == p_yarn_type_name), "")
-            wt_code = next((item['code'] for item in weight_codes if item['name'] == p_weight_name), "")
-            sz_code = next((item['code'] for item in size_codes if item['name'] == p_size_name), "")
             
+        # [수정] 선택된 값에서 명칭과 코드 분리
+        def parse_selection(val):
+            if val == "선택하세요": return "", ""
+            try:
+                name, code = val.rsplit(' (', 1)
+                return name, code[:-1]
+            except:
+                return val, ""
+
+        pt_name, pt_code = parse_selection(p_product_type_sel)
+        yt_name, yt_code = parse_selection(p_yarn_type_sel)
+        wt_name, wt_code = parse_selection(p_weight_sel)
+        sz_name, sz_code = parse_selection(p_size_sel)
+
+        if "선택하세요" not in [p_product_type_sel, p_yarn_type_sel, p_weight_sel, p_size_sel]:
             if all([pt_code, yt_code, wt_code, sz_code]):
                 generated_code = f"{pt_code}{yt_code}{wt_code}{sz_code}"
                 
@@ -2252,20 +2524,17 @@ elif menu == "제품 관리":
                 product_code = generated_code
                 
                 # 중량은 계산을 위해 숫자로 변환하여 저장
-                weight_code = next((item['code'] for item in weight_codes if item['name'] == p_weight_name), "0")
-                
-                # 중량은 계산을 위해 숫자로 변환하여 저장 (코드값이 숫자라고 가정)
                 try:
-                    weight_val = int(weight_code)
+                    weight_val = int(wt_code)
                 except:
                     weight_val = 0
 
                 product_data = {
                     "product_code": product_code,
-                    "product_type": p_product_type_name,
-                    "yarn_type": p_yarn_type_name,
+                    "product_type": pt_name,
+                    "yarn_type": yt_name,
                     "weight": weight_val, # 계산용 숫자 (코드값 사용)
-                    "size": p_size_name,  # 표시용 이름
+                    "size": sz_name,  # 표시용 이름
                     "created_at": datetime.datetime.now()
                 }
                 db.collection("products").document(product_code).set(product_data)

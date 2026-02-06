@@ -952,7 +952,7 @@ elif menu == "발주현황":
                 p_nowrap = st.checkbox("텍스트 줄바꿈 방지 (한 줄 표시)", value=False)
 
             # 인쇄 버튼 (HTML 생성 후 새 창 열기 방식 흉내)
-            if btn_c2.button("🖨️ 인쇄 페이지 열기"):
+            if btn_c2.button("🖨️ 바로 인쇄하기"):
                 print_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
                 date_align = p_date_pos.lower()
                 date_display = "block" if p_show_date else "none"
@@ -971,12 +971,12 @@ elif menu == "발주현황":
                         # nth-child는 1부터 시작
                         custom_css += f"table tr th:nth-child({i+1}), table tr td:nth-child({i+1}) {{ width: {w}px; min-width: {w}px; }}\n"
 
+                # [수정] body에 onload를 추가하고, 화면에는 보이지 않도록 CSS 수정
                 print_html = f"""
                     <html>
                     <head>
                         <title>{p_title}</title>
                         <style>
-                            body {{ font-family: 'Malgun Gothic', sans-serif; padding: 20px; }}
                             @page {{ margin: {p_m_top}mm {p_m_right}mm {p_m_bottom}mm {p_m_left}mm; }}
                             body {{ font-family: 'Malgun Gothic', sans-serif; padding: 0; margin: 0; }}
                             h2 {{ text-align: center; margin-bottom: 5px; font-size: {p_title_size}px; }}
@@ -984,22 +984,19 @@ elif menu == "발주현황":
                             table {{ width: 100%; border-collapse: collapse; font-size: {p_body_size}px; }}
                             th, td {{ border: 1px solid #444; padding: {p_padding}px 4px; text-align: center; }}
                             th {{ background-color: #f0f0f0; font-weight: bold; }}
-                            @media print {{ .no-print {{ display: none; }} }}
+                            @media screen {{ body {{ display: none; }} }}
                             {custom_css}
                         </style>
                     </head>
-                    <body>
+                    <body onload="window.print();">
                         <h2>{p_title}</h2>
                         <div class="info">출력일시: {print_date}</div>
-                        <div class="no-print" style="text-align:right; margin-bottom:10px;">
-                            <button onclick="window.print()" style="padding:8px 15px; font-size:14px; cursor:pointer; background-color:#4CAF50; color:white; border:none; border-radius:4px;">🖨️ 인쇄하기</button>
-                        </div>
                         {print_df.to_html(index=False, border=1)}
                     </body>
                     </html>
                 """
-                # 인쇄용 HTML을 화면 하단에 렌더링 (스크립트로 인해 인쇄창이 뜸)
-                st.components.v1.html(print_html, height=600, scrolling=True)
+                # 보이지 않는 컴포넌트로 HTML을 렌더링하여 스크립트(window.print) 실행
+                st.components.v1.html(print_html, height=0, width=0)
 
             # --- 상세 수정 (단일 선택 시에만) ---
             if len(selection.selection.rows) == 1:
@@ -1650,19 +1647,17 @@ elif menu == "제직현황":
         html_content += f"<div class='section-title'>📝 주간근무자 전달사항</div><div class='note-box'>{n_note}</div>"
         html_content += "</body></html>"
         
+        # [수정] '바로 인쇄하기' 로직으로 변경
         with c2:
-            if st.button("🖨️ 작업일지 인쇄 미리보기"):
-                print_view = html_content.replace("</body>", """
-                    <div class="no-print" style="text-align:center; margin-top:20px; margin-bottom:20px;">
-                        <button onclick="window.print()" style="padding:10px 20px; font-size:16px; cursor:pointer; background-color:#4CAF50; color:white; border:none; border-radius:4px;">🖨️ 인쇄하기</button>
-                    </div>
-                    <style>
-                        @media print { .no-print { display: none; } }
-                        body { margin: 0; padding: 20px; }
-                    </style>
-                    </body>
-                """)
-                st.components.v1.html(print_view, height=800, scrolling=True)
+            if st.button("🖨️ 작업일지 바로 인쇄하기"):
+                final_print_html = html_content.replace(
+                    "</head>",
+                    """<style> @media screen { body { display: none; } } </style></head>"""
+                ).replace(
+                    "<body>",
+                    '<body onload="window.print();">'
+                )
+                st.components.v1.html(final_print_html, height=0, width=0)
 
     # --- 5. 생산일지 탭 ---
     with tab_prodlog:
@@ -1759,18 +1754,16 @@ elif menu == "제직현황":
             with c2:
                 c2_1, c2_2 = st.columns(2)
                 
-                if c2_1.button("🖨️ 인쇄 미리보기"):
-                    print_view = print_html.replace("</body>", """
-                        <div class="no-print" style="text-align:center; margin-top:20px; margin-bottom:20px;">
-                            <button onclick="window.print()" style="padding:10px 20px; font-size:16px; cursor:pointer; background-color:#4CAF50; color:white; border:none; border-radius:4px;">🖨️ 인쇄하기</button>
-                        </div>
-                        <style>
-                            @media print { .no-print { display: none; } }
-                            body { margin: 0; padding: 20px; }
-                        </style>
-                        </body>
-                    """)
-                    st.components.v1.html(print_view, height=800, scrolling=True)
+                # [수정] '바로 인쇄하기' 로직으로 변경
+                if c2_1.button("🖨️ 바로 인쇄하기"):
+                    final_print_html = print_html.replace(
+                        "</head>",
+                        """<style> @media screen { body { display: none; } } </style></head>"""
+                    ).replace(
+                        "<body>",
+                        '<body onload="window.print();">'
+                    )
+                    st.components.v1.html(final_print_html, height=0, width=0)
 
                 c2_2.download_button(
                     label="💾 엑셀 다운로드",

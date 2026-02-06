@@ -6,6 +6,8 @@ import datetime
 import json
 import pandas as pd
 import io
+# [NEW] 분리한 utils 파일에서 공통 함수 임포트
+from utils import get_db, get_common_codes, get_partners, is_basic_code_used, generate_report_html, firestore
 
 # 1. 화면 기본 설정 (제목 등)
 st.set_page_config(page_title="타올 생산 현황 관리", layout="wide")
@@ -19,33 +21,6 @@ st.markdown("""
         }
     </style>
 """, unsafe_allow_html=True)
-
-# 2. 데이터베이스 연결 (아까 받은 열쇠 사용)
-# 이미 연결되어 있다면 건너뛰고, 안 되어 있을 때만 연결합니다.
-@st.cache_resource
-def get_db():
-    if not firebase_admin._apps:
-        cred = None
-        # 방법 1: Streamlit Cloud의 비밀 금고(Secrets) 시도
-        try:
-            if "FIREBASE_KEY" in st.secrets:
-                secret_val = st.secrets["FIREBASE_KEY"]
-                if isinstance(secret_val, str):
-                    key_dict = json.loads(secret_val)
-                else:
-                    key_dict = dict(secret_val)
-                cred = credentials.Certificate(key_dict)
-        except:
-            # 로컬 환경이라 secrets가 없는 경우 무시하고 넘어감
-            pass
-
-        # 방법 2: 로컬 환경이거나 비밀 금고가 없으면 내 컴퓨터 파일 사용
-        if cred is None:
-            # 방법 2: 로컬 환경이거나 비밀 금고가 없으면 내 컴퓨터 파일 사용
-            cred = credentials.Certificate("serviceAccountKey.json")
-            
-        firebase_admin.initialize_app(cred)
-    return firestore.client()
 
 db = get_db()
 
@@ -108,6 +83,9 @@ with st.sidebar:
         if st.button("🚚 출고현황", use_container_width=True):
             st.session_state["current_menu"] = "출고현황"
             st.rerun()
+        if st.button("📦 재고현황", use_container_width=True):
+            st.session_state["current_menu"] = "재고현황"
+            st.rerun()
 
     with st.expander("⚙️ 기초정보관리", expanded=True):
         if st.button("📦 제품 관리", use_container_width=True):
@@ -124,48 +102,6 @@ with st.sidebar:
             st.rerun()
             
     menu = st.session_state["current_menu"]
-
-# --- 공통 함수: 기초 코드 가져오기 ---
-def get_common_codes(code_type, default_values):
-    doc_ref = db.collection("settings").document("codes")
-    doc = doc_ref.get()
-    if doc.exists:
-        data = doc.to_dict()
-        return data.get(code_type, default_values)
-    return default_values
-
-# --- 공통 함수: 거래처 목록 가져오기 ---
-def get_partners(partner_type=None):
-    query = db.collection("partners")
-    if partner_type:
-        query = query.where("type", "==", partner_type)
-    docs = query.stream()
-    partners = []
-    for doc in docs:
-        p = doc.to_dict()
-        partners.append(p.get("name"))
-    return partners
-
-# --- [NEW] 공통 함수: 기초 코드가 제품에 사용되었는지 확인 ---
-@st.cache_data(ttl=60) # 1분 동안 결과 캐싱
-def is_basic_code_used(code_key, name, code):
-    """지정된 기초 코드가 'products' 컬렉션에서 사용되었는지 확인합니다."""
-    query = None
-    if code_key == "product_types":
-        query = db.collection("products").where("product_type", "==", name).limit(1)
-    elif code_key == "yarn_types_coded":
-        query = db.collection("products").where("yarn_type", "==", name).limit(1)
-    elif code_key == "size_codes":
-        query = db.collection("products").where("size", "==", name).limit(1)
-    elif code_key == "weight_codes":
-        try:
-            # 'weight' 필드는 숫자로 저장되어 있으므로 코드를 숫자로 변환하여 쿼리
-            weight_val = int(code)
-            query = db.collection("products").where("weight", "==", weight_val).limit(1)
-        except (ValueError, TypeError):
-            return False # 코드가 숫자가 아니면 사용될 수 없음
-    
-    return len(list(query.stream())) > 0 if query else False
 
 # --- 공통 함수: 기초 코드 관리 UI ---
 
@@ -655,6 +591,7 @@ elif menu == "발주현황":
         date_range = c1.date_input("조회 기간", st.session_state.get("search_date_range"), format="YYYY-MM-DD")
         # 상세 공정 상태 목록 추가
         status_options = ["발주접수", "제직대기", "제직중", "제직완료", "염색출고", "염색중", "염색완료", "봉제중", "봉제완료", "출고완료"]
+        status_options = ["발주접수", "제직대기", "제직중", "제직완료", "염색중", "염색완료", "봉제중", "봉제완료", "출고완료"]
         
         # 초기값: 이전에 검색한 값이 있으면 유지, 없으면 빈 리스트 (전체 조회)
         default_status = st.session_state.get("search_filter_status_new")
@@ -692,9 +629,9 @@ elif menu == "발주현황":
             d = doc.to_dict()
             d['id'] = doc.id
             
-            # [수정] 롤별 상세 내역(하위 문서)은 발주현황 목록에서 제외
-            if 'parent_id' in d:
-                continue
+            # [수정] 롤별 상세 내역(하위 문서)도 포함하여 조회 (공정 진행 상황 확인)
+            # if 'parent_id' in d:
+            #     continue
                 
             # [수정] 마스터 완료 상태를 일반 '제직완료'로 표시
             if d.get('status') == "제직완료(Master)":
@@ -759,18 +696,17 @@ elif menu == "발주현황":
                 selected_rows = df.iloc[selected_indices]
                 
                 with action_placeholder:
-                    # 1. 일괄 상태 변경 (Expander로 구성)
-                    with st.expander("🚀 상태 일괄 변경 (제직대기 발송 등)", expanded=True):
-                        c_batch1, c_batch2 = st.columns([3, 1])
-                        with c_batch1:
-                            target_status = st.selectbox("선택한 항목의 상태를 변경합니다:", ["제직대기", "발주접수"], key="batch_status_opt_top")
-                        with c_batch2:
-                            if st.button("상태 변경 적용", type="primary", key="btn_batch_update_top"):
-                                count = 0
-                                for idx, row in selected_rows.iterrows():
-                                    db.collection("orders").document(row['id']).update({"status": target_status})
-                                    count += 1
-                                st.success(f"선택한 {count}건의 상태가 '{target_status}'(으)로 변경되었습니다.")
+                    # 1. 제직 지시 (발주접수 -> 제직대기)
+                    # 선택된 항목 중 '발주접수' 상태인 것만 필터링
+                    valid_to_weaving = selected_rows[selected_rows['status'] == '발주접수']
+                    
+                    if not valid_to_weaving.empty:
+                        with st.expander(f"🚀 제직 지시 ({len(valid_to_weaving)}건)", expanded=True):
+                            st.write(f"선택한 항목 중 **'발주접수' 상태인 {len(valid_to_weaving)}건**을 **'제직대기'**로 변경합니다.")
+                            if st.button("선택 항목 제직대기로 발송", type="primary", key="btn_batch_weaving"):
+                                for idx, row in valid_to_weaving.iterrows():
+                                    db.collection("orders").document(row['id']).update({"status": "제직대기"})
+                                st.success(f"{len(valid_to_weaving)}건이 제직대기 상태로 변경되었습니다.")
                                 st.rerun()
                     
                     # 2. 상세 수정 바로가기 (단일 선택 시)
@@ -1103,6 +1039,8 @@ elif menu == "발주현황":
 
 elif menu == "제직현황":
     st.header("🧵 제직 현황")
+    if "weaving_df_key" not in st.session_state:
+        st.session_state["weaving_df_key"] = 0
     st.info("발주된 건을 확인하고 제직 작업을 지시하거나, 완료된 건을 염색 공정으로 넘깁니다.")
 
     # 1. 제직기 가동 현황 (Dashboard)
@@ -1229,6 +1167,13 @@ elif menu == "제직현황":
                             })
                             st.success(f"제직을 시작합니다.")
                             st.rerun()
+                
+                # 발주접수로 되돌리기 기능 추가
+                st.divider()
+                if st.button("🚫 발주접수로 되돌리기", key="back_to_order_waiting"):
+                    db.collection("orders").document(sel_id).update({"status": "발주접수"})
+                    st.success("발주접수 상태로 되돌렸습니다.")
+                    st.rerun()
         else:
             st.info("대기 중인 작업이 없습니다.")
 
@@ -1255,107 +1200,139 @@ elif menu == "제직현황":
             
             # 진행률 표시를 위해 컬럼 확보
             if 'completed_rolls' not in df.columns: df['completed_rolls'] = 0
+            
+            # [NEW] 롤 진행 상황 표시 (예: 1/3)
+            df['roll_progress'] = df.apply(lambda x: f"{int(x.get('completed_rolls', 0) + 1)}/{int(x.get('weaving_roll_count', 1))}", axis=1)
+            
             col_map = {
                 "order_no": "발주번호", "machine_no": "제직기", "weaving_start_time": "시작시간",
-                "customer": "발주처", "name": "제품명", "stock": "수량", "weaving_roll_count": "롤수"
+                "customer": "발주처", "name": "제품명", "stock": "수량", "roll_progress": "롤진행(현재/총)"
             }
-            display_cols = ["machine_no", "order_no", "customer", "name", "stock", "weaving_roll_count", "weaving_start_time"]
+            display_cols = ["machine_no", "order_no", "customer", "name", "stock", "roll_progress", "weaving_start_time"]
             final_cols = [c for c in display_cols if c in df.columns]
             
             st.write("🔽 완료 처리할 항목을 선택하세요.")
             # key="df_weaving" 추가
-            selection = st.dataframe(df[final_cols].rename(columns=col_map), use_container_width=True, on_select="rerun", selection_mode="single-row", key="df_weaving")
+            selection = st.dataframe(df[final_cols].rename(columns=col_map), use_container_width=True, on_select="rerun", selection_mode="single-row", key=f"df_weaving_{st.session_state['weaving_df_key']}")
             
             if selection.selection.rows:
                 idx = selection.selection.rows[0]
                 sel_row = df.iloc[idx]
                 sel_id = sel_row['id']
                 
-                # 현재 진행 상황 계산
+                # [NEW] 잔여 수량 계산 및 실시간 중량 계산 로직
+                
+                # 1. 현재까지 생산된 롤들의 수량 합계 계산 (형제 문서 조회)
+                child_rolls = db.collection("orders").where("parent_id", "==", sel_id).stream()
+                accumulated_stock = 0
+                for r in child_rolls:
+                    accumulated_stock += int(r.to_dict().get('real_stock', 0))
+                
+                total_order_stock = int(sel_row.get('stock', 0))
+                remaining_stock = max(0, total_order_stock - accumulated_stock)
+                
+                # 기본 중량 (g)
+                base_weight = int(sel_row.get('weight', 0)) if not pd.isna(sel_row.get('weight')) else 0
+                
+                # 세션 스테이트 키 (아이템별 고유)
+                ss_stock_key = f"ws_stock_{sel_id}"
+                ss_kg_key = f"ws_kg_{sel_id}"
+                
+                # 세션 초기화 (처음 선택 시 잔여 수량으로 설정)
+                if ss_stock_key not in st.session_state:
+                    st.session_state[ss_stock_key] = remaining_stock
+                    st.session_state[ss_kg_key] = float((remaining_stock * base_weight) / 1000)
+                
+                # 콜백 함수: 수량 변경 시 중량 자동 계산
+                def on_stock_change():
+                    new_stock = st.session_state[ss_stock_key]
+                    st.session_state[ss_kg_key] = float((new_stock * base_weight) / 1000)
+
+                st.divider()
+                st.markdown(f"### ✅ 제직 완료 처리: **{sel_row['name']}**")
+                
                 cur_completed = int(sel_row.get('completed_rolls', 0)) if not pd.isna(sel_row.get('completed_rolls')) else 0
                 total_rolls = int(sel_row.get('weaving_roll_count', 1)) if not pd.isna(sel_row.get('weaving_roll_count')) else 1
                 next_roll_no = cur_completed + 1
                 
-                st.divider()
-                st.markdown(f"### ✅ 제직 완료 처리: **{sel_row['name']}**")
-                
                 if total_rolls > 1:
-                    st.info(f"📢 현재 **{total_rolls}롤 중 {next_roll_no}번째 롤** 작업 중입니다.")
+                    st.info(f"📢 현재 **{total_rolls}롤 중 {next_roll_no}번째 롤** 작업 중입니다. (누적 생산: {accumulated_stock}장 / 잔여: {remaining_stock}장)")
                 else:
-                    st.info("📢 **단일 롤(1/1)** 작업 중입니다.")
+                    st.info(f"📢 **단일 롤(1/1)** 작업 중입니다. (잔여: {remaining_stock}장)")
                 
-                with st.form("weaving_complete_form"):
-                    st.write("생산 실적을 입력하세요.")
-                    c1, c2 = st.columns(2)
-                    end_date = c1.date_input("제직완료일", datetime.date.today())
-                    end_time = c2.time_input("완료시간", datetime.datetime.now().time())
+                # [변경] st.form 제거 -> 실시간 인터랙션 지원
+                st.write("생산 실적을 입력하세요.")
+                c1, c2 = st.columns(2)
+                end_date = c1.date_input("제직완료일", datetime.date.today(), key=f"wd_{sel_id}")
+                end_time = c2.time_input("완료시간", datetime.datetime.now().time(), key=f"wt_{sel_id}")
+                
+                c3, c4 = st.columns(2)
+                # 중량(g)
+                real_weight_g = c3.number_input("중량(g)", value=base_weight, step=1, format="%d", key=f"ww_{sel_id}")
+                # 생산매수(장) - 변경 시 on_stock_change 호출
+                real_stock_val = c4.number_input("생산매수(장)", min_value=0, step=1, format="%d", key=ss_stock_key, on_change=on_stock_change)
+                
+                c5, c6 = st.columns(2)
+                # 생산중량(kg) - 자동 계산되지만 수정 가능
+                prod_weight_val = c5.number_input("생산중량(kg)", min_value=0.0, step=0.1, format="%.1f", key=ss_kg_key)
+                # 평균중량(g)
+                avg_weight_val = c6.number_input("평균중량(g)", value=base_weight, step=1, format="%d", key=f"wa_{sel_id}")
+                
+                if st.button("제직 완료 저장", type="primary"):
+                    end_dt = datetime.datetime.combine(end_date, end_time)
                     
-                    # 기본값 계산 (정수형 변환)
-                    base_weight = int(sel_row.get('weight', 0)) if not pd.isna(sel_row.get('weight')) else 0
-                    total_stock = int(sel_row.get('stock', 0)) if not pd.isna(sel_row.get('stock')) else 0
+                    # 1. 롤 데이터 생성 (새 문서)
+                    parent_doc = db.collection("orders").document(sel_id).get().to_dict()
+                    new_roll_doc = parent_doc.copy()
                     
-                    # 이번 롤의 예상 생산량 (전체수량 / 롤수)
-                    def_roll_stock = int(total_stock / total_rolls) if total_rolls > 0 else total_stock
+                    new_roll_doc['status'] = "제직완료"
+                    new_roll_doc['order_no'] = f"{parent_doc.get('order_no')}-{next_roll_no}" # 예: 2405001-1
+                    new_roll_doc['parent_id'] = sel_id
+                    new_roll_doc['roll_no'] = next_roll_no
+                    new_roll_doc['weaving_end_time'] = end_dt
+                    new_roll_doc['real_weight'] = real_weight_g
+                    new_roll_doc['real_stock'] = real_stock_val
+                    new_roll_doc['stock'] = real_stock_val # 중요: 이후 공정은 이 롤의 수량을 기준으로 함
+                    new_roll_doc['prod_weight_kg'] = prod_weight_val
+                    new_roll_doc['avg_weight'] = avg_weight_val
                     
-                    def_prod_kg = int((base_weight * def_roll_stock) / 1000) # kg 계산
-                    def_avg_weight = base_weight
-
-                    c3, c4 = st.columns(2)
-                    # step=1, format="%d"로 소수점 제거 및 1단위 증감
-                    real_weight = c3.number_input("중량(g)", value=base_weight, step=1, format="%d")
-                    real_stock = c4.number_input("생산매수(장)", value=def_roll_stock, step=1, format="%d")
+                    # 불필요한 필드 제거
+                    if 'completed_rolls' in new_roll_doc: del new_roll_doc['completed_rolls']
+                    if 'weaving_roll_count' in new_roll_doc: del new_roll_doc['weaving_roll_count']
                     
-                    c5, c6 = st.columns(2)
-                    prod_weight_kg = c5.number_input("생산중량(kg)", value=def_prod_kg, step=1, format="%d")
-                    avg_weight = c6.number_input("평균중량(g)", value=def_avg_weight, step=1, format="%d")
+                    db.collection("orders").add(new_roll_doc)
                     
-                    if st.form_submit_button("제직 완료 저장"):
-                        end_dt = datetime.datetime.combine(end_date, end_time)
-                        
-                        # 1. 롤 데이터 생성 (새 문서)
-                        # 부모 문서의 데이터를 가져와서 복사
-                        parent_doc = db.collection("orders").document(sel_id).get().to_dict()
-                        new_roll_doc = parent_doc.copy()
-                        
-                        new_roll_doc['status'] = "제직완료"
-                        new_roll_doc['order_no'] = f"{parent_doc.get('order_no')}-{next_roll_no}" # 예: 2405001-1
-                        new_roll_doc['parent_id'] = sel_id
-                        new_roll_doc['roll_no'] = next_roll_no
-                        new_roll_doc['weaving_end_time'] = end_dt
-                        new_roll_doc['real_weight'] = real_weight
-                        new_roll_doc['real_stock'] = real_stock
-                        new_roll_doc['stock'] = real_stock # 중요: 이후 공정은 이 롤의 수량을 기준으로 함
-                        new_roll_doc['prod_weight_kg'] = prod_weight_kg
-                        new_roll_doc['avg_weight'] = avg_weight
-                        
-                        # 불필요한 필드 제거
-                        if 'completed_rolls' in new_roll_doc: del new_roll_doc['completed_rolls']
-                        if 'weaving_roll_count' in new_roll_doc: del new_roll_doc['weaving_roll_count']
-                        
-                        db.collection("orders").add(new_roll_doc)
-                        
-                        # 2. 부모 문서 업데이트 (진행률 표시)
-                        updates = {"completed_rolls": next_roll_no}
-                        
-                        # 마지막 롤이면 부모 문서는 '제직완료(Master)' 상태로 변경하여 목록에서 숨김
-                        if next_roll_no >= total_rolls:
-                            updates["status"] = "제직완료(Master)"
-                            msg = f"🎉 마지막 롤({next_roll_no}/{total_rolls})까지 처리가 완료되었습니다!"
-                        else:
-                            msg = f"✅ {next_roll_no}번 롤 처리가 완료되었습니다. 이어서 {next_roll_no + 1}번 롤을 입력해주세요."
-                        
-                        db.collection("orders").document(sel_id).update(updates)
-                        
-                        # 메시지를 세션에 저장하여 리런 후에도 보이게 함
-                        st.session_state["weaving_msg"] = msg
-                        st.rerun()
+                    # 2. 부모 문서 업데이트 (진행률 표시)
+                    updates = {"completed_rolls": next_roll_no}
+                    
+                    # 마지막 롤이면 부모 문서는 '제직완료(Master)' 상태로 변경하여 목록에서 숨김
+                    if next_roll_no >= total_rolls:
+                        updates["status"] = "제직완료(Master)"
+                        msg = f"🎉 마지막 롤({next_roll_no}/{total_rolls})까지 처리가 완료되었습니다!"
+                    else:
+                        msg = f"✅ {next_roll_no}번 롤 처리가 완료되었습니다. 이어서 {next_roll_no + 1}번 롤을 입력해주세요."
+                    
+                    db.collection("orders").document(sel_id).update(updates)
+                    
+                    # 메시지를 세션에 저장하여 리런 후에도 보이게 함
+                    st.session_state["weaving_msg"] = msg
+                    
+                    # [중요] 저장 후 선택 초기화를 위해 키 증가
+                    st.session_state["weaving_df_key"] += 1
+                    
+                    # 세션 정리
+                    if ss_stock_key in st.session_state: del st.session_state[ss_stock_key]
+                    if ss_kg_key in st.session_state: del st.session_state[ss_kg_key]
+                    
+                    st.rerun()
                 
                 if st.button("🚫 제직 취소 (대기로 되돌리기)", key="cancel_weaving"):
                     db.collection("orders").document(sel_id).update({
-                        "status": "발주접수",
+                        "status": "제직대기",
                         "machine_no": firestore.DELETE_FIELD,
                         "weaving_start_time": firestore.DELETE_FIELD
                     })
+                    st.session_state["weaving_df_key"] += 1
                     st.rerun()
         else:
             st.info("현재 제직 중인 작업이 없습니다.")
@@ -1411,6 +1388,11 @@ elif menu == "제직현황":
             if 'weaving_end_time' in df.columns:
                 df['weaving_end_time'] = df['weaving_end_time'].apply(lambda x: x.strftime('%Y-%m-%d %H:%M') if not pd.isnull(x) and hasattr(x, 'strftime') else x)
             
+            # [NEW] 합계 정보
+            total_stock = df['real_stock'].sum() if 'real_stock' in df.columns else 0
+            total_weight = df['prod_weight_kg'].sum() if 'prod_weight_kg' in df.columns else 0.0
+            st.markdown(f"### 📊 합계: 생산수량 **{total_stock:,}장** / 생산중량 **{total_weight:,.1f}kg**")
+
             col_map = {
                 "order_no": "발주번호", "machine_no": "제직기", "weaving_end_time": "완료시간",
                 "customer": "발주처", "name": "제품명", 
@@ -1421,9 +1403,57 @@ elif menu == "제직현황":
             display_cols = ["weaving_end_time", "machine_no", "order_no", "roll_no", "customer", "name", "real_stock", "real_weight", "prod_weight_kg", "avg_weight"]
             final_cols = [c for c in display_cols if c in df.columns]
             
+            df_display = df[final_cols].rename(columns=col_map)
+
+            # 엑셀 및 인쇄 버튼
+            c_exp1, c_exp2 = st.columns([1, 5])
+            
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                df_display.to_excel(writer, index=False)
+                
+            c_exp1.download_button(
+                label="💾 엑셀 다운로드",
+                data=buffer.getvalue(),
+                file_name=f"제직완료내역_{today}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+            # 인쇄 옵션 설정
+            with st.expander("🖨️ 인쇄 옵션 설정"):
+                po_c1, po_c2, po_c3, po_c4 = st.columns(4)
+                p_title = po_c1.text_input("제목", value="제직 완료 내역", key="wd_title")
+                p_title_size = po_c2.number_input("제목 크기(px)", value=24, step=1, key="wd_ts")
+                p_body_size = po_c3.number_input("본문 글자 크기(px)", value=11, step=1, key="wd_bs")
+                p_padding = po_c4.number_input("셀 여백(px)", value=6, step=1, key="wd_pad")
+                
+                po_c5, po_c6, po_c7 = st.columns(3)
+                p_show_date = po_c5.checkbox("출력일시 표시", value=True, key="wd_sd")
+                p_date_pos = po_c6.selectbox("일시 위치", ["Right", "Left", "Center"], index=0, key="wd_dp")
+                p_date_size = po_c7.number_input("일시 글자 크기(px)", value=12, step=1, key="wd_ds")
+                
+                st.caption("페이지 여백 (mm)")
+                po_c8, po_c9, po_c10, po_c11 = st.columns(4)
+                p_m_top = po_c8.number_input("상단", value=15, step=1, key="wd_mt")
+                p_m_bottom = po_c9.number_input("하단", value=15, step=1, key="wd_mb")
+                p_m_left = po_c10.number_input("좌측", value=15, step=1, key="wd_ml")
+                p_m_right = po_c11.number_input("우측", value=15, step=1, key="wd_mr")
+
+            # [수정] utils의 generate_report_html 함수 사용
+            if c_exp2.button("🖨️ 바로 인쇄하기", key="btn_print_wd"):
+                options = {
+                    'mt': p_m_top, 'mr': p_m_right, 'mb': p_m_bottom, 'ml': p_m_left,
+                    'ts': p_title_size, 'bs': p_body_size, 'pad': p_padding,
+                    'da': p_date_pos.lower(), 'ds': p_date_size, 'dd': "block" if p_show_date else "none"
+                }
+                summary_text = f"합계 - 생산수량: {total_stock:,}장 / 생산중량: {total_weight:,.1f}kg"
+                print_html = generate_report_html(p_title, df_display, summary_text, options)
+                st.components.v1.html(print_html, height=0, width=0)
+
             st.write("🔽 수정하거나 취소할 항목을 선택하세요.")
             selection = st.dataframe(
                 df[final_cols].rename(columns=col_map), 
+                df_display, 
                 use_container_width=True, 
                 hide_index=True,
                 on_select="rerun",
@@ -1732,6 +1762,13 @@ elif menu == "제직현황":
                 p_m_left = po_c10.number_input("좌측", value=15, step=1, key="pl_ml")
                 p_m_right = po_c11.number_input("우측", value=15, step=1, key="pl_mr")
 
+            # [수정] utils의 generate_report_html 함수 사용
+            options = {
+                'mt': p_m_top, 'mr': p_m_right, 'mb': p_m_bottom, 'ml': p_m_left,
+                'ts': p_title_size, 'bs': p_body_size, 'pad': p_padding,
+                'da': p_date_pos.lower(), 'ds': p_date_size, 'dd': "block" if p_show_date else "none"
+            }
+            print_html = generate_report_html(p_title, df_display, "", options)
             print_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
             date_align = p_date_pos.lower()
             date_display = "block" if p_show_date else "none"
@@ -1856,12 +1893,16 @@ elif menu == "염색현황":
             
         if rows:
             df = pd.DataFrame(rows)
+            # 비고 컬럼이 없는 경우 빈 값으로 초기화 (데이터가 없을 때 오류 방지)
+            if 'dyeing_note' not in df.columns:
+                df['dyeing_note'] = ""
+
             col_map = {
                 "order_no": "발주번호", "dyeing_partner": "염색업체", "dyeing_out_date": "출고일",
                 "name": "제품명", "color": "색상", "stock": "수량", "dyeing_out_weight": "출고중량(kg)",
-                "roll_no": "롤번호"
+                "roll_no": "롤번호", "dyeing_note": "비고"
             }
-            display_cols = ["dyeing_out_date", "dyeing_partner", "order_no", "roll_no", "name", "color", "stock", "dyeing_out_weight"]
+            display_cols = ["dyeing_out_date", "dyeing_partner", "order_no", "roll_no", "name", "color", "stock", "dyeing_out_weight", "dyeing_note"]
             final_cols = [c for c in display_cols if c in df.columns]
             
             st.write("🔽 관리할 항목을 선택하세요.")
@@ -1953,12 +1994,13 @@ elif menu == "염색현황":
     with tab_dye_done:
         st.subheader("염색 완료 목록")
         
-        # 검색 조건 (기간 + 염색업체)
+        # 검색 조건 (기간 + 염색업체 + 발주처)
         with st.form("search_dye_done"):
-            c1, c2 = st.columns([2, 1])
+            c1, c2, c3 = st.columns([2, 1, 1])
             today = datetime.date.today()
             s_date = c1.date_input("조회 기간 (완료일)", [today - datetime.timedelta(days=30), today])
-            s_partner = c2.text_input("염색업체 검색")
+            s_partner = c2.text_input("염색업체")
+            s_customer = c3.text_input("발주처")
             st.form_submit_button("🔍 조회")
 
         # 날짜 범위 계산
@@ -1991,6 +2033,10 @@ elif menu == "염색현황":
             # 2. 염색업체 필터
             if s_partner and s_partner not in d.get('dyeing_partner', ''):
                 continue
+
+            # 3. 발주처 필터
+            if s_customer and s_customer not in d.get('customer', ''):
+                continue
                 
             rows.append(d)
             
@@ -2000,20 +2046,71 @@ elif menu == "염색현황":
         if rows:
             df = pd.DataFrame(rows)
             
-            # 금액 합계 표시
+            # 합계 계산
+            total_stock = df['stock'].sum() if 'stock' in df.columns else 0
+            total_weight = df['dyeing_in_weight'].sum() if 'dyeing_in_weight' in df.columns else 0.0
             total_amount = df['dyeing_amount'].sum() if 'dyeing_amount' in df.columns else 0
-            st.markdown(f"### 💵 총 염색금액: **{total_amount:,}원** (총 {len(rows)}건)")
+            
+            st.markdown(f"### 📊 합계: 수량 **{total_stock:,}장** / 중량 **{total_weight:,.1f}kg** / 금액 **{total_amount:,}원**")
             
             col_map = {
                 "order_no": "발주번호", "dyeing_partner": "염색업체", "dyeing_in_date": "완료일",
                 "name": "제품명", "color": "색상", "stock": "수량", "roll_no": "롤번호",
-                "dyeing_in_weight": "입고중량(kg)", "dyeing_unit_price": "단가", "dyeing_amount": "금액"
+                "dyeing_in_weight": "입고중량(kg)", "dyeing_unit_price": "단가", "dyeing_amount": "금액",
+                "customer": "발주처"
             }
-            display_cols = ["dyeing_in_date", "dyeing_partner", "order_no", "roll_no", "name", "color", "stock", "dyeing_in_weight", "dyeing_unit_price", "dyeing_amount"]
+            display_cols = ["dyeing_in_date", "dyeing_partner", "customer", "order_no", "roll_no", "name", "color", "stock", "dyeing_in_weight", "dyeing_unit_price", "dyeing_amount"]
             final_cols = [c for c in display_cols if c in df.columns]
             
+            df_display = df[final_cols].rename(columns=col_map)
+            
+            # 엑셀 및 인쇄 버튼
+            c_exp1, c_exp2 = st.columns([1, 5])
+            
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                df_display.to_excel(writer, index=False)
+                
+            c_exp1.download_button(
+                label="💾 엑셀 다운로드",
+                data=buffer.getvalue(),
+                file_name=f"염색완료내역_{today}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+            
+            # 인쇄 옵션 설정
+            with st.expander("🖨️ 인쇄 옵션 설정"):
+                po_c1, po_c2, po_c3, po_c4 = st.columns(4)
+                p_title = po_c1.text_input("제목", value="염색 완료 내역", key="dd_title")
+                p_title_size = po_c2.number_input("제목 크기(px)", value=24, step=1, key="dd_ts")
+                p_body_size = po_c3.number_input("본문 글자 크기(px)", value=11, step=1, key="dd_bs")
+                p_padding = po_c4.number_input("셀 여백(px)", value=6, step=1, key="dd_pad")
+                
+                po_c5, po_c6, po_c7 = st.columns(3)
+                p_show_date = po_c5.checkbox("출력일시 표시", value=True, key="dd_sd")
+                p_date_pos = po_c6.selectbox("일시 위치", ["Right", "Left", "Center"], index=0, key="dd_dp")
+                p_date_size = po_c7.number_input("일시 글자 크기(px)", value=12, step=1, key="dd_ds")
+                
+                st.caption("페이지 여백 (mm)")
+                po_c8, po_c9, po_c10, po_c11 = st.columns(4)
+                p_m_top = po_c8.number_input("상단", value=15, step=1, key="dd_mt")
+                p_m_bottom = po_c9.number_input("하단", value=15, step=1, key="dd_mb")
+                p_m_left = po_c10.number_input("좌측", value=15, step=1, key="dd_ml")
+                p_m_right = po_c11.number_input("우측", value=15, step=1, key="dd_mr")
+
+            # [수정] utils의 generate_report_html 함수 사용 (오류 원천 차단)
+            if c_exp2.button("🖨️ 바로 인쇄하기", key="btn_print_dd"):
+                options = {
+                    'mt': p_m_top, 'mr': p_m_right, 'mb': p_m_bottom, 'ml': p_m_left,
+                    'ts': p_title_size, 'bs': p_body_size, 'pad': p_padding,
+                    'da': p_date_pos.lower(), 'ds': p_date_size, 'dd': "block" if p_show_date else "none"
+                }
+                summary_text = f"합계 - 수량: {total_stock:,}장 / 중량: {total_weight:,.1f}kg / 금액: {total_amount:,}원"
+                print_html = generate_report_html(p_title, df_display, summary_text, options)
+                st.components.v1.html(print_html, height=0, width=0)
+
             st.write("🔽 수정하거나 취소할 항목을 선택하세요.")
-            selection = st.dataframe(df[final_cols].rename(columns=col_map), use_container_width=True, on_select="rerun", selection_mode="single-row", key="df_dye_done")
+            selection = st.dataframe(df_display, use_container_width=True, on_select="rerun", selection_mode="single-row", key="df_dye_done")
             
             if selection.selection.rows:
                 idx = selection.selection.rows[0]
@@ -2270,10 +2367,11 @@ elif menu == "봉제현황":
         
         # 검색 및 엑셀 다운로드
         with st.form("search_sew_done"):
-            c1, c2 = st.columns([2, 1])
+            c1, c2, c3 = st.columns([2, 1, 1])
             today = datetime.date.today()
             s_date = c1.date_input("조회 기간 (완료일)", [today - datetime.timedelta(days=30), today])
-            s_partner = c2.text_input("봉제업체 검색")
+            s_partner = c2.text_input("봉제업체")
+            s_customer = c3.text_input("발주처")
             st.form_submit_button("🔍 조회")
             
         # 날짜 범위 계산
@@ -2304,6 +2402,10 @@ elif menu == "봉제현황":
             # 업체 필터
             if s_partner and s_partner not in d.get('sewing_partner', ''):
                 continue
+
+            # 발주처 필터
+            if s_customer and s_customer not in d.get('customer', ''):
+                continue
                 
             rows.append(d)
             
@@ -2312,35 +2414,70 @@ elif menu == "봉제현황":
         if rows:
             df = pd.DataFrame(rows)
             
-            # 금액 합계 (외주봉제만)
+            # 합계 계산
+            total_stock = df['stock'].sum() if 'stock' in df.columns else 0
             total_amount = df['sewing_amount'].sum() if 'sewing_amount' in df.columns else 0
-            st.markdown(f"### 💵 외주봉제 총 금액: **{total_amount:,}원**")
+            
+            st.markdown(f"### 📊 합계: 수량 **{total_stock:,}장** / 금액 **{total_amount:,}원**")
             
             col_map = {
                 "order_no": "발주번호", "sewing_partner": "봉제처", "sewing_end_date": "완료일",
                 "name": "제품명", "color": "색상", "stock": "수량", "sewing_type": "구분",
-                "sewing_unit_price": "단가", "sewing_amount": "금액"
+                "sewing_unit_price": "단가", "sewing_amount": "금액",
+                "customer": "발주처"
             }
-            display_cols = ["sewing_end_date", "sewing_type", "sewing_partner", "order_no", "name", "color", "stock", "sewing_unit_price", "sewing_amount"]
+            display_cols = ["sewing_end_date", "sewing_type", "sewing_partner", "customer", "order_no", "name", "color", "stock", "sewing_unit_price", "sewing_amount"]
             final_cols = [c for c in display_cols if c in df.columns]
             
             df_display = df[final_cols].rename(columns=col_map)
             
-            st.write("🔽 수정하거나 취소할 항목을 선택하세요.")
-            selection = st.dataframe(df_display, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row", key="df_sew_done")
+            # 엑셀 및 인쇄 버튼
+            c_exp1, c_exp2 = st.columns([1, 5])
             
-            # 엑셀 다운로드
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                 df_display.to_excel(writer, index=False)
                 
-            c_dl1, c_dl2 = st.columns([1, 5])
-            c_dl1.download_button(
+            c_exp1.download_button(
                 label="💾 엑셀 다운로드",
                 data=buffer.getvalue(),
                 file_name=f"봉제완료내역_{today}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+            
+            # 인쇄 옵션 설정
+            with st.expander("🖨️ 인쇄 옵션 설정"):
+                po_c1, po_c2, po_c3, po_c4 = st.columns(4)
+                p_title = po_c1.text_input("제목", value="봉제 완료 내역", key="sd_title")
+                p_title_size = po_c2.number_input("제목 크기(px)", value=24, step=1, key="sd_ts")
+                p_body_size = po_c3.number_input("본문 글자 크기(px)", value=11, step=1, key="sd_bs")
+                p_padding = po_c4.number_input("셀 여백(px)", value=6, step=1, key="sd_pad")
+                
+                po_c5, po_c6, po_c7 = st.columns(3)
+                p_show_date = po_c5.checkbox("출력일시 표시", value=True, key="sd_sd")
+                p_date_pos = po_c6.selectbox("일시 위치", ["Right", "Left", "Center"], index=0, key="sd_dp")
+                p_date_size = po_c7.number_input("일시 글자 크기(px)", value=12, step=1, key="sd_ds")
+                
+                st.caption("페이지 여백 (mm)")
+                po_c8, po_c9, po_c10, po_c11 = st.columns(4)
+                p_m_top = po_c8.number_input("상단", value=15, step=1, key="sd_mt")
+                p_m_bottom = po_c9.number_input("하단", value=15, step=1, key="sd_mb")
+                p_m_left = po_c10.number_input("좌측", value=15, step=1, key="sd_ml")
+                p_m_right = po_c11.number_input("우측", value=15, step=1, key="sd_mr")
+
+            # [수정] utils의 generate_report_html 함수 사용
+            if c_exp2.button("🖨️ 바로 인쇄하기", key="btn_print_sd"):
+                options = {
+                    'mt': p_m_top, 'mr': p_m_right, 'mb': p_m_bottom, 'ml': p_m_left,
+                    'ts': p_title_size, 'bs': p_body_size, 'pad': p_padding,
+                    'da': p_date_pos.lower(), 'ds': p_date_size, 'dd': "block" if p_show_date else "none"
+                }
+                summary_text = f"합계 - 수량: {total_stock:,}장 / 금액: {total_amount:,}원"
+                print_html = generate_report_html(p_title, df_display, summary_text, options)
+                st.components.v1.html(print_html, height=0, width=0)
+
+            st.write("🔽 수정하거나 취소할 항목을 선택하세요.")
+            selection = st.dataframe(df_display, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row", key="df_sew_done")
             
             if selection.selection.rows:
                 idx = selection.selection.rows[0]
@@ -2409,13 +2546,34 @@ elif menu == "출고현황":
                     # 출고 방법 선택 및 완료 처리
                     with c4:
                         ship_method = st.selectbox("출고방법", ["택배", "화물", "용차", "직배송", "기타"], key=f"sm_{item['id']}")
-                        if st.button("🚀 출고 완료 처리", key=f"ship_{item['id']}"):
-                            db.collection("orders").document(item['id']).update({
-                                "status": "출고완료",
-                                "shipping_date": datetime.datetime.now(),
-                                "shipping_method": ship_method
-                            })
-                            st.success("출고 처리되었습니다.")
+                        
+                        # [NEW] 부분 출고(분할) 기능 추가
+                        current_stock = int(item.get('stock', 0))
+                        ship_qty = st.number_input("출고수량", min_value=1, max_value=current_stock, value=current_stock, step=10, key=f"sq_{item['id']}")
+                        
+                        if st.button("🚀 출고 처리", key=f"ship_{item['id']}"):
+                            if ship_qty < current_stock:
+                                # 부분 출고: 새 문서 생성(출고분) + 기존 문서 업데이트(잔여분)
+                                doc_ref = db.collection("orders").document(item['id'])
+                                doc_data = doc_ref.get().to_dict()
+                                
+                                # 1. 출고분 (새 문서)
+                                new_ship_doc = doc_data.copy()
+                                new_ship_doc['stock'] = ship_qty
+                                new_ship_doc['status'] = "출고완료"
+                                new_ship_doc['shipping_date'] = datetime.datetime.now()
+                                new_ship_doc['shipping_method'] = ship_method
+                                new_ship_doc['parent_id'] = item['id'] # 추적용
+                                db.collection("orders").add(new_ship_doc)
+                                
+                                # 2. 잔여분 (기존 문서 유지, 수량 차감)
+                                doc_ref.update({"stock": current_stock - ship_qty})
+                                st.success(f"{ship_qty}장 부분 출고 완료! (잔여: {current_stock - ship_qty}장)")
+                            else:
+                                # 전량 출고
+                                db.collection("orders").document(item['id']).update({"status": "출고완료", "shipping_date": datetime.datetime.now(), "shipping_method": ship_method})
+                                st.success("전량 출고 처리되었습니다.")
+                            
                             st.rerun()
                 st.divider()
         else:
@@ -2475,6 +2633,62 @@ elif menu == "출고현황":
                 st.divider()
         else:
             st.info("출고 완료된 내역이 없습니다.")
+
+elif menu == "재고현황":
+    st.header("📦 재고 현황")
+    st.info("생산이 완료되어 출고 대기 중인 제품(완제품 재고)을 확인합니다.")
+    
+    # 재고 기준: status == "봉제완료" (출고 전 단계)
+    docs = db.collection("orders").where("status", "==", "봉제완료").stream()
+    rows = []
+    for doc in docs:
+        d = doc.to_dict()
+        d['id'] = doc.id
+        rows.append(d)
+    
+    if rows:
+        df = pd.DataFrame(rows)
+        
+        # 1. 제품별 재고 요약 (Pivot)
+        st.subheader("📊 제품별 재고 요약")
+        if 'product_code' in df.columns and 'stock' in df.columns:
+            summary = df.groupby(['product_code', 'name']).agg({'stock': 'sum'}).reset_index()
+            summary.columns = ['제품코드', '제품명', '총재고수량']
+            st.dataframe(summary, use_container_width=True, hide_index=True)
+        
+        st.divider()
+        
+        # 2. 상세 재고 내역 (Lot별 관리)
+        st.subheader("📋 상세 재고 내역 (Lot별)")
+        st.markdown("""
+        같은 제품코드라도 **발주번호(Lot)**에 따라 색상, 사양 등이 다를 수 있습니다.  
+        아래 목록에서 개별 생산 건별 재고를 확인할 수 있습니다.
+        """)
+        
+        # 날짜 포맷팅
+        if 'sewing_end_date' in df.columns:
+            df['sewing_end_date'] = df['sewing_end_date'].apply(lambda x: str(x)[:10] if x else "-")
+            
+        col_map = {
+            "product_code": "제품코드", "order_no": "발주번호(Lot)", "name": "제품명", 
+            "color": "색상", "stock": "재고수량", "sewing_end_date": "생산완료일",
+            "customer": "발주처(용도)", "note": "비고"
+        }
+        
+        display_cols = ["product_code", "order_no", "name", "color", "stock", "customer", "sewing_end_date", "note"]
+        final_cols = [c for c in display_cols if c in df.columns]
+        
+        # 정렬: 제품코드 > 발주번호
+        df = df.sort_values(by=['product_code', 'order_no'])
+        
+        st.dataframe(
+            df[final_cols].rename(columns=col_map),
+            use_container_width=True,
+            hide_index=True
+        )
+        
+    else:
+        st.info("현재 보유 중인 완제품 재고가 없습니다. (모두 출고되었거나 생산 중입니다.)")
 
 elif menu == "제품 관리":
     st.header("📦 제품 마스터 관리")
@@ -2843,15 +3057,19 @@ elif menu == "제직기관리":
             c1, c2 = st.columns(2)
             new_no = c1.number_input("호기 번호 (No.)", min_value=1, step=1, help="정렬 순서 및 고유 ID로 사용됩니다.")
             new_name = c2.text_input("제직기 명칭", placeholder="예: 1호대")
-            c3, c4 = st.columns(2)
+            c3, c4, c5 = st.columns(3)
             new_model = c3.text_input("모델명")
-            new_note = c4.text_input("특이사항/메모")
+            new_loom = c4.text_input("직기타입")
+            new_jacquard = c5.text_input("자가드타입")
+            new_note = st.text_input("특이사항/메모")
             
             if st.form_submit_button("저장"):
                 db.collection("machines").document(str(new_no)).set({
                     "machine_no": new_no,
                     "name": new_name,
                     "model": new_model,
+                    "loom_type": new_loom,
+                    "jacquard_type": new_jacquard,
                     "note": new_note
                 })
                 st.success("저장되었습니다.")
@@ -2882,9 +3100,14 @@ elif menu == "제직기관리":
         else:
             df = pd.DataFrame(m_list)
             col_map = {"machine_no": "호기", "name": "명칭", "model": "모델명", "note": "비고"}
+            # 신규 컬럼이 없는 경우를 대비해 빈 값으로 초기화
+            for col in ["loom_type", "jacquard_type"]:
+                if col not in df.columns:
+                    df[col] = ""
+            col_map = {"machine_no": "호기", "name": "명칭", "model": "모델명", "loom_type": "직기타입", "jacquard_type": "자가드타입", "note": "비고"}
             
             # 화면 표시용
-            df_display = df[["machine_no", "name", "model", "note"]].rename(columns=col_map)
+            df_display = df[["machine_no", "name", "model", "loom_type", "jacquard_type", "note"]].rename(columns=col_map)
             
             st.write("🔽 수정할 제직기를 선택하세요.")
             selection = st.dataframe(df_display, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row", key="machine_list")
@@ -2908,12 +3131,20 @@ elif menu == "제직기관리":
                     c1, c2 = st.columns(2)
                     e_no = c1.number_input("호기 번호", value=int(sel_item['machine_no']), step=1, disabled=True)
                     e_name = c2.text_input("명칭", value=sel_item['name'])
-                    c3, c4 = st.columns(2)
+                    c3, c4, c5 = st.columns(3)
                     e_model = c3.text_input("모델명", value=sel_item.get('model', ''))
-                    e_note = c4.text_input("비고", value=sel_item.get('note', ''))
+                    e_loom = c4.text_input("직기타입", value=sel_item.get('loom_type', ''))
+                    e_jacquard = c5.text_input("자가드타입", value=sel_item.get('jacquard_type', ''))
+                    e_note = st.text_input("비고", value=sel_item.get('note', ''))
                     
                     if st.form_submit_button("수정 저장"):
-                        db.collection("machines").document(sel_id).update({"name": e_name, "model": e_model, "note": e_note})
+                        db.collection("machines").document(sel_id).update({
+                            "name": e_name, 
+                            "model": e_model, 
+                            "loom_type": e_loom,
+                            "jacquard_type": e_jacquard,
+                            "note": e_note
+                        })
                         st.success("수정되었습니다.")
                         st.rerun()
                 

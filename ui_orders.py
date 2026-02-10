@@ -360,6 +360,9 @@ def render_order_status(db):
     st.header("📊 발주 현황")
     st.write("조건을 설정하여 발주 내역을 조회하고 관리합니다.")
 
+    # [NEW] 탭 구분 (기본 목록 / 품목별 상세내역)
+    tab_list, tab_detail = st.tabs(["📋 발주 목록", "🔍 품목별 상세내역 (통합)"])
+
     # 메뉴 첫 진입 시 기본 검색 조건 설정
     if "search_performed" not in st.session_state:
         st.session_state["search_performed"] = True
@@ -454,388 +457,283 @@ def render_order_status(db):
             # 화면 표시용 데이터프레임 (한글 컬럼 적용)
             df_display = df[final_cols].rename(columns=col_map)
             
-            # [NEW] 테이블 위 작업 영역 (상태변경, 수정버튼 등)
-            action_placeholder = st.container()
+            with tab_list:
+                # [NEW] 테이블 위 작업 영역 (상태변경, 수정버튼 등)
+                action_placeholder = st.container()
 
-            # --- 수정/삭제를 위한 테이블 선택 기능 ---
-            st.write("🔽 목록에서 상세 정보를 보거나 수정할 행을 선택(체크)하세요.")
-            selection = st.dataframe(
-                df_display, 
-                use_container_width=True, 
-                hide_index=True,  # 맨 왼쪽 순번(0,1,2..) 숨기기
-                on_select="rerun", # 선택 시 리런
-                selection_mode="multi-row", # 다중 선택 가능으로 변경
-                height=700 # [수정] 목록 높이 확대 (약 20행)
-            )
-            
-            # [MOVED] 작업 영역 로직 (테이블 상단)
-            if selection.selection.rows:
-                selected_indices = selection.selection.rows
-                selected_rows = df.iloc[selected_indices]
-                
-                with action_placeholder:
-                    # 1. 제직 지시 (발주접수 -> 제직대기)
-                    # 선택된 항목 중 '발주접수' 상태인 것만 필터링
-                    valid_to_weaving = selected_rows[selected_rows['status'] == '발주접수']
-                    
-                    if not valid_to_weaving.empty:
-                        with st.expander(f"🚀 제직 지시 ({len(valid_to_weaving)}건)", expanded=True):
-                            st.write(f"선택한 항목 중 **'발주접수' 상태인 {len(valid_to_weaving)}건**을 **'제직대기'**로 변경합니다.")
-                            if st.button("선택 항목 제직대기로 발송", type="primary", key="btn_batch_weaving"):
-                                for idx, row in valid_to_weaving.iterrows():
-                                    db.collection("orders").document(row['id']).update({"status": "제직대기"})
-                                st.success(f"{len(valid_to_weaving)}건이 제직대기 상태로 변경되었습니다.")
-                                st.rerun()
-                    
-                    # 2. 상세 수정 바로가기 (단일 선택 시)
-                    if len(selection.selection.rows) == 1:
-                        st.markdown("""
-                            <a href="#edit_detail_section" style="text-decoration: none;">
-                                <div style="
-                                    display: inline-block;
-                                    padding: 0.5rem 1rem;
-                                    background-color: #f0f2f6;
-                                    color: #31333F;
-                                    border-radius: 0.5rem;
-                                    border: 1px solid #d6d6d8;
-                                    font-weight: 500;
-                                    text-align: center;
-                                    cursor: pointer;
-                                    margin-bottom: 10px;
-                                ">
-                                    🛠️ 선택한 내역 상세 수정 (화면 아래로 이동)
-                                </div>
-                            </a>
-                        """, unsafe_allow_html=True)
-            
-            # 버튼 영역 (엑셀 다운로드 + 인쇄)
-            btn_c1, btn_c2 = st.columns([1, 1])
-            
-            # 엑셀 다운로드 (xlsx)
-            buffer = io.BytesIO()
-            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                df_display.to_excel(writer, index=False)
-                
-            btn_c1.download_button(
-                label="💾 엑셀(.xlsx) 다운로드",
-                data=buffer.getvalue(),
-                file_name='발주현황.xlsx',
-                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            )
-
-            # 인쇄 옵션 설정
-            with st.expander("🖨️ 인쇄 옵션 설정"):
-                po_c1, po_c2, po_c3, po_c4 = st.columns(4)
-                p_title = po_c1.text_input("제목", value="발주 현황 리스트")
-                p_title_size = po_c2.number_input("제목 크기(px)", value=24, step=1)
-                p_body_size = po_c3.number_input("본문 글자 크기(px)", value=11, step=1)
-                p_padding = po_c4.number_input("셀 여백(px)", value=6, step=1)
-                
-                po_c5, po_c6, po_c7 = st.columns(3)
-                p_show_date = po_c5.checkbox("출력일시 표시", value=True)
-                p_date_pos = po_c6.selectbox("일시 위치", ["Right", "Left", "Center"], index=0)
-                p_date_size = po_c7.number_input("일시 글자 크기(px)", value=12, step=1)
-                
-                st.caption("페이지 여백 (mm)")
-                po_c8, po_c9, po_c10, po_c11 = st.columns(4)
-                p_m_top = po_c8.number_input("상단", value=15, step=1)
-                p_m_bottom = po_c9.number_input("하단", value=15, step=1)
-                p_m_left = po_c10.number_input("좌측", value=15, step=1)
-                p_m_right = po_c11.number_input("우측", value=15, step=1)
-                
-                st.divider()
-                st.markdown("###### 📊 컬럼 설정 (순서 변경 및 너비 지정)")
-                st.caption("💡 아래 버튼을 사용하여 컬럼 순서를 변경하세요.")
-
-                # [수정] 인쇄 선택용 컬럼명을 한글로 변환
-                final_cols_kr = [col_map.get(c, c) for c in final_cols]
-                
-                # 세션 상태에 설정 데이터프레임 초기화 및 동기화
-                if "print_settings_df" not in st.session_state:
-                    # 초기값 생성 (기본 너비 0 = 자동)
-                    init_data = []
-                    for i, col in enumerate(final_cols_kr):
-                        init_data.append({"출력": True, "컬럼명": col, "너비(px)": 0, "순서": i+1})
-                    st.session_state["print_settings_df"] = pd.DataFrame(init_data)
-                
-                # 현재 컬럼과 동기화 (새로운 컬럼이 생기면 추가)
-                curr_df = st.session_state["print_settings_df"]
-                existing_cols = set(curr_df["컬럼명"].tolist())
-                new_cols = [c for c in final_cols_kr if c not in existing_cols]
-                
-                if new_cols:
-                    max_order = curr_df["순서"].max() if not curr_df.empty else 0
-                    new_rows = []
-                    for i, col in enumerate(new_cols):
-                        new_rows.append({"출력": True, "컬럼명": col, "너비(px)": 0, "순서": max_order + i + 1})
-                    if new_rows:
-                        curr_df = pd.concat([curr_df, pd.DataFrame(new_rows)], ignore_index=True)
-                        st.session_state["print_settings_df"] = curr_df
-                
-                # 화면 표시를 위해 순서대로 정렬
-                df_editor_view = st.session_state["print_settings_df"].sort_values("순서")
-                
-                # 에디터 갱신을 위한 버전 관리
-                if "print_settings_ver" not in st.session_state:
-                    st.session_state["print_settings_ver"] = 0
-
-                # 데이터 에디터 표시
-                edited_df = st.data_editor(
-                    df_editor_view,
-                    column_config={
-                        "출력": st.column_config.CheckboxColumn("출력", width="small"),
-                        "컬럼명": st.column_config.TextColumn("컬럼명", disabled=True),
-                        "너비(px)": st.column_config.NumberColumn("너비(px)", min_value=0, max_value=500, width="small", help="0으로 설정하면 자동 너비가 적용됩니다."),
-                        "순서": st.column_config.NumberColumn("순서", width="small", disabled=True), # [수정] 직접 입력 방지
-                    },
-                    hide_index=True,
-                    use_container_width=True,
-                    key=f"print_settings_editor_{st.session_state['print_settings_ver']}"
+                # --- 수정/삭제를 위한 테이블 선택 기능 ---
+                st.write("🔽 목록에서 수정하거나 제직대기로 보낼 행을 선택(체크)하세요. (다중 선택 가능)")
+                selection = st.dataframe(
+                    df_display, 
+                    use_container_width=True, 
+                    hide_index=True,  # 맨 왼쪽 순번(0,1,2..) 숨기기
+                    on_select="rerun", # 선택 시 리런
+                    selection_mode="multi-row", # 다중 선택 가능으로 변경
+                    height=700, # [수정] 목록 높이 확대 (약 20행)
+                    key="order_status_list" # [추가] 선택 상태 유지를 위한 고유 키
                 )
                 
-                # 변경사항 저장 (리런 시 반영됨)
-                st.session_state["print_settings_df"] = edited_df
-
-                # [NEW] 순서 변경 도구 (위/아래 이동 및 초기화)
-                c_move1, c_move2, c_move3, c_move4, c_move5 = st.columns([3, 1.3, 1.3, 2, 1.3])
-                
-                current_cols_ordered = df_editor_view["컬럼명"].tolist()
-                
-                # 선택 상태 유지를 위한 index 계산
-                default_ix = 0
-                if "last_target_col" in st.session_state and st.session_state["last_target_col"] in current_cols_ordered:
-                    default_ix = current_cols_ordered.index(st.session_state["last_target_col"])
-
-                with c_move1:
-                    target_col = st.selectbox("이동할 컬럼 선택", current_cols_ordered, index=default_ix, label_visibility="collapsed", key="sb_col_move")
-                
-                with c_move2:
-                    if st.button("⬆️ 위로 한칸", help="위로 이동"):
-                        st.session_state["last_target_col"] = target_col
-                        df = st.session_state["print_settings_df"].sort_values("순서").reset_index(drop=True)
-                        try:
-                            idx = df[df["컬럼명"] == target_col].index[0]
-                            if idx > 0:
-                                df.iloc[idx], df.iloc[idx-1] = df.iloc[idx-1].copy(), df.iloc[idx].copy()
-                                df["순서"] = range(1, len(df) + 1)
-                                st.session_state["print_settings_df"] = df
-                                st.session_state["print_settings_ver"] += 1
-                                st.rerun()
-                        except: pass
-
-                with c_move3:
-                    if st.button("⬇️ 아래로 한칸", help="아래로 이동"):
-                        st.session_state["last_target_col"] = target_col
-                        df = st.session_state["print_settings_df"].sort_values("순서").reset_index(drop=True)
-                        try:
-                            idx = df[df["컬럼명"] == target_col].index[0]
-                            if idx < len(df) - 1:
-                                df.iloc[idx], df.iloc[idx+1] = df.iloc[idx+1].copy(), df.iloc[idx].copy()
-                                df["순서"] = range(1, len(df) + 1)
-                                st.session_state["print_settings_df"] = df
-                                st.session_state["print_settings_ver"] += 1
-                                st.rerun()
-                        except: pass
-                
-                with c_move5:
-                    if st.button("🔄 초기화", help="순서 초기화"):
-                        if "last_target_col" in st.session_state:
-                            del st.session_state["last_target_col"]
-                        df = st.session_state["print_settings_df"].sort_values("순서").reset_index(drop=True)
+                # [MOVED] 작업 영역 로직 (테이블 상단)
+                if selection.selection.rows:
+                    selected_indices = selection.selection.rows
+                    selected_rows = df.iloc[selected_indices]
+                    
+                    with action_placeholder:
+                        # 1. 제직 지시 (발주접수 -> 제직대기)
+                        # 선택된 항목 중 '발주접수' 상태인 것만 필터링
+                        valid_to_weaving = selected_rows[selected_rows['status'] == '발주접수']
                         
-                        # [수정] 초기화 로직 개선: 기본 컬럼 순서(final_cols_kr)대로 순서값 재할당
-                        df = st.session_state["print_settings_df"]
-                        order_map = {col: i+1 for i, col in enumerate(final_cols_kr)}
-                        df["순서"] = df["컬럼명"].map(order_map).fillna(999)
-                        df = df.sort_values("순서").reset_index(drop=True)
-                        df["순서"] = range(1, len(df) + 1)
+                        if not valid_to_weaving.empty:
+                            with st.expander(f"🚀 제직 지시 ({len(valid_to_weaving)}건)", expanded=True):
+                                st.write(f"선택한 항목 중 **'발주접수' 상태인 {len(valid_to_weaving)}건**을 **'제직대기'**로 변경합니다.")
+                                if st.button("선택 항목 제직대기로 발송", type="primary", key="btn_batch_weaving"):
+                                    for idx, row in valid_to_weaving.iterrows():
+                                        db.collection("orders").document(row['id']).update({"status": "제직대기"})
+                                    st.success(f"{len(valid_to_weaving)}건이 제직대기 상태로 변경되었습니다.")
+                                    st.rerun()
                         
-                        st.session_state["print_settings_df"] = df
-                        st.session_state["print_settings_ver"] += 1
-                        st.rerun()
+                        # 2. 상세 수정 바로가기 (단일 선택 시)
+                        if len(selection.selection.rows) == 1:
+                            st.markdown("""
+                                <a href="#edit_detail_section" style="text-decoration: none;">
+                                    <div style="
+                                        display: inline-block;
+                                        padding: 0.5rem 1rem;
+                                        background-color: #f0f2f6;
+                                        color: #31333F;
+                                        border-radius: 0.5rem;
+                                        border: 1px solid #d6d6d8;
+                                        font-weight: 500;
+                                        text-align: center;
+                                        cursor: pointer;
+                                        margin-bottom: 10px;
+                                    ">
+                                        🛠️ 선택한 내역 상세 수정 (화면 아래로 이동)
+                                    </div>
+                                </a>
+                            """, unsafe_allow_html=True)
                 
-                # 인쇄 로직에 사용할 변수 추출
-                # 출력 체크된 것만, 순서대로 정렬
-                print_target = edited_df[edited_df["출력"]].sort_values("순서")
-                # 현재 데이터프레임에 존재하는 컬럼만 선택 (KeyError 방지)
-                p_selected_cols = [c for c in print_target["컬럼명"].tolist() if c in final_cols_kr]
-                # 너비 정보 딕셔너리
-                p_widths = dict(zip(print_target["컬럼명"], print_target["너비(px)"]))
+                # 버튼 영역 (엑셀 다운로드 + 인쇄)
+                btn_c1, btn_c2 = st.columns([1, 1])
                 
-                # 스타일 설정
-                p_nowrap = st.checkbox("텍스트 줄바꿈 방지 (한 줄 표시)", value=False)
+                # 엑셀 다운로드 (xlsx)
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    df_display.to_excel(writer, index=False)
+                    
+                btn_c1.download_button(
+                    label="💾 엑셀(.xlsx) 다운로드",
+                    data=buffer.getvalue(),
+                    file_name='발주현황.xlsx',
+                    mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                )
 
-            # 인쇄 버튼 (HTML 생성 후 새 창 열기 방식 흉내)
-            if btn_c2.button("🖨️ 바로 인쇄하기"):
-                print_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-                date_align = p_date_pos.lower()
-                date_display = "block" if p_show_date else "none"
-                
-                # [수정] 선택된 컬럼만 필터링
-                print_df = df_display[p_selected_cols]
-                
-                # [수정] CSS 생성 (줄바꿈 방지 및 너비 지정)
-                custom_css = ""
-                if p_nowrap:
-                    custom_css += "td { white-space: nowrap; }\n"
-                
-                for i, col in enumerate(p_selected_cols):
-                    w = p_widths.get(col, 0)
-                    if w > 0:
-                        # nth-child는 1부터 시작
-                        custom_css += f"table tr th:nth-child({i+1}), table tr td:nth-child({i+1}) {{ width: {w}px; min-width: {w}px; }}\n"
+                # 인쇄 옵션 설정
+                with st.expander("🖨️ 인쇄 옵션 설정"):
+                    po_c1, po_c2, po_c3, po_c4 = st.columns(4)
+                    p_title = po_c1.text_input("제목", value="발주 현황 리스트")
+                    p_title_size = po_c2.number_input("제목 크기(px)", value=24, step=1)
+                    p_body_size = po_c3.number_input("본문 글자 크기(px)", value=11, step=1)
+                    p_padding = po_c4.number_input("셀 여백(px)", value=6, step=1)
+                    
+                    po_c5, po_c6, po_c7 = st.columns(3)
+                    p_show_date = po_c5.checkbox("출력일시 표시", value=True)
+                    p_date_pos = po_c6.selectbox("일시 위치", ["Right", "Left", "Center"], index=0)
+                    p_date_size = po_c7.number_input("일시 글자 크기(px)", value=12, step=1)
+                    
+                    st.caption("페이지 여백 (mm)")
+                    po_c8, po_c9, po_c10, po_c11 = st.columns(4)
+                    p_m_top = po_c8.number_input("상단", value=15, step=1)
+                    p_m_bottom = po_c9.number_input("하단", value=15, step=1)
+                    p_m_left = po_c10.number_input("좌측", value=15, step=1)
+                    p_m_right = po_c11.number_input("우측", value=15, step=1)
+                    
+                    st.divider()
+                    st.markdown("###### 📊 컬럼 설정 (순서 변경 및 너비 지정)")
+                    st.caption("💡 아래 버튼을 사용하여 컬럼 순서를 변경하세요.")
 
-                # [수정] body에 onload를 추가하고, 화면에는 보이지 않도록 CSS 수정
-                print_html = f"""
-                    <html>
-                    <head>
-                        <title>{p_title}</title>
-                        <style>
-                            @page {{ margin: {p_m_top}mm {p_m_right}mm {p_m_bottom}mm {p_m_left}mm; }}
-                            body {{ font-family: 'Malgun Gothic', sans-serif; padding: 0; margin: 0; }}
-                            h2 {{ text-align: center; margin-bottom: 5px; font-size: {p_title_size}px; }}
-                            .info {{ text-align: {date_align}; font-size: {p_date_size}px; margin-bottom: 10px; color: #555; display: {date_display}; }}
-                            table {{ width: 100%; border-collapse: collapse; font-size: {p_body_size}px; }}
-                            th, td {{ border: 1px solid #444; padding: {p_padding}px 4px; text-align: center; }}
-                            th {{ background-color: #f0f0f0; font-weight: bold; }}
-                            @media screen {{ body {{ display: none; }} }}
-                            {custom_css}
-                        </style>
-                    </head>
-                    <body onload="window.print();">
-                        <h2>{p_title}</h2>
-                        <div class="info">출력일시: {print_date}</div>
-                        {print_df.to_html(index=False, border=1)}
-                    </body>
-                    </html>
-                """
-                # 보이지 않는 컴포넌트로 HTML을 렌더링하여 스크립트(window.print) 실행
-                st.components.v1.html(print_html, height=0, width=0)
+                    # [수정] 인쇄 선택용 컬럼명을 한글로 변환
+                    final_cols_kr = [col_map.get(c, c) for c in final_cols]
+                    
+                    # 세션 상태에 설정 데이터프레임 초기화 및 동기화
+                    if "print_settings_df" not in st.session_state:
+                        # 초기값 생성 (기본 너비 0 = 자동)
+                        init_data = []
+                        for i, col in enumerate(final_cols_kr):
+                            init_data.append({"출력": True, "컬럼명": col, "너비(px)": 0, "순서": i+1})
+                        st.session_state["print_settings_df"] = pd.DataFrame(init_data)
+                    
+                    # 현재 컬럼과 동기화 (새로운 컬럼이 생기면 추가)
+                    curr_df = st.session_state["print_settings_df"]
+                    existing_cols = set(curr_df["컬럼명"].tolist())
+                    new_cols = [c for c in final_cols_kr if c not in existing_cols]
+                    
+                    if new_cols:
+                        max_order = curr_df["순서"].max() if not curr_df.empty else 0
+                        new_rows = []
+                        for i, col in enumerate(new_cols):
+                            new_rows.append({"출력": True, "컬럼명": col, "너비(px)": 0, "순서": max_order + i + 1})
+                        if new_rows:
+                            curr_df = pd.concat([curr_df, pd.DataFrame(new_rows)], ignore_index=True)
+                            st.session_state["print_settings_df"] = curr_df
+                    
+                    # 화면 표시를 위해 순서대로 정렬
+                    df_editor_view = st.session_state["print_settings_df"].sort_values("순서")
+                    
+                    # 에디터 갱신을 위한 버전 관리
+                    if "print_settings_ver" not in st.session_state:
+                        st.session_state["print_settings_ver"] = 0
 
-            # --- 상세 정보 및 이력 (단일 선택 시) ---
-            if len(selection.selection.rows) == 1:
-                st.markdown('<div id="edit_detail_section"></div>', unsafe_allow_html=True)
-                st.divider()
-                
-                selected_idx = selection.selection.rows[0]
-                sel_row = df.iloc[selected_idx]
-                sel_id = sel_row['id']
+                    # 데이터 에디터 표시
+                    edited_df = st.data_editor(
+                        df_editor_view,
+                        column_config={
+                            "출력": st.column_config.CheckboxColumn("출력", width="small"),
+                            "컬럼명": st.column_config.TextColumn("컬럼명", disabled=True),
+                            "너비(px)": st.column_config.NumberColumn("너비(px)", min_value=0, max_value=500, width="small", help="0으로 설정하면 자동 너비가 적용됩니다."),
+                            "순서": st.column_config.NumberColumn("순서", width="small", disabled=True), # [수정] 직접 입력 방지
+                        },
+                        hide_index=True,
+                        use_container_width=True,
+                        key=f"print_settings_editor_{st.session_state['print_settings_ver']}"
+                    )
+                    
+                    # 변경사항 저장 (리런 시 반영됨)
+                    st.session_state["print_settings_df"] = edited_df
 
-                # 제직기 명칭 매핑을 위한 데이터 가져오기
-                machine_map = {}
-                try:
-                    m_docs = db.collection("machines").stream()
-                    for m in m_docs:
-                        md = m.to_dict()
-                        machine_map[md.get('machine_no')] = md.get('name')
-                except: pass
+                    # [NEW] 순서 변경 도구 (위/아래 이동 및 초기화)
+                    c_move1, c_move2, c_move3, c_move4, c_move5 = st.columns([3, 1.3, 1.3, 2, 1.3])
+                    
+                    current_cols_ordered = df_editor_view["컬럼명"].tolist()
+                    
+                    # 선택 상태 유지를 위한 index 계산
+                    default_ix = 0
+                    if "last_target_col" in st.session_state and st.session_state["last_target_col"] in current_cols_ordered:
+                        default_ix = current_cols_ordered.index(st.session_state["last_target_col"])
 
-                # [NEW] 상세 이력 뷰
-                st.subheader(f"📋 상세 이력 정보: {sel_row['name']} ({sel_row['order_no']})")
-                
-                def fmt_dt(val):
-                    if pd.isna(val) or val == "" or val is None: return "-"
-                    if isinstance(val, pd.Timestamp): return val.strftime("%Y-%m-%d %H:%M")
-                    if isinstance(val, datetime.datetime): return val.strftime("%Y-%m-%d %H:%M")
-                    return str(val)[:16]
-                
-                def fmt_date(val):
-                    if pd.isna(val) or val == "" or val is None: return "-"
-                    if isinstance(val, pd.Timestamp): return val.strftime("%Y-%m-%d")
-                    if isinstance(val, datetime.datetime): return val.strftime("%Y-%m-%d")
-                    return str(val)[:10]
+                    with c_move1:
+                        target_col = st.selectbox("이동할 컬럼 선택", current_cols_ordered, index=default_ix, label_visibility="collapsed", key="sb_col_move")
+                    
+                    with c_move2:
+                        if st.button("⬆️ 위로 한칸", help="위로 이동"):
+                            st.session_state["last_target_col"] = target_col
+                            df = st.session_state["print_settings_df"].sort_values("순서").reset_index(drop=True)
+                            try:
+                                idx = df[df["컬럼명"] == target_col].index[0]
+                                if idx > 0:
+                                    df.iloc[idx], df.iloc[idx-1] = df.iloc[idx-1].copy(), df.iloc[idx].copy()
+                                    df["순서"] = range(1, len(df) + 1)
+                                    st.session_state["print_settings_df"] = df
+                                    st.session_state["print_settings_ver"] += 1
+                                    st.rerun()
+                            except: pass
 
-                def fmt_num(val, unit=""):
-                    try: return f"{int(val):,}{unit}"
-                    except: return "-"
-                
-                def fmt_float(val, unit=""):
-                    try: return f"{float(val):,.1f}{unit}"
-                    except: return "-"
-                
-                def fmt_money(val):
-                    try: return f"{int(val):,}원"
-                    except: return "-"
-
-                c_p1, c_p2, c_p3, c_p4 = st.columns(4)
-                
-                with c_p1:
-                    st.markdown("##### 🧵 제직 공정")
-                    if sel_row.get('weaving_start_time'):
-                        m_no = sel_row.get('machine_no')
-                        try:
-                            m_no_int = int(m_no) if pd.notna(m_no) else None
-                            m_name = machine_map.get(m_no_int, f"{m_no_int}호기" if m_no_int is not None else "-")
-                        except:
-                            m_name = str(m_no)
+                    with c_move3:
+                        if st.button("⬇️ 아래로 한칸", help="아래로 이동"):
+                            st.session_state["last_target_col"] = target_col
+                            df = st.session_state["print_settings_df"].sort_values("순서").reset_index(drop=True)
+                            try:
+                                idx = df[df["컬럼명"] == target_col].index[0]
+                                if idx < len(df) - 1:
+                                    df.iloc[idx], df.iloc[idx+1] = df.iloc[idx+1].copy(), df.iloc[idx].copy()
+                                    df["순서"] = range(1, len(df) + 1)
+                                    st.session_state["print_settings_df"] = df
+                                    st.session_state["print_settings_ver"] += 1
+                                    st.rerun()
+                            except: pass
+                    
+                    with c_move5:
+                        if st.button("🔄 초기화", help="순서 초기화"):
+                            if "last_target_col" in st.session_state:
+                                del st.session_state["last_target_col"]
+                            df = st.session_state["print_settings_df"].sort_values("순서").reset_index(drop=True)
                             
-                        st.caption("제직 설정 및 결과")
-                        st.text(f"제직기    : {m_name}")
-                        st.text(f"시작일시  : {fmt_dt(sel_row.get('weaving_start_time'))}")
-                        st.text(f"제직롤수  : {fmt_num(sel_row.get('weaving_roll_count'), '롤')}")
-                        st.markdown("---")
-                        st.text(f"완료일시  : {fmt_dt(sel_row.get('weaving_end_time'))}")
-                        st.text(f"생산매수  : {fmt_num(sel_row.get('real_stock'), '장')}")
-                        st.text(f"중량(g)   : {fmt_num(sel_row.get('real_weight'), 'g')}")
-                        st.text(f"생산중량  : {fmt_float(sel_row.get('prod_weight_kg'), 'kg')}")
-                        st.text(f"평균중량  : {fmt_float(sel_row.get('avg_weight'), 'g')}")
-                    else:
-                        st.info("대기 중")
+                            # [수정] 초기화 로직 개선: 기본 컬럼 순서(final_cols_kr)대로 순서값 재할당
+                            df = st.session_state["print_settings_df"]
+                            order_map = {col: i+1 for i, col in enumerate(final_cols_kr)}
+                            df["순서"] = df["컬럼명"].map(order_map).fillna(999)
+                            df = df.sort_values("순서").reset_index(drop=True)
+                            df["순서"] = range(1, len(df) + 1)
+                            
+                            st.session_state["print_settings_df"] = df
+                            st.session_state["print_settings_ver"] += 1
+                            st.rerun()
+                    
+                    # 인쇄 로직에 사용할 변수 추출
+                    # 출력 체크된 것만, 순서대로 정렬
+                    print_target = edited_df[edited_df["출력"]].sort_values("순서")
+                    # 현재 데이터프레임에 존재하는 컬럼만 선택 (KeyError 방지)
+                    p_selected_cols = [c for c in print_target["컬럼명"].tolist() if c in final_cols_kr]
+                    # 너비 정보 딕셔너리
+                    p_widths = dict(zip(print_target["컬럼명"], print_target["너비(px)"]))
+                    
+                    # 스타일 설정
+                    p_nowrap = st.checkbox("텍스트 줄바꿈 방지 (한 줄 표시)", value=False)
 
-                with c_p2:
-                    st.markdown("##### 🎨 염색 공정")
-                    if sel_row.get('dyeing_out_date'):
-                        st.caption("염색 출고 및 입고")
-                        st.text(f"염색업체  : {sel_row.get('dyeing_partner')}")
-                        st.text(f"출고일자  : {fmt_date(sel_row.get('dyeing_out_date'))}")
-                        st.text(f"출고중량  : {fmt_float(sel_row.get('dyeing_out_weight'), 'kg')}")
-                        st.text(f"색상정보  : {sel_row.get('dyeing_color_name')} ({sel_row.get('dyeing_color_code')})")
-                        st.text(f"비고      : {sel_row.get('dyeing_note')}")
-                        st.markdown("---")
-                        st.text(f"입고일자  : {fmt_date(sel_row.get('dyeing_in_date'))}")
-                        st.text(f"입고중량  : {fmt_float(sel_row.get('dyeing_in_weight'), 'kg')}")
-                        st.text(f"염색단가  : {fmt_money(sel_row.get('dyeing_unit_price'))}")
-                        st.text(f"염색금액  : {fmt_money(sel_row.get('dyeing_amount'))}")
-                    else:
-                        st.info("대기 중")
+                # 인쇄 버튼 (HTML 생성 후 새 창 열기 방식 흉내)
+                if btn_c2.button("🖨️ 바로 인쇄하기"):
+                    print_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                    date_align = p_date_pos.lower()
+                    date_display = "block" if p_show_date else "none"
+                    
+                    # [수정] 선택된 컬럼만 필터링
+                    print_df = df_display[p_selected_cols]
+                    
+                    # [수정] CSS 생성 (줄바꿈 방지 및 너비 지정)
+                    custom_css = ""
+                    if p_nowrap:
+                        custom_css += "td { white-space: nowrap; }\n"
+                    
+                    for i, col in enumerate(p_selected_cols):
+                        w = p_widths.get(col, 0)
+                        if w > 0:
+                            # nth-child는 1부터 시작
+                            custom_css += f"table tr th:nth-child({i+1}), table tr td:nth-child({i+1}) {{ width: {w}px; min-width: {w}px; }}\n"
 
-                with c_p3:
-                    st.markdown("##### 🪡 봉제 공정")
-                    if sel_row.get('sewing_start_date'):
-                        st.caption("봉제 작업 및 결과")
-                        st.text(f"봉제업체  : {sel_row.get('sewing_partner')}")
-                        st.text(f"작업구분  : {sel_row.get('sewing_type')}")
-                        st.text(f"시작일자  : {fmt_date(sel_row.get('sewing_start_date'))}")
-                        st.markdown("---")
-                        st.text(f"완료일자  : {fmt_date(sel_row.get('sewing_end_date'))}")
-                        st.text(f"완료수량  : {fmt_num(sel_row.get('stock'), '장')}")
-                        st.text(f"불량수량  : {fmt_num(sel_row.get('sewing_defect_qty'), '장')}")
-                        if sel_row.get('sewing_type') == "외주봉제":
-                            st.text(f"봉제단가  : {fmt_money(sel_row.get('sewing_unit_price'))}")
-                            st.text(f"봉제금액  : {fmt_money(sel_row.get('sewing_amount'))}")
-                    else:
-                        st.info("대기 중")
+                    # [수정] body에 onload를 추가하고, 화면에는 보이지 않도록 CSS 수정
+                    print_html = f"""
+                        <html>
+                        <head>
+                            <title>{p_title}</title>
+                            <style>
+                                @page {{ margin: {p_m_top}mm {p_m_right}mm {p_m_bottom}mm {p_m_left}mm; }}
+                                body {{ font-family: 'Malgun Gothic', sans-serif; padding: 0; margin: 0; }}
+                                h2 {{ text-align: center; margin-bottom: 5px; font-size: {p_title_size}px; }}
+                                .info {{ text-align: {date_align}; font-size: {p_date_size}px; margin-bottom: 10px; color: #555; display: {date_display}; }}
+                                table {{ width: 100%; border-collapse: collapse; font-size: {p_body_size}px; }}
+                                th, td {{ border: 1px solid #444; padding: {p_padding}px 4px; text-align: center; }}
+                                th {{ background-color: #f0f0f0; font-weight: bold; }}
+                                @media screen {{ body {{ display: none; }} }}
+                                {custom_css}
+                            </style>
+                        </head>
+                        <body onload="window.print();">
+                            <h2>{p_title}</h2>
+                            <div class="info">출력일시: {print_date}</div>
+                            {print_df.to_html(index=False, border=1)}
+                        </body>
+                        </html>
+                    """
+                    # 보이지 않는 컴포넌트로 HTML을 렌더링하여 스크립트(window.print) 실행
+                    st.components.v1.html(print_html, height=0, width=0)
 
-                with c_p4:
-                    st.markdown("##### 🚚 출고/배송")
-                    if sel_row.get('shipping_date'):
-                        st.caption("출고 정보")
-                        st.text(f"출고일시  : {fmt_dt(sel_row.get('shipping_date'))}")
-                        st.text(f"출고방법  : {sel_row.get('shipping_method')}")
-                        st.text(f"납품처    : {sel_row.get('delivery_to')}")
-                        st.text(f"연락처    : {sel_row.get('delivery_contact')}")
-                        st.text(f"주소      : {sel_row.get('delivery_address')}")
-                    else:
-                        st.info("미출고")
-                
-                st.divider()
-                
-                # 수정 폼을 위해 기초 데이터 다시 로드
-                product_types_coded = get_common_codes("product_types", [])
-                product_type_names = [item['name'] for item in product_types_coded]
-                customer_list = get_partners("발주처")
+                # --- 상세 수정 (단일 선택 시에만) ---
+                if len(selection.selection.rows) == 1:
+                    # 스크롤 이동을 위한 앵커
+                    st.markdown('<div id="edit_detail_section"></div>', unsafe_allow_html=True)
+                    st.divider()
+                    
+                    selected_idx = selection.selection.rows[0]
+                    # 선택된 행의 데이터 가져오기 (df는 필터링된 상태일 수 있으므로 iloc 사용)
+                    sel_row = df.iloc[selected_idx]
+                    sel_id = sel_row['id']
+                    
+                    # 수정 폼을 위해 기초 데이터 다시 로드
+                    product_types_coded = get_common_codes("product_types", [])
+                    product_type_names = [item['name'] for item in product_types_coded]
+                    customer_list = get_partners("발주처")
 
-                with st.expander("🛠️ 발주 내역 상세 수정", expanded=False):
+                    st.subheader("🛠️ 발주 내역 상세 수정")
                     with st.form("edit_order_form"):
                         st.write(f"선택된 발주건: **{sel_row['customer']} - {sel_row['name']}**")
                         
@@ -897,27 +795,98 @@ def render_order_status(db):
                             })
                             st.success("수정되었습니다.")
                             st.rerun()
+                    
+                    # 삭제 확인 및 처리 (폼 밖에서 처리)
+                    st.divider()
+                    if st.button("🗑️ 이 발주건 삭제", type="primary", key="btn_del_req"):
+                        st.session_state["delete_confirm_id"] = sel_id
+                    
+                    if st.session_state.get("delete_confirm_id") == sel_id:
+                        st.warning("정말로 삭제하시겠습니까? (복구 불가)")
+                        col_conf1, col_conf2 = st.columns(2)
+                        if col_conf1.button("✅ 예, 삭제합니다", key="btn_del_yes"):
+                            db.collection("orders").document(sel_id).delete()
+                            st.session_state["delete_confirm_id"] = None
+                            st.success("삭제되었습니다.")
+                            st.rerun()
+                        if col_conf2.button("❌ 취소", key="btn_del_no"):
+                            st.session_state["delete_confirm_id"] = None
+                            st.rerun()
+                elif len(selection.selection.rows) > 1:
+                    st.info("ℹ️ 상세 수정은 한 번에 하나의 행만 선택했을 때 가능합니다. (상단 일괄 변경 기능 사용 가능)")
+                else:
+                    st.info("👆 위 목록에서 수정하거나 상태를 변경할 행을 선택해주세요.")
+
+            with tab_detail:
+                st.subheader("🔍 품목별 진행 현황 (Pivot)")
+                st.info("제품별로 현재 각 공정에 있는 수량을 한눈에 확인합니다.")
                 
-                # 삭제 확인 및 처리 (폼 밖에서 처리)
-                st.divider()
-                if st.button("🗑️ 이 발주건 삭제", type="primary", key="btn_del_req"):
-                    st.session_state["delete_confirm_id"] = sel_id
-                
-                if st.session_state.get("delete_confirm_id") == sel_id:
-                    st.warning("정말로 삭제하시겠습니까? (복구 불가)")
-                    col_conf1, col_conf2 = st.columns(2)
-                    if col_conf1.button("✅ 예, 삭제합니다", key="btn_del_yes"):
-                        db.collection("orders").document(sel_id).delete()
-                        st.session_state["delete_confirm_id"] = None
-                        st.success("삭제되었습니다.")
-                        st.rerun()
-                    if col_conf2.button("❌ 취소", key="btn_del_no"):
-                        st.session_state["delete_confirm_id"] = None
-                        st.rerun()
-            elif len(selection.selection.rows) > 1:
-                st.info("ℹ️ 상세 수정은 한 번에 하나의 행만 선택했을 때 가능합니다. (상단 일괄 변경 기능 사용 가능)")
-            else:
-                st.info("👆 위 목록에서 수정하거나 상태를 변경할 행을 선택해주세요.")
+                if not df.empty:
+                    # 1. Pivot Table 생성
+                    # 행: 제품명 (또는 제품코드)
+                    # 열: 상태
+                    # 값: 수량 (Sum)
+                    
+                    # 상태 순서 정렬을 위한 Categorical Type 설정
+                    status_order = ["발주접수", "제직대기", "제직중", "제직완료", "염색중", "염색완료", "봉제중", "봉제완료", "출고완료"]
+                    df['status_cat'] = pd.Categorical(df['status'], categories=status_order, ordered=True)
+                    
+                    pivot_df = pd.pivot_table(
+                        df, 
+                        values='stock', 
+                        index=['name', 'product_code'], 
+                        columns='status_cat', 
+                        aggfunc='sum', 
+                        fill_value=0,
+                        margins=True,
+                        margins_name='합계'
+                    )
+                    
+                    # 숫자 포맷팅 (천단위 콤마)
+                    st.dataframe(pivot_df.style.format("{:,.0f}"), use_container_width=True)
+                    
+                    st.divider()
+                    st.subheader("📋 품목별 상세 진행 타임라인")
+                    st.caption("각 발주건의 공정별 완료일을 확인합니다.")
+                    
+                    # 타임라인용 데이터 구성
+                    timeline_data = []
+                    for idx, row in df.iterrows():
+                        # 날짜 데이터 포맷팅 함수
+                        def fmt_date(val):
+                            if pd.isna(val) or val == "" or val is None: return "-"
+                            if isinstance(val, pd.Timestamp): return val.strftime("%Y-%m-%d")
+                            if isinstance(val, datetime.datetime): return val.strftime("%Y-%m-%d")
+                            return str(val)[:10]
+
+                        item = {
+                            "제품명": row.get('name'),
+                            "발주번호": row.get('order_no'),
+                            "발주처": row.get('customer'),
+                            "상태": row.get('status'),
+                            "수량": row.get('stock'),
+                            "접수일": fmt_date(row.get('date')),
+                            "제직완료": fmt_date(row.get('weaving_end_time')),
+                            "염색완료": fmt_date(row.get('dyeing_in_date')),
+                            "봉제완료": fmt_date(row.get('sewing_end_date')),
+                            "출고일": fmt_date(row.get('shipping_date'))
+                        }
+                        timeline_data.append(item)
+                    
+                    df_timeline = pd.DataFrame(timeline_data)
+                    # 정렬: 제품명 > 접수일
+                    if not df_timeline.empty:
+                        df_timeline = df_timeline.sort_values(by=["제품명", "접수일"])
+                    
+                    cols_order = ["제품명", "발주번호", "발주처", "상태", "수량", "접수일", "제직완료", "염색완료", "봉제완료", "출고일"]
+                    
+                    st.dataframe(
+                        df_timeline[cols_order],
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                else:
+                    st.info("데이터가 없습니다.")
 
         else:
             st.info("해당 기간에 조회된 데이터가 없습니다.")

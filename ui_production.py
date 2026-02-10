@@ -931,6 +931,10 @@ def render_dyeing(db):
     # --- 2. 염색중 탭 ---
     with tab_dye_ing:
         st.subheader("염색중 목록")
+        
+        if "key_dyeing_ing" not in st.session_state:
+            st.session_state["key_dyeing_ing"] = 0
+            
         docs = db.collection("orders").where("status", "==", "염색중").stream()
         rows = []
         for doc in docs:
@@ -953,7 +957,7 @@ def render_dyeing(db):
             final_cols = [c for c in display_cols if c in df.columns]
             
             st.write("🔽 관리할 항목을 선택하세요.")
-            selection = st.dataframe(df[final_cols].rename(columns=col_map), use_container_width=True, on_select="rerun", selection_mode="single-row", key="df_dye_ing")
+            selection = st.dataframe(df[final_cols].rename(columns=col_map), use_container_width=True, on_select="rerun", selection_mode="single-row", key=f"df_dye_ing_{st.session_state['key_dyeing_ing']}")
             
             if selection.selection.rows:
                 idx = selection.selection.rows[0]
@@ -1004,6 +1008,7 @@ def render_dyeing(db):
                             "vat_included": d_vat_inc
                         })
                         st.success(f"염색이 완료되었습니다. (합계: {d_total:,}원)")
+                        st.session_state["key_dyeing_ing"] += 1
                         st.rerun()
                             
                 with tab_act2:
@@ -1044,6 +1049,7 @@ def render_dyeing(db):
                                 "dyeing_color_name": e_cn
                             })
                             st.success("수정되었습니다.")
+                            st.session_state["key_dyeing_ing"] += 1
                             st.rerun()
                     
                     st.markdown("#### 🚫 작업 취소")
@@ -1052,6 +1058,7 @@ def render_dyeing(db):
                             "status": "제직완료"
                         })
                         st.success("취소되었습니다.")
+                        st.session_state["key_dyeing_ing"] += 1
                         st.rerun()
         else:
             st.info("현재 염색 중인 작업이 없습니다.")
@@ -1059,6 +1066,9 @@ def render_dyeing(db):
     # --- 3. 염색 완료 탭 ---
     with tab_dye_done:
         st.subheader("염색 완료 목록")
+        
+        if "key_dyeing_done" not in st.session_state:
+            st.session_state["key_dyeing_done"] = 0
         
         # 검색 조건 (기간 + 염색업체 + 발주처)
         with st.form("search_dye_done"):
@@ -1176,7 +1186,7 @@ def render_dyeing(db):
                 st.components.v1.html(print_html, height=0, width=0)
 
             st.write("🔽 수정하거나 취소할 항목을 선택하세요.")
-            selection = st.dataframe(df_display, use_container_width=True, on_select="rerun", selection_mode="single-row", key="df_dye_done")
+            selection = st.dataframe(df_display, use_container_width=True, on_select="rerun", selection_mode="single-row", key=f"df_dye_done_{st.session_state['key_dyeing_done']}")
             
             if selection.selection.rows:
                 idx = selection.selection.rows[0]
@@ -1215,6 +1225,7 @@ def render_dyeing(db):
                                     "dyeing_amount": new_amount
                                 })
                                 st.success("수정되었습니다.")
+                                st.session_state["key_dyeing_done"] += 1
                                 st.rerun()
                     with c2:
                         st.write("🚫 **완료 취소**")
@@ -1224,6 +1235,7 @@ def render_dyeing(db):
                                 "status": "염색중"
                             })
                             st.success("복귀되었습니다.")
+                            st.session_state["key_dyeing_done"] += 1
                             st.rerun()
         else:
             st.info("염색 완료된 내역이 없습니다.")
@@ -1525,6 +1537,9 @@ def render_sewing(db):
     with tab_sew_done:
         st.subheader("봉제 완료 목록")
         
+        if "key_sewing_done" not in st.session_state:
+            st.session_state["key_sewing_done"] = 0
+        
         # 검색 및 엑셀 다운로드
         with st.form("search_sew_done"):
             c1, c2, c3 = st.columns([2, 1, 1])
@@ -1637,7 +1652,7 @@ def render_sewing(db):
                 st.components.v1.html(print_html, height=0, width=0)
 
             st.write("🔽 수정하거나 취소할 항목을 선택하세요.")
-            selection = st.dataframe(df_display, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row", key="df_sew_done")
+            selection = st.dataframe(df_display, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row", key=f"df_sew_done_{st.session_state['key_sewing_done']}")
             
             if selection.selection.rows:
                 idx = selection.selection.rows[0]
@@ -1675,6 +1690,7 @@ def render_sewing(db):
                                     
                                 db.collection("orders").document(sel_id).update(updates)
                                 st.success("수정되었습니다.")
+                                st.session_state["key_sewing_done"] += 1
                                 st.rerun()
                     with c2:
                         st.write("🚫 **완료 취소**")
@@ -1682,6 +1698,7 @@ def render_sewing(db):
                         if st.button("완료 취소 (봉제중으로 복귀)", type="primary"):
                             db.collection("orders").document(sel_id).update({"status": "봉제중"})
                             st.success("복귀되었습니다.")
+                            st.session_state["key_sewing_done"] += 1
                             st.rerun()
         else:
             st.info("조회된 봉제 완료 내역이 없습니다.")

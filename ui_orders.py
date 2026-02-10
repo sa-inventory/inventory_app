@@ -396,6 +396,11 @@ def render_order_status(db):
     if st.session_state.get("search_performed"):
         # 저장된 검색 조건 사용
         s_date_range = st.session_state["search_date_range"]
+        
+        # [NEW] 목록 갱신을 위한 키 초기화
+        if "order_status_key" not in st.session_state:
+            st.session_state["order_status_key"] = 0
+
         s_filter_status = st.session_state["search_filter_status_new"]
         s_filter_customer = st.session_state["search_filter_customer"]
 
@@ -466,7 +471,7 @@ def render_order_status(db):
                 on_select="rerun", # 선택 시 리런
                 selection_mode="multi-row", # 다중 선택 가능으로 변경
                 height=700, # [수정] 목록 높이 확대 (약 20행)
-                key="order_status_list" # [추가] 선택 상태 유지를 위한 고유 키
+                key=f"order_status_list_{st.session_state['order_status_key']}" # [수정] 동적 키 적용
             )
             
             # [MOVED] 작업 영역 로직 (테이블 상단)
@@ -486,6 +491,7 @@ def render_order_status(db):
                                 for idx, row in valid_to_weaving.iterrows():
                                     db.collection("orders").document(row['id']).update({"status": "제직대기"})
                                 st.success(f"{len(valid_to_weaving)}건이 제직대기 상태로 변경되었습니다.")
+                                st.session_state["order_status_key"] += 1
                                 st.rerun()
                     
                     # 2. 상세 수정 바로가기 (단일 선택 시)
@@ -899,6 +905,7 @@ def render_order_status(db):
                                 "delivery_address": e_del_addr
                             })
                             st.success("수정되었습니다.")
+                            st.session_state["order_status_key"] += 1
                             st.rerun()
                     
                     # 삭제 확인 및 처리 (폼 밖에서 처리)
@@ -913,6 +920,7 @@ def render_order_status(db):
                             db.collection("orders").document(sel_id).delete()
                             st.session_state["delete_confirm_id"] = None
                             st.success("삭제되었습니다.")
+                            st.session_state["order_status_key"] += 1
                             st.rerun()
                         if col_conf2.button("❌ 취소", key="btn_del_no"):
                             st.session_state["delete_confirm_id"] = None

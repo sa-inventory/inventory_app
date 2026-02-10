@@ -1445,6 +1445,11 @@ def render_sewing(db):
             
             if selection.selection.rows:
                 idx = selection.selection.rows[0]
+                
+                # [FIX] 선택된 인덱스가 데이터프레임 범위를 벗어나는 경우 방지
+                if idx >= len(df):
+                    st.rerun()
+                
                 sel_row = df.iloc[idx]
                 sel_id = sel_row['id']
                 
@@ -1526,10 +1531,30 @@ def render_sewing(db):
                     
                     st.markdown("#### 🚫 작업 취소")
                     if st.button("봉제 취소 (대기로 되돌리기)", type="primary"):
-                        db.collection("orders").document(sel_id).update({
-                            "status": "염색완료"
-                        })
-                        st.success("취소되었습니다.")
+                        # [NEW] 병합 로직: 같은 발주번호의 대기중(염색완료)인 항목이 있으면 합침
+                        siblings = list(db.collection("orders")\
+                            .where("order_no", "==", sel_row['order_no'])\
+                            .where("status", "==", "염색완료")\
+                            .stream())
+                        
+                        merged = False
+                        for sib in siblings:
+                            sib_data = sib.to_dict()
+                            # 안전장치: 제품코드와 색상이 같은지 확인 (발주번호가 같으면 보통 같음)
+                            if sib_data.get('product_code') == sel_row.get('product_code') and \
+                               sib_data.get('color') == sel_row.get('color'):
+                                
+                                new_stock = int(sib_data.get('stock', 0)) + int(sel_row.get('stock', 0))
+                                db.collection("orders").document(sib.id).update({"stock": new_stock})
+                                db.collection("orders").document(sel_id).delete()
+                                merged = True
+                                st.success(f"기존 대기 건과 병합되어 '염색완료' 상태로 복귀되었습니다. (합계: {new_stock}장)")
+                                break
+                        
+                        if not merged:
+                            db.collection("orders").document(sel_id).update({"status": "염색완료"})
+                            st.success("취소되었습니다. (염색완료 상태로 복귀)")
+                        
                         st.session_state["sewing_ing_key"] += 1
                         st.rerun()
         else:
@@ -1658,6 +1683,12 @@ def render_sewing(db):
             
             if selection.selection.rows:
                 idx = selection.selection.rows[0]
+
+                # [FIX] 선택된 인덱스가 데이터프레임 범위를 벗어나는 경우를 방지 (삭제/상태변경 후 발생)
+                if idx >= len(df):
+                    # 선택 상태를 초기화하기 위해 리런
+                    st.rerun()
+
                 sel_row = df.iloc[idx]
                 sel_id = sel_row['id']
                 

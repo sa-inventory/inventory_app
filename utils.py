@@ -25,7 +25,12 @@ def get_db():
 
         # 방법 2: 로컬 환경이거나 비밀 금고가 없으면 내 컴퓨터 파일 사용
         if cred is None:
-            cred = credentials.Certificate("serviceAccountKey.json")
+            import os
+            if os.path.exists("serviceAccountKey.json"):
+                cred = credentials.Certificate("serviceAccountKey.json")
+            else:
+                st.error("🔥 Firebase 인증 키를 찾을 수 없습니다. Streamlit Cloud의 Secrets에 'FIREBASE_KEY'를 설정해주세요.")
+                st.stop()
             
         firebase_admin.initialize_app(cred)
     return firestore.client()

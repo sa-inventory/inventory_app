@@ -9,10 +9,15 @@ def render_shipping(db):
     st.header("🚚 출고 현황")
     st.info("완성된 제품을 출고 처리하거나, 출고된 내역의 거래명세서를 발행합니다.")
     
-    tab1, tab2 = st.tabs(["🚀 출고 대기 관리", "📋 출고 완료 내역 (명세서)"])
+    if "shipping_key" not in st.session_state:
+        st.session_state["shipping_key"] = 0
+
+    tab1, tab2, tab3 = st.tabs(["🚀 출고 대기 관리", "📋 출고 완료 내역 (명세서)", "📊 배송/운임 통계"])
+    
+    shipping_partners = get_partners("배송업체")
     
     with tab1:
-        # '봉제완료' (출고대기) 상태
+        st.subheader("출고 대기 목록 (봉제완료)")
         docs = db.collection("orders").where("status", "==", "봉제완료").stream()
         rows = []
         for doc in docs:
@@ -22,50 +27,144 @@ def render_shipping(db):
         rows.sort(key=lambda x: x.get('date', datetime.datetime.max))
         
         if rows:
-            for item in rows:
-                with st.container():
-                    c1, c2, c3, c4 = st.columns([2, 2, 3, 2])
-                    c1.markdown(f"**[{item['status']}]** :green[{item.get('order_no', '-')}]")
-                    c2.write(f"**{item.get('customer')}**")
-                    c3.write(f"{item.get('name')} ({item.get('stock')}장)")
+            df = pd.DataFrame(rows)
+            
+            # 날짜 포맷팅
+            if 'date' in df.columns:
+                df['date'] = df['date'].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isnull(x) and hasattr(x, 'strftime') else x)
+
+            col_map = {
+                "product_code": "제품코드", "order_no": "발주번호", "date": "접수일", 
+                "customer": "발주처", "name": "제품명", "weight": "중량(g)", "stock": "수량",
+                "delivery_to": "납품처", "delivery_contact": "연락처", "delivery_address": "주소", "note": "비고"
+            }
+            display_cols = ["product_code", "order_no", "date", "customer", "name", "weight", "stock", "delivery_to", "delivery_contact", "delivery_address", "note"]
+            final_cols = [c for c in display_cols if c in df.columns]
+            
+            st.write("🔽 출고할 항목을 선택(체크)하세요. (다중 선택 가능)")
+            selection = st.dataframe(
+                df[final_cols].rename(columns=col_map),
+                use_container_width=True,
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="multi-row",
+                key=f"ship_wait_list_{st.session_state['shipping_key']}"
+            )
+            
+            if selection.selection.rows:
+                selected_indices = selection.selection.rows
+                selected_rows = df.iloc[selected_indices]
+                
+                st.divider()
+                st.markdown(f"### 🚚 배송 정보 입력 (선택된 {len(selected_rows)}건)")
+                
+                # 배송 정보 입력 폼
+                with st.form("shipping_process_form"):
+                    c1, c2, c3, c4 = st.columns(4)
+                    s_date = c1.date_input("출고일자", datetime.date.today())
+                    s_method = c2.selectbox("배송방법", ["택배", "화물", "용차", "직배송", "퀵서비스", "기타"])
+                    s_carrier = c3.selectbox("배송업체", ["직접입력"] + shipping_partners)
+                    if s_carrier == "직접입력":
+                        s_carrier_input = c3.text_input("업체명 직접입력", placeholder="택배사/기사님 성함")
+                        final_carrier = s_carrier_input
+                    else:
+                        final_carrier = s_carrier
                     
-                    # 출고 방법 선택 및 완료 처리
-                    with c4:
-                        ship_method = st.selectbox("출고방법", ["택배", "화물", "용차", "직배송", "기타"], key=f"sm_{item['id']}")
+                    # [수정] 운임비 적용 방식 로직 개선 (명칭 변경 및 조건부 표시)
+                    if len(selected_rows) > 1:
+                        s_cost_mode = st.radio("운임비 적용 방식", ["개별 운임비", "묶음 운임비"], index=1, horizontal=True, help="개별: 각 건마다 입력한 비용 적용 / 묶음: 입력한 총 비용을 건수로 나눔")
+                    else:
+                        s_cost_mode = "개별 운임비"
+                        st.caption("운임비 적용: **개별 운임비** (단일 건)")
+                    
+                    s_cost = c4.number_input("운임비 입력(원)", min_value=0, step=100)
+
+                    st.markdown("##### 📍 납품처 정보 (일괄 적용)")
+                    st.caption("여러 건을 묶음 배송(용차 등)할 때, 아래 정보를 입력하면 선택된 모든 건의 배송지가 변경됩니다.")
+                    
+                    # 첫 번째 선택된 행의 정보를 기본값으로 사용
+                    first_row = selected_rows.iloc[0]
+                    
+                    c_d1, c_d2, c_d3 = st.columns(3)
+                    d_to = c_d1.text_input("납품처명", value=first_row.get('delivery_to', ''))
+                    d_contact = c_d2.text_input("납품연락처", value=first_row.get('delivery_contact', ''))
+                    d_addr = c_d3.text_input("납품주소", value=first_row.get('delivery_address', ''))
+                    
+                    s_note = st.text_area("비고 (송장번호/차량번호 등)", placeholder="예: 경동택배 123-456-7890")
+
+                    # 단일 선택 시 부분 출고 옵션 제공
+                    partial_ship = False
+                    ship_qty = 0
+                    current_stock = 0
+                    
+                    if len(selected_rows) == 1:
+                        current_stock = int(first_row.get('stock', 0))
+                        st.markdown("##### 📦 수량 확인")
+                        ship_qty = st.number_input("출고 수량", min_value=1, max_value=current_stock, value=current_stock, step=10, help="전량 출고 시 그대로 두세요.")
+                        if ship_qty < current_stock:
+                            partial_ship = True
+                            st.info(f"ℹ️ 부분 출고: {ship_qty}장 출고 후 {current_stock - ship_qty}장은 대기 목록에 남습니다.")
+                    else:
+                        total_qty = selected_rows['stock'].sum()
+                        st.markdown(f"##### 📦 총 출고 수량: **{total_qty:,}장** (일괄 전량 출고)")
+
+                    if st.form_submit_button("🚀 출고 처리"):
+                        # 운임비 계산
+                        total_items = len(selected_rows)
+                        if total_items > 0:
+                            if s_cost_mode == "묶음 운임비":
+                                # 총 비용을 N빵 (통계 처리를 위해 개별 항목에 분산 저장)
+                                cost_per_item = int(s_cost / total_items)
+                            else:
+                                # 건당 비용 적용
+                                cost_per_item = s_cost
+                        else:
+                            cost_per_item = 0
                         
-                        # [NEW] 부분 출고(분할) 기능 추가
-                        current_stock = int(item.get('stock', 0))
-                        ship_qty = st.number_input("출고수량", min_value=1, max_value=current_stock, value=current_stock, step=10, key=f"sq_{item['id']}")
-                        
-                        if st.button("🚀 출고 처리", key=f"ship_{item['id']}"):
-                            if ship_qty < current_stock:
+                        for idx, row in selected_rows.iterrows():
+                            doc_id = row['id']
+                            
+                            # 공통 업데이트 데이터
+                            update_data = {
+                                "status": "출고완료",
+                                "shipping_date": datetime.datetime.combine(s_date, datetime.datetime.now().time()),
+                                "shipping_method": s_method,
+                                "shipping_carrier": final_carrier,
+                                "shipping_cost": cost_per_item,
+                                "delivery_to": d_to,
+                                "delivery_contact": d_contact,
+                                "delivery_address": d_addr,
+                                "note": s_note # 기존 비고 덮어쓰기 (배송 정보 위주)
+                            }
+
+                            if partial_ship and len(selected_rows) == 1:
                                 # 부분 출고: 새 문서 생성(출고분) + 기존 문서 업데이트(잔여분)
-                                doc_ref = db.collection("orders").document(item['id'])
-                                doc_data = doc_ref.get().to_dict()
+                                doc_ref = db.collection("orders").document(doc_id)
+                                org_data = doc_ref.get().to_dict()
                                 
-                                # 1. 출고분 (새 문서)
-                                new_ship_doc = doc_data.copy()
+                                new_ship_doc = org_data.copy()
+                                new_ship_doc.update(update_data)
                                 new_ship_doc['stock'] = ship_qty
-                                new_ship_doc['status'] = "출고완료"
-                                new_ship_doc['shipping_date'] = datetime.datetime.now()
-                                new_ship_doc['shipping_method'] = ship_method
-                                new_ship_doc['parent_id'] = item['id'] # 추적용
+                                new_ship_doc['parent_id'] = doc_id
                                 db.collection("orders").add(new_ship_doc)
                                 
-                                # 2. 잔여분 (기존 문서 유지, 수량 차감)
                                 doc_ref.update({"stock": current_stock - ship_qty})
-                                st.success(f"{ship_qty}장 부분 출고 완료! (잔여: {current_stock - ship_qty}장)")
                             else:
                                 # 전량 출고
-                                db.collection("orders").document(item['id']).update({"status": "출고완료", "shipping_date": datetime.datetime.now(), "shipping_method": ship_method})
-                                st.success("전량 출고 처리되었습니다.")
-                            
-                            st.rerun()
-                st.divider()
+                                db.collection("orders").document(doc_id).update(update_data)
+                        
+                        st.success(f"{len(selected_rows)}건 출고 처리 완료!")
+                        st.session_state["shipping_key"] += 1
+                        st.rerun()
         else:
             st.info("출고 대기 중인 건이 없습니다.")
 
     with tab2:
+        st.subheader("출고 완료 목록")
+        
+        if "key_ship_done" not in st.session_state:
+            st.session_state["key_ship_done"] = 0
+
         # '출고완료' 상태 조회
         docs = db.collection("orders").where("status", "==", "출고완료").stream()
         rows = []
@@ -74,51 +173,171 @@ def render_shipping(db):
             d['id'] = doc.id
             rows.append(d)
             
-        # 출고일(shipping_date) 기준 내림차순 정렬 (최신순)
         rows.sort(key=lambda x: x.get('shipping_date', datetime.datetime.min), reverse=True)
         
         if rows:
-            for item in rows:
-                with st.container():
-                    c1, c2, c3, c4 = st.columns([2, 2, 3, 2])
-                    ship_date = item.get('shipping_date').strftime('%Y-%m-%d') if item.get('shipping_date') else "-"
-                    c1.write(f"📅 {ship_date}")
-                    c2.write(f"**{item.get('customer')}**")
-                    c3.write(f"{item.get('name')} ({item.get('stock')}장)")
-                    
-                    with c4.expander("🖨️ 거래명세서"):
-                        # 거래명세서 HTML 디자인
-                        invoice_html = f"""
-                        <div style="border:2px solid #333; padding:20px; font-family:sans-serif; background-color:white; color:black;">
-                            <h2 style="text-align:center; margin-bottom:30px; text-decoration:underline;">거 래 명 세 서</h2>
-                            <table style="width:100%; margin-bottom:20px;">
-                                <tr>
-                                    <td style="width:50%;"><strong>공급받는자:</strong> {item.get('customer')} 귀하</td>
-                                    <td style="width:50%; text-align:right;"><strong>일자:</strong> {ship_date}</td>
-                                </tr>
-                            </table>
-                            <table style="width:100%; border-collapse:collapse; text-align:center; border:1px solid #333;">
-                                <tr style="background-color:#eee;">
-                                    <th style="border:1px solid #333; padding:8px;">품목</th>
-                                    <th style="border:1px solid #333; padding:8px;">규격/사종</th>
-                                    <th style="border:1px solid #333; padding:8px;">수량</th>
-                                    <th style="border:1px solid #333; padding:8px;">비고</th>
-                                </tr>
-                                <tr>
-                                    <td style="border:1px solid #333; padding:10px;">{item.get('name')}</td>
-                                    <td style="border:1px solid #333; padding:10px;">{item.get('product_type', item.get('weaving_type', ''))}</td>
-                                    <td style="border:1px solid #333; padding:10px;">{item.get('stock')} 장</td>
-                                    <td style="border:1px solid #333; padding:10px;">{item.get('note', '')}</td>
-                                </tr>
-                            </table>
-                            <p style="margin-top:20px; text-align:center;">위와 같이 정히 영수(청구)함.</p>
-                        </div>
-                        """
-                        st.markdown(invoice_html, unsafe_allow_html=True)
-                        st.caption("Ctrl+P를 눌러 인쇄하세요.")
+            df = pd.DataFrame(rows)
+            if 'shipping_date' in df.columns:
+                df['shipping_date'] = df['shipping_date'].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isnull(x) and hasattr(x, 'strftime') else x)
+
+            col_map = {
+                "shipping_date": "출고일", "customer": "발주처", "name": "제품명",
+                "stock": "수량", "shipping_method": "배송방법", "shipping_carrier": "배송업체", "shipping_cost": "운임비",
+                "delivery_to": "납품처", "delivery_contact": "납품연락처", "delivery_address": "납품주소", "note": "비고"
+            }
+            display_cols = ["shipping_date", "customer", "name", "stock", "shipping_method", "shipping_carrier", "shipping_cost", "delivery_to", "delivery_contact", "delivery_address", "note"]
+            final_cols = [c for c in display_cols if c in df.columns]
+            
+            st.write("🔽 출고 취소할 항목을 선택하세요.")
+            selection = st.dataframe(
+                df[final_cols].rename(columns=col_map),
+                use_container_width=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                key=f"ship_done_list_{st.session_state['key_ship_done']}"
+            )
+            
+            if selection.selection.rows:
+                idx = selection.selection.rows[0]
+                sel_row = df.iloc[idx]
+                sel_id = sel_row['id']
+                
                 st.divider()
+                c1, c2 = st.columns([1, 1])
+                with c1:
+                    st.markdown(f"### 📄 거래명세서 발행: **{sel_row['name']}**")
+                    # 거래명세서 HTML 디자인 (간소화)
+                    invoice_html = f"""
+                    <div style="border:2px solid #333; padding:20px; font-family:sans-serif; background-color:white; color:black;">
+                        <h2 style="text-align:center; margin-bottom:30px; text-decoration:underline;">거 래 명 세 서</h2>
+                        <table style="width:100%; margin-bottom:20px;">
+                            <tr><td style="width:50%;"><strong>공급받는자:</strong> {sel_row.get('customer')} 귀하</td><td style="width:50%; text-align:right;"><strong>일자:</strong> {sel_row.get('shipping_date')}</td></tr>
+                        </table>
+                        <table style="width:100%; border-collapse:collapse; text-align:center; border:1px solid #333;">
+                            <tr style="background-color:#eee;"><th style="border:1px solid #333; padding:8px;">품목</th><th style="border:1px solid #333; padding:8px;">수량</th><th style="border:1px solid #333; padding:8px;">비고</th></tr>
+                            <tr>
+                                <td style="border:1px solid #333; padding:10px;">{sel_row.get('name')}</td>
+                                <td style="border:1px solid #333; padding:10px;">{sel_row.get('stock')} 장</td>
+                                <td style="border:1px solid #333; padding:10px;">{sel_row.get('note', '')}</td>
+                            </tr>
+                        </table>
+                    </div>
+                    """
+                    if st.button("🖨️ 명세서 인쇄 (미리보기)"):
+                        st.components.v1.html(invoice_html, height=400, scrolling=True)
+                
+                with c2:
+                    st.markdown("### 🚫 출고 취소")
+                    st.warning("상태를 '봉제완료'로 되돌립니다.")
+                    if st.button("출고 취소 (봉제완료로 복귀)", type="primary"):
+                        db.collection("orders").document(sel_id).update({"status": "봉제완료"})
+                        st.success("취소되었습니다.")
+                        st.session_state["key_ship_done"] += 1
+                        st.rerun()
         else:
             st.info("출고 완료된 내역이 없습니다.")
+
+    with tab3:
+        st.subheader("📊 배송/운임 통계")
+        st.info("기간별, 배송업체별 운임비 지출 현황을 확인합니다.")
+        
+        with st.form("ship_stats_form"):
+            # [수정] 통계 기준 선택 (기간별/월별/년도별)
+            stat_type = st.radio("통계 기준", ["기간별(일자)", "월별", "년도별"], horizontal=True)
+            
+            c1, c2, c3 = st.columns(3)
+            
+            if stat_type == "기간별(일자)":
+                today = datetime.date.today()
+                stats_date = c1.date_input("조회 기간", [today - datetime.timedelta(days=30), today])
+            elif stat_type == "월별":
+                this_year = datetime.date.today().year
+                stats_year = c1.number_input("조회 년도", value=this_year, step=1, format="%d")
+            else: # 년도별
+                c1.write("최근 데이터 기준")
+
+            stats_carrier = c2.selectbox("배송업체 필터", ["전체"] + shipping_partners)
+            stats_customer = c3.text_input("발주처 필터")
+            
+            st.form_submit_button("통계 조회")
+            
+        # 데이터 조회 및 필터링
+        docs = db.collection("orders").where("status", "==", "출고완료").stream()
+        rows = []
+        for doc in docs:
+            d = doc.to_dict()
+            s_date = d.get('shipping_date')
+            
+            if s_date:
+                if s_date.tzinfo: s_date = s_date.replace(tzinfo=None)
+                
+                # 날짜 필터링
+                if stat_type == "기간별(일자)" and isinstance(stats_date, list) and len(stats_date) == 2:
+                    start_dt = datetime.datetime.combine(stats_date[0], datetime.time.min)
+                    end_dt = datetime.datetime.combine(stats_date[1], datetime.time.max)
+                    if start_dt <= s_date <= end_dt:
+                        rows.append(d)
+                elif stat_type == "월별":
+                    if s_date.year == stats_year:
+                        rows.append(d)
+                else: # 년도별 (전체)
+                    rows.append(d)
+
+            if rows:
+                df_stats = pd.DataFrame(rows)
+                # 운임비 합계
+                total_cost = df_stats['shipping_cost'].sum() if 'shipping_cost' in df_stats.columns else 0
+                total_count = len(df_stats)
+                
+                st.metric("총 운임비 지출", f"{total_cost:,}원", f"총 {total_count}건")
+
+                # 추가 필터링 (업체/거래처) - 메모리 상에서 처리
+                if stats_carrier != "전체":
+                    df_stats = df_stats[df_stats['shipping_carrier'] == stats_carrier]
+                if stats_customer:
+                    df_stats = df_stats[df_stats['customer'].str.contains(stats_customer, na=False)]
+                
+                st.divider()
+                
+                # 통계 그룹화 기준 설정
+                if stat_type == "기간별(일자)":
+                    df_stats['group_key'] = df_stats['shipping_date'].apply(lambda x: x.strftime('%Y-%m-%d'))
+                    group_label = "일자"
+                elif stat_type == "월별":
+                    df_stats['group_key'] = df_stats['shipping_date'].apply(lambda x: x.strftime('%Y-%m'))
+                    group_label = "월"
+                else:
+                    df_stats['group_key'] = df_stats['shipping_date'].apply(lambda x: x.strftime('%Y'))
+                    group_label = "년도"
+
+                c_chart1, c_chart2 = st.columns(2)
+                
+                # 1. 시계열 추이 (운임비)
+                with c_chart1:
+                    st.markdown(f"##### 📈 {group_label}별 운임비 추이")
+                    time_stats = df_stats.groupby('group_key')['shipping_cost'].sum().reset_index()
+                    time_stats.columns = [group_label, '운임비']
+                    st.bar_chart(time_stats.set_index(group_label))
+
+                # 2. 배송업체별 점유율
+                with c_chart2:
+                    st.markdown("##### 🚛 배송업체별 운임비 비중")
+                    if 'shipping_carrier' in df_stats.columns:
+                        carrier_pie = df_stats.groupby('shipping_carrier')['shipping_cost'].sum()
+                        st.bar_chart(carrier_pie) # Streamlit 기본 차트 사용
+
+                # 3. 상세 테이블 (업체별)
+                if 'shipping_carrier' in df_stats.columns and 'shipping_cost' in df_stats.columns:
+                    st.markdown("##### 📋 업체별 상세 지출 현황")
+                    carrier_stats = df_stats.groupby(['shipping_carrier', 'customer'])['shipping_cost'].sum().reset_index()
+                    # [수정] 컬럼 수 불일치 오류 해결 (3개 컬럼)
+                    carrier_stats.columns = ['배송업체', '발주처', '운임비 합계']
+                    carrier_stats = carrier_stats.sort_values('운임비 합계', ascending=False)
+                    st.dataframe(carrier_stats, use_container_width=True, hide_index=True)
+                    
+                    st.bar_chart(carrier_stats.set_index('배송업체'))
+            else:
+                st.info("조회된 배송 내역이 없습니다.")
 
 def render_inventory(db):
     st.header("📦 재고 현황")

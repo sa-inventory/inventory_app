@@ -11,6 +11,7 @@ from utils import get_db, firestore
 from ui_orders import render_order_entry, render_order_status
 from ui_production import render_weaving, render_dyeing, render_sewing
 from ui_management import render_shipping, render_inventory, render_product_master, render_partners, render_machines, render_codes, render_users
+from ui_statistics import render_statistics
 
 # 1. 화면 기본 설정 (제목 등)
 st.set_page_config(page_title="타올 생산 현황 관리", layout="wide")
@@ -89,6 +90,9 @@ with st.sidebar:
         if st.button("📦 재고현황", use_container_width=True):
             st.session_state["current_menu"] = "재고현황"
             st.rerun()
+        if st.button("📈 통합통계", use_container_width=True):
+            st.session_state["current_menu"] = "통합통계"
+            st.rerun()
 
     with st.expander("⚙️ 기초정보관리", expanded=True):
         if st.button("📦 제품 관리", use_container_width=True):
@@ -126,6 +130,8 @@ elif menu == "출고현황":
     render_shipping(db)
 elif menu == "재고현황":
     render_inventory(db)
+elif menu == "통합통계":
+    render_statistics(db)
 elif menu == "제품 관리":
     render_product_master(db)
 elif menu == "거래처관리":

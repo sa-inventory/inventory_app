@@ -2,3 +2,5 @@ streamlit>=1.35.0
 pandas
 firebase-admin
 openpyxl
+altair
+matplotlib

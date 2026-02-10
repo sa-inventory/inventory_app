@@ -1491,10 +1491,14 @@ def render_sewing(db):
                         st.info(f"**봉제비용 합계**: {s_total:,}원 (공급가: {s_supply:,}원 / 부가세: {s_vat:,}원)")
                     
                     if st.button("봉제 완료 (출고대기로 이동)"):
+                        # [수정] 불량 수량을 제외한 정품 수량만 다음 공정(출고)으로 이동
+                        final_stock = max(0, s_real_stock - s_defect_stock)
+                        
                         updates = {
                             "status": "봉제완료",
                             "sewing_end_date": str(s_end_date),
                             "stock": s_real_stock,
+                            "stock": final_stock,
                             "sewing_defect_qty": s_defect_stock # 불량 수량 저장
                         }
                         if sel_row.get('sewing_type') == "외주봉제":
@@ -1625,10 +1629,10 @@ def render_sewing(db):
             col_map = {
                 "order_no": "발주번호", "sewing_partner": "봉제처", "sewing_end_date": "완료일",
                 "name": "제품명", "color": "색상", "stock": "수량", "sewing_type": "구분",
-                "sewing_unit_price": "단가", "sewing_amount": "금액",
+                "sewing_unit_price": "단가", "sewing_amount": "금액", "sewing_defect_qty": "불량",
                 "customer": "발주처"
             }
-            display_cols = ["sewing_end_date", "sewing_type", "sewing_partner", "customer", "order_no", "name", "color", "stock", "sewing_unit_price", "sewing_amount"]
+            display_cols = ["sewing_end_date", "sewing_type", "sewing_partner", "customer", "order_no", "name", "color", "stock", "sewing_defect_qty", "sewing_unit_price", "sewing_amount"]
             final_cols = [c for c in display_cols if c in df.columns]
             
             df_display = df[final_cols].rename(columns=col_map)
@@ -1705,7 +1709,8 @@ def render_sewing(db):
                         with st.form("sewing_done_edit"):
                             st.write("완료 정보 수정")
                             new_end_date = st.date_input("봉제완료일", datetime.datetime.strptime(sel_row['sewing_end_date'], "%Y-%m-%d").date() if sel_row.get('sewing_end_date') else datetime.date.today())
-                            new_stock = st.number_input("완료수량(장)", value=int(sel_row.get('stock', 0)), step=10)
+                            new_stock = st.number_input("완료수량(정품)", value=int(sel_row.get('stock', 0)), step=10)
+                            new_defect = st.number_input("불량수량(장)", value=int(sel_row.get('sewing_defect_qty', 0)), step=1)
                             
                             new_price = 0
                             if sel_row.get('sewing_type') == "외주봉제":
@@ -1714,7 +1719,8 @@ def render_sewing(db):
                             if st.form_submit_button("수정 저장"):
                                 updates = {
                                     "sewing_end_date": str(new_end_date),
-                                    "stock": new_stock
+                                    "stock": new_stock,
+                                    "sewing_defect_qty": new_defect
                                 }
                                 if sel_row.get('sewing_type') == "외주봉제":
                                     # 부가세 로직은 복잡하므로 단순 계산만 반영

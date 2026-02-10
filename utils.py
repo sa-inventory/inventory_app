@@ -79,7 +79,7 @@ def is_basic_code_used(code_key, name, code):
     return len(list(query.stream())) > 0 if query else False
 
 # --- 공통 함수: 인쇄용 HTML 생성 ---
-def generate_report_html(title, df, summary_text, options):
+def generate_report_html(title, df, summary_text, options, chart_html=""):
     """
     데이터프레임과 옵션을 받아 인쇄용 HTML 문자열을 생성합니다.
     f-string과 CSS 중괄호 충돌 방지를 위해 format()을 사용합니다.
@@ -115,6 +115,7 @@ def generate_report_html(title, df, summary_text, options):
     <style>{css}</style></head><body onload="window.print()">
     <h2>{title}</h2>
     <div class="info">출력일시: {print_now}</div>
+    {chart_html}
     {df.to_html(index=False)}
     <div class="summary">{summary_text}</div>
     </body></html>"""

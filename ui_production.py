@@ -147,6 +147,7 @@ def render_weaving(db):
                 if st.button("🚫 발주접수로 되돌리기", key="back_to_order_waiting"):
                     db.collection("orders").document(sel_id).update({"status": "발주접수"})
                     st.success("발주접수 상태로 되돌렸습니다.")
+                    st.session_state["key_weaving_wait"] += 1
                     st.rerun()
         else:
             st.info("대기 중인 작업이 없습니다.")
@@ -316,6 +317,10 @@ def render_weaving(db):
     with tab_done:
         st.subheader("제직 완료 목록")
         
+        # [NEW] 목록 갱신을 위한 키 초기화 (제직완료)
+        if "key_weaving_done" not in st.session_state:
+            st.session_state["key_weaving_done"] = 0
+
         # 검색 조건 (기간 + 발주처)
         with st.form("search_weaving_done"):
             c1, c2 = st.columns([2, 1])
@@ -464,7 +469,7 @@ def render_weaving(db):
                 hide_index=True,
                 on_select="rerun",
                 selection_mode="single-row",
-                key="df_done"
+                key=f"df_done_{st.session_state['key_weaving_done']}"
             )
 
             if selection.selection.rows:
@@ -498,6 +503,7 @@ def render_weaving(db):
                                 "avg_weight": new_avg_weight
                             })
                             st.success("수정되었습니다.")
+                            st.session_state["key_weaving_done"] += 1
                             st.rerun()
 
                     st.markdown("#### 🚫 제직 완료 취소 (삭제)")
@@ -520,6 +526,7 @@ def render_weaving(db):
                             })
                         
                         st.success("삭제되었습니다. 제직중 목록에서 다시 작업할 수 있습니다.")
+                        st.session_state["key_weaving_done"] += 1
                         st.rerun()
         else:
             st.info("제직 완료된 내역이 없습니다.")

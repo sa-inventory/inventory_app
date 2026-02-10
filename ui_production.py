@@ -467,49 +467,54 @@ def render_weaving(db):
                 sel_id = sel_row['id']
                 
                 st.divider()
-                st.markdown(f"### 🛠️ 제직 결과 수정: **{sel_row['name']} ({sel_row.get('roll_no', '?')}번 롤)**")
-                
-                with st.form("edit_weaving_done"):
-                    c1, c2 = st.columns(2)
-                    new_real_weight = c1.number_input("중량(g)", value=int(sel_row.get('real_weight', 0)), step=1, format="%d")
-                    new_real_stock = c2.number_input("생산매수(장)", value=int(sel_row.get('real_stock', 0)), step=1, format="%d")
+                current_status = sel_row.get('status', '')
+                if current_status not in ["제직완료", "제직완료(Master)"]:
+                    st.error(f"⛔ 현재 상태가 '**{current_status}**'이므로 이 단계에서 수정하거나 취소할 수 없습니다.")
+                    st.info("다음 공정(염색 등)이 이미 진행된 경우, 해당 공정에서 작업을 취소하여 상태를 되돌린 후 시도해주세요.")
+                else:
+                    st.markdown(f"### 🛠️ 제직 결과 수정: **{sel_row['name']} ({sel_row.get('roll_no', '?')}번 롤)**")
                     
-                    c3, c4 = st.columns(2)
-                    new_prod_kg = c3.number_input("생산중량(kg)", value=int(sel_row.get('prod_weight_kg', 0)), step=1, format="%d")
-                    new_avg_weight = c4.number_input("평균중량(g)", value=int(sel_row.get('avg_weight', 0)), step=1, format="%d")
-                    
-                    if st.form_submit_button("수정 저장"):
-                        db.collection("orders").document(sel_id).update({
-                            "real_weight": new_real_weight,
-                            "real_stock": new_real_stock,
-                            "stock": new_real_stock, # 이후 공정을 위해 재고 수량도 함께 업데이트
-                            "prod_weight_kg": new_prod_kg,
-                            "avg_weight": new_avg_weight
-                        })
-                        st.success("수정되었습니다.")
-                        st.rerun()
-                
-                st.markdown("#### 🚫 제직 완료 취소 (삭제)")
-                st.warning("이 롤 데이터를 삭제하고, 제직중 상태로 되돌립니다.")
-                if st.button("🗑️ 이 롤 삭제하기 (취소)", type="primary"):
-                    parent_id = sel_row.get('parent_id')
-                    
-                    # 1. 현재 롤 문서 삭제
-                    db.collection("orders").document(sel_id).delete()
-                    
-                    # 2. 부모 문서(제직중인 건) 상태 업데이트
-                    if parent_id:
-                        # 남은 형제 롤 개수 확인
-                        siblings = db.collection("orders").where("parent_id", "==", parent_id).where("status", "==", "제직완료").stream()
-                        cnt = sum(1 for _ in siblings)
+                    with st.form("edit_weaving_done"):
+                        c1, c2 = st.columns(2)
+                        new_real_weight = c1.number_input("중량(g)", value=int(sel_row.get('real_weight', 0)), step=1, format="%d")
+                        new_real_stock = c2.number_input("생산매수(장)", value=int(sel_row.get('real_stock', 0)), step=1, format="%d")
                         
-                        db.collection("orders").document(parent_id).update({
-                            "completed_rolls": cnt,
-                            "status": "제직중" # 마스터 완료 상태였더라도 다시 제직중으로 복귀
-                        })
-                    
-                    st.success("삭제되었습니다. 제직중 목록에서 다시 작업할 수 있습니다.")
-                    st.rerun()
+                        c3, c4 = st.columns(2)
+                        new_prod_kg = c3.number_input("생산중량(kg)", value=float(sel_row.get('prod_weight_kg', 0)), step=0.1, format="%.1f")
+                        new_avg_weight = c4.number_input("평균중량(g)", value=float(sel_row.get('avg_weight', 0)), step=0.1, format="%.1f")
+                        
+                        if st.form_submit_button("수정 저장"):
+                            db.collection("orders").document(sel_id).update({
+                                "real_weight": new_real_weight,
+                                "real_stock": new_real_stock,
+                                "stock": new_real_stock, # 이후 공정을 위해 재고 수량도 함께 업데이트
+                                "prod_weight_kg": new_prod_kg,
+                                "avg_weight": new_avg_weight
+                            })
+                            st.success("수정되었습니다.")
+                            st.rerun()
+
+                    st.markdown("#### 🚫 제직 완료 취소 (삭제)")
+                    st.warning("이 롤 데이터를 삭제하고, 제직중 상태로 되돌립니다.")
+                    if st.button("🗑️ 이 롤 삭제하기 (취소)", type="primary"):
+                        parent_id = sel_row.get('parent_id')
+                        
+                        # 1. 현재 롤 문서 삭제
+                        db.collection("orders").document(sel_id).delete()
+                        
+                        # 2. 부모 문서(제직중인 건) 상태 업데이트
+                        if parent_id:
+                            # 남은 형제 롤 개수 확인
+                            siblings = db.collection("orders").where("parent_id", "==", parent_id).where("status", "==", "제직완료").stream()
+                            cnt = sum(1 for _ in siblings)
+                            
+                            db.collection("orders").document(parent_id).update({
+                                "completed_rolls": cnt,
+                                "status": "제직중" # 마스터 완료 상태였더라도 다시 제직중으로 복귀
+                            })
+                        
+                        st.success("삭제되었습니다. 제직중 목록에서 다시 작업할 수 있습니다.")
+                        st.rerun()
         else:
             st.info("제직 완료된 내역이 없습니다.")
 
@@ -1160,42 +1165,47 @@ def render_dyeing(db):
                 sel_id = sel_row['id']
                 
                 st.divider()
-                st.markdown(f"### 🛠️ 완료 정보 수정: **{sel_row['name']}**")
-                
-                c1, c2 = st.columns(2)
-                with c1:
-                    with st.form("dyeing_done_edit"):
-                        st.write("입고 정보 수정")
-                        new_in_date = st.date_input("염색완료일", datetime.datetime.strptime(sel_row['dyeing_in_date'], "%Y-%m-%d").date() if sel_row.get('dyeing_in_date') else datetime.date.today())
-                        
-                        c_e1, c_e2 = st.columns(2)
-                        new_stock = c_e1.number_input("입고수량(장)", value=int(sel_row.get('stock', 0)), step=10)
-                        new_weight = c_e2.number_input("입고중량(kg)", value=float(sel_row.get('dyeing_in_weight', 0)) if not pd.isna(sel_row.get('dyeing_in_weight')) else 0.0, step=0.1, format="%.1f")
-                        
-                        c_e3, c_e4 = st.columns(2)
-                        new_price = c_e3.number_input("단가(원)", value=int(sel_row.get('dyeing_unit_price', 0)) if not pd.isna(sel_row.get('dyeing_unit_price')) else 0, step=1)
-                        
-                        if st.form_submit_button("수정 저장"):
-                            new_amount = int(new_weight * new_price)
+                current_status = sel_row.get('status', '')
+                if current_status != "염색완료":
+                    st.error(f"⛔ 현재 상태가 '**{current_status}**'이므로 이 단계에서 수정하거나 취소할 수 없습니다.")
+                    st.info("다음 공정(봉제)이 이미 진행된 경우, 해당 공정에서 작업을 취소하여 상태를 되돌린 후 시도해주세요.")
+                else:
+                    st.markdown(f"### 🛠️ 완료 정보 수정: **{sel_row['name']}**")
+                    
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        with st.form("dyeing_done_edit"):
+                            st.write("입고 정보 수정")
+                            new_in_date = st.date_input("염색완료일", datetime.datetime.strptime(sel_row['dyeing_in_date'], "%Y-%m-%d").date() if sel_row.get('dyeing_in_date') else datetime.date.today())
+                            
+                            c_e1, c_e2 = st.columns(2)
+                            new_stock = c_e1.number_input("입고수량(장)", value=int(sel_row.get('stock', 0)), step=10)
+                            new_weight = c_e2.number_input("입고중량(kg)", value=float(sel_row.get('dyeing_in_weight', 0)) if not pd.isna(sel_row.get('dyeing_in_weight')) else 0.0, step=0.1, format="%.1f")
+                            
+                            c_e3, c_e4 = st.columns(2)
+                            new_price = c_e3.number_input("단가(원)", value=int(sel_row.get('dyeing_unit_price', 0)) if not pd.isna(sel_row.get('dyeing_unit_price')) else 0, step=1)
+                            
+                            if st.form_submit_button("수정 저장"):
+                                # 부가세 로직은 복잡하므로 여기서는 단순 계산만 반영
+                                new_amount = int(new_weight * new_price)
+                                db.collection("orders").document(sel_id).update({
+                                    "dyeing_in_date": str(new_in_date),
+                                    "stock": new_stock,
+                                    "dyeing_in_weight": new_weight,
+                                    "dyeing_unit_price": new_price,
+                                    "dyeing_amount": new_amount
+                                })
+                                st.success("수정되었습니다.")
+                                st.rerun()
+                    with c2:
+                        st.write("🚫 **완료 취소**")
+                        st.warning("상태를 다시 '염색중'으로 되돌립니다.")
+                        if st.button("완료 취소 (염색중으로 복귀)", type="primary"):
                             db.collection("orders").document(sel_id).update({
-                                "dyeing_in_date": str(new_in_date),
-                                "stock": new_stock,
-                                "dyeing_in_weight": new_weight,
-                                "dyeing_unit_price": new_price,
-                                "dyeing_amount": new_amount
+                                "status": "염색중"
                             })
-                            st.success("수정되었습니다.")
+                            st.success("복귀되었습니다.")
                             st.rerun()
-                
-                with c2:
-                    st.write("🚫 **완료 취소**")
-                    st.warning("상태를 다시 '염색중'으로 되돌립니다.")
-                    if st.button("완료 취소 (염색중으로 복귀)", type="primary"):
-                        db.collection("orders").document(sel_id).update({
-                            "status": "염색중"
-                        })
-                        st.success("복귀되었습니다.")
-                        st.rerun()
         else:
             st.info("염색 완료된 내역이 없습니다.")
 
@@ -1610,36 +1620,43 @@ def render_sewing(db):
                 sel_id = sel_row['id']
                 
                 st.divider()
-                st.markdown(f"### 🛠️ 완료 정보 수정: **{sel_row['name']}**")
-                
-                c1, c2 = st.columns(2)
-                with c1:
-                    with st.form("sewing_done_edit"):
-                        st.write("완료 정보 수정")
-                        new_end_date = st.date_input("봉제완료일", datetime.datetime.strptime(sel_row['sewing_end_date'], "%Y-%m-%d").date() if sel_row.get('sewing_end_date') else datetime.date.today())
-                        new_stock = st.number_input("완료수량(장)", value=int(sel_row.get('stock', 0)), step=10)
-                        
-                        new_price = 0
-                        if sel_row.get('sewing_type') == "외주봉제":
-                            new_price = st.number_input("봉제단가(원)", value=int(sel_row.get('sewing_unit_price', 0)) if not pd.isna(sel_row.get('sewing_unit_price')) else 0, step=1)
-                        
-                        if st.form_submit_button("수정 저장"):
-                            updates = {
-                                "sewing_end_date": str(new_end_date),
-                                "stock": new_stock
-                            }
+                current_status = sel_row.get('status', '')
+                if current_status != "봉제완료":
+                    st.error(f"⛔ 현재 상태가 '**{current_status}**'이므로 이 단계에서 수정하거나 취소할 수 없습니다.")
+                    st.info("이미 출고 처리가 된 경우, 출고 현황에서 출고를 취소해야 합니다.")
+                else:
+                    st.markdown(f"### 🛠️ 완료 정보 수정: **{sel_row['name']}**")
+                    
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        with st.form("sewing_done_edit"):
+                            st.write("완료 정보 수정")
+                            new_end_date = st.date_input("봉제완료일", datetime.datetime.strptime(sel_row['sewing_end_date'], "%Y-%m-%d").date() if sel_row.get('sewing_end_date') else datetime.date.today())
+                            new_stock = st.number_input("완료수량(장)", value=int(sel_row.get('stock', 0)), step=10)
+                            
+                            new_price = 0
                             if sel_row.get('sewing_type') == "외주봉제":
-                                updates["sewing_unit_price"] = new_price
-                                updates["sewing_amount"] = int(new_stock * new_price)
-                                
-                            db.collection("orders").document(sel_id).update(updates)
-                            st.success("수정되었습니다.")
+                                new_price = st.number_input("봉제단가(원)", value=int(sel_row.get('sewing_unit_price', 0)) if not pd.isna(sel_row.get('sewing_unit_price')) else 0, step=1)
+                            
+                            if st.form_submit_button("수정 저장"):
+                                updates = {
+                                    "sewing_end_date": str(new_end_date),
+                                    "stock": new_stock
+                                }
+                                if sel_row.get('sewing_type') == "외주봉제":
+                                    # 부가세 로직은 복잡하므로 단순 계산만 반영
+                                    updates["sewing_unit_price"] = new_price
+                                    updates["sewing_amount"] = int(new_stock * new_price)
+                                    
+                                db.collection("orders").document(sel_id).update(updates)
+                                st.success("수정되었습니다.")
+                                st.rerun()
+                    with c2:
+                        st.write("🚫 **완료 취소**")
+                        st.warning("상태를 다시 '봉제중'으로 되돌립니다.")
+                        if st.button("완료 취소 (봉제중으로 복귀)", type="primary"):
+                            db.collection("orders").document(sel_id).update({"status": "봉제중"})
+                            st.success("복귀되었습니다.")
                             st.rerun()
-                with c2:
-                    st.write("🚫 **완료 취소**")
-                    if st.button("완료 취소 (봉제중으로 복귀)", type="primary"):
-                        db.collection("orders").document(sel_id).update({"status": "봉제중"})
-                        st.success("복귀되었습니다.")
-                        st.rerun()
         else:
             st.info("조회된 봉제 완료 내역이 없습니다.")

@@ -1521,6 +1521,7 @@ def render_sewing(db):
                             }
                             db.collection("orders").document(sel_id).update(updates)
                             st.success("수정되었습니다.")
+                            st.session_state["sewing_ing_key"] += 1
                             st.rerun()
                     
                     st.markdown("#### 🚫 작업 취소")
@@ -1529,6 +1530,7 @@ def render_sewing(db):
                             "status": "염색완료"
                         })
                         st.success("취소되었습니다.")
+                        st.session_state["sewing_ing_key"] += 1
                         st.rerun()
         else:
             st.info("현재 봉제 중인 작업이 없습니다.")

@@ -13,6 +13,9 @@ def render_order_entry(db):
     if "order_df_key" not in st.session_state:
         st.session_state["order_df_key"] = 0
 
+    if "del_orders_key" not in st.session_state:
+        st.session_state["del_orders_key"] = 0
+
     # 발주 등록 성공 메시지 표시 (리런 후 유지)
     if "order_success_msg" in st.session_state:
         st.success(st.session_state["order_success_msg"])
@@ -258,7 +261,7 @@ def render_order_entry(db):
                     use_container_width=True,
                     on_select="rerun",
                     selection_mode="multi-row",
-                    key="del_orders_selection"
+                    key=f"del_orders_selection_{st.session_state['del_orders_key']}"
                 )
                 
                 # 선택된 행 삭제 처리
@@ -270,6 +273,7 @@ def render_order_entry(db):
                         for idx, row in selected_rows.iterrows():
                             db.collection("orders").document(row['id']).delete()
                         st.success(f"{len(selected_rows)}건이 삭제되었습니다.")
+                        st.session_state["del_orders_key"] += 1
                         st.rerun()
             else:
                 st.info("삭제할 발주 내역이 없습니다.")

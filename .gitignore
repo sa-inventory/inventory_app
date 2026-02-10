@@ -1,0 +1,7 @@
+# Firebase service account key - 절대 업로드 금지!
+serviceAccountKey.json
+
+# Python virtual environment
+venv/
+.venv/
+__pycache__/

@@ -458,7 +458,7 @@ def render_order_status(db):
             action_placeholder = st.container()
 
             # --- 수정/삭제를 위한 테이블 선택 기능 ---
-            st.write("🔽 목록에서 수정하거나 제직대기로 보낼 행을 선택(체크)하세요. (다중 선택 가능)")
+            st.write("🔽 목록에서 상세 정보를 보거나 수정할 행을 선택(체크)하세요.")
             selection = st.dataframe(
                 df_display, 
                 use_container_width=True, 
@@ -639,20 +639,20 @@ def render_order_status(db):
                 
                 with c_move5:
                     if st.button("🔄 초기화", help="순서 초기화"):
-                         if "last_target_col" in st.session_state:
-                             del st.session_state["last_target_col"]
-                         df = st.session_state["print_settings_df"].sort_values("순서").reset_index(drop=True)
-                         
-                         # [수정] 초기화 로직 개선: 기본 컬럼 순서(final_cols_kr)대로 순서값 재할당
-                         df = st.session_state["print_settings_df"]
-                         order_map = {col: i+1 for i, col in enumerate(final_cols_kr)}
-                         df["순서"] = df["컬럼명"].map(order_map).fillna(999)
-                         df = df.sort_values("순서").reset_index(drop=True)
-                         df["순서"] = range(1, len(df) + 1)
-                         
-                         st.session_state["print_settings_df"] = df
-                         st.session_state["print_settings_ver"] += 1
-                         st.rerun()
+                        if "last_target_col" in st.session_state:
+                            del st.session_state["last_target_col"]
+                        df = st.session_state["print_settings_df"].sort_values("순서").reset_index(drop=True)
+                        
+                        # [수정] 초기화 로직 개선: 기본 컬럼 순서(final_cols_kr)대로 순서값 재할당
+                        df = st.session_state["print_settings_df"]
+                        order_map = {col: i+1 for i, col in enumerate(final_cols_kr)}
+                        df["순서"] = df["컬럼명"].map(order_map).fillna(999)
+                        df = df.sort_values("순서").reset_index(drop=True)
+                        df["순서"] = range(1, len(df) + 1)
+                        
+                        st.session_state["print_settings_df"] = df
+                        st.session_state["print_settings_ver"] += 1
+                        st.rerun()
                 
                 # 인쇄 로직에 사용할 변수 추출
                 # 출력 체크된 것만, 순서대로 정렬
@@ -712,84 +712,191 @@ def render_order_status(db):
                 # 보이지 않는 컴포넌트로 HTML을 렌더링하여 스크립트(window.print) 실행
                 st.components.v1.html(print_html, height=0, width=0)
 
-            # --- 상세 수정 (단일 선택 시에만) ---
+            # --- 상세 정보 및 이력 (단일 선택 시) ---
             if len(selection.selection.rows) == 1:
-                # 스크롤 이동을 위한 앵커
                 st.markdown('<div id="edit_detail_section"></div>', unsafe_allow_html=True)
                 st.divider()
                 
                 selected_idx = selection.selection.rows[0]
-                # 선택된 행의 데이터 가져오기 (df는 필터링된 상태일 수 있으므로 iloc 사용)
                 sel_row = df.iloc[selected_idx]
                 sel_id = sel_row['id']
+
+                # 제직기 명칭 매핑을 위한 데이터 가져오기
+                machine_map = {}
+                try:
+                    m_docs = db.collection("machines").stream()
+                    for m in m_docs:
+                        md = m.to_dict()
+                        machine_map[md.get('machine_no')] = md.get('name')
+                except: pass
+
+                # [NEW] 상세 이력 뷰
+                st.subheader(f"📋 상세 이력 정보: {sel_row['name']} ({sel_row['order_no']})")
+                
+                def fmt_dt(val):
+                    if pd.isna(val) or val == "" or val is None: return "-"
+                    if isinstance(val, pd.Timestamp): return val.strftime("%Y-%m-%d %H:%M")
+                    if isinstance(val, datetime.datetime): return val.strftime("%Y-%m-%d %H:%M")
+                    return str(val)[:16]
+                
+                def fmt_date(val):
+                    if pd.isna(val) or val == "" or val is None: return "-"
+                    if isinstance(val, pd.Timestamp): return val.strftime("%Y-%m-%d")
+                    if isinstance(val, datetime.datetime): return val.strftime("%Y-%m-%d")
+                    return str(val)[:10]
+
+                def fmt_num(val, unit=""):
+                    try: return f"{int(val):,}{unit}"
+                    except: return "-"
+                
+                def fmt_float(val, unit=""):
+                    try: return f"{float(val):,.1f}{unit}"
+                    except: return "-"
+                
+                def fmt_money(val):
+                    try: return f"{int(val):,}원"
+                    except: return "-"
+
+                c_p1, c_p2, c_p3, c_p4 = st.columns(4)
+                
+                with c_p1:
+                    st.markdown("##### 🧵 제직 공정")
+                    if sel_row.get('weaving_start_time'):
+                        m_no = sel_row.get('machine_no')
+                        try:
+                            m_no_int = int(m_no) if pd.notna(m_no) else None
+                            m_name = machine_map.get(m_no_int, f"{m_no_int}호기" if m_no_int is not None else "-")
+                        except:
+                            m_name = str(m_no)
+                            
+                        st.caption("제직 설정 및 결과")
+                        st.text(f"제직기    : {m_name}")
+                        st.text(f"시작일시  : {fmt_dt(sel_row.get('weaving_start_time'))}")
+                        st.text(f"제직롤수  : {fmt_num(sel_row.get('weaving_roll_count'), '롤')}")
+                        st.markdown("---")
+                        st.text(f"완료일시  : {fmt_dt(sel_row.get('weaving_end_time'))}")
+                        st.text(f"생산매수  : {fmt_num(sel_row.get('real_stock'), '장')}")
+                        st.text(f"중량(g)   : {fmt_num(sel_row.get('real_weight'), 'g')}")
+                        st.text(f"생산중량  : {fmt_float(sel_row.get('prod_weight_kg'), 'kg')}")
+                        st.text(f"평균중량  : {fmt_float(sel_row.get('avg_weight'), 'g')}")
+                    else:
+                        st.info("대기 중")
+
+                with c_p2:
+                    st.markdown("##### 🎨 염색 공정")
+                    if sel_row.get('dyeing_out_date'):
+                        st.caption("염색 출고 및 입고")
+                        st.text(f"염색업체  : {sel_row.get('dyeing_partner')}")
+                        st.text(f"출고일자  : {fmt_date(sel_row.get('dyeing_out_date'))}")
+                        st.text(f"출고중량  : {fmt_float(sel_row.get('dyeing_out_weight'), 'kg')}")
+                        st.text(f"색상정보  : {sel_row.get('dyeing_color_name')} ({sel_row.get('dyeing_color_code')})")
+                        st.text(f"비고      : {sel_row.get('dyeing_note')}")
+                        st.markdown("---")
+                        st.text(f"입고일자  : {fmt_date(sel_row.get('dyeing_in_date'))}")
+                        st.text(f"입고중량  : {fmt_float(sel_row.get('dyeing_in_weight'), 'kg')}")
+                        st.text(f"염색단가  : {fmt_money(sel_row.get('dyeing_unit_price'))}")
+                        st.text(f"염색금액  : {fmt_money(sel_row.get('dyeing_amount'))}")
+                    else:
+                        st.info("대기 중")
+
+                with c_p3:
+                    st.markdown("##### 🪡 봉제 공정")
+                    if sel_row.get('sewing_start_date'):
+                        st.caption("봉제 작업 및 결과")
+                        st.text(f"봉제업체  : {sel_row.get('sewing_partner')}")
+                        st.text(f"작업구분  : {sel_row.get('sewing_type')}")
+                        st.text(f"시작일자  : {fmt_date(sel_row.get('sewing_start_date'))}")
+                        st.markdown("---")
+                        st.text(f"완료일자  : {fmt_date(sel_row.get('sewing_end_date'))}")
+                        st.text(f"완료수량  : {fmt_num(sel_row.get('stock'), '장')}")
+                        st.text(f"불량수량  : {fmt_num(sel_row.get('sewing_defect_qty'), '장')}")
+                        if sel_row.get('sewing_type') == "외주봉제":
+                            st.text(f"봉제단가  : {fmt_money(sel_row.get('sewing_unit_price'))}")
+                            st.text(f"봉제금액  : {fmt_money(sel_row.get('sewing_amount'))}")
+                    else:
+                        st.info("대기 중")
+
+                with c_p4:
+                    st.markdown("##### 🚚 출고/배송")
+                    if sel_row.get('shipping_date'):
+                        st.caption("출고 정보")
+                        st.text(f"출고일시  : {fmt_dt(sel_row.get('shipping_date'))}")
+                        st.text(f"출고방법  : {sel_row.get('shipping_method')}")
+                        st.text(f"납품처    : {sel_row.get('delivery_to')}")
+                        st.text(f"연락처    : {sel_row.get('delivery_contact')}")
+                        st.text(f"주소      : {sel_row.get('delivery_address')}")
+                    else:
+                        st.info("미출고")
+                
+                st.divider()
                 
                 # 수정 폼을 위해 기초 데이터 다시 로드
                 product_types_coded = get_common_codes("product_types", [])
                 product_type_names = [item['name'] for item in product_types_coded]
                 customer_list = get_partners("발주처")
 
-                st.subheader("🛠️ 발주 내역 상세 수정")
-                with st.form("edit_order_form"):
-                    st.write(f"선택된 발주건: **{sel_row['customer']} - {sel_row['name']}**")
-                    
-                    # [추가] 상태 변경 기능 (관리자용 강제 변경)
-                    st.markdown("##### ⚠️ 관리자 상태 변경 (실수 복구용)")
-                    status_options = ["발주접수", "제직대기", "제직중", "제직완료", "염색출고", "염색중", "염색완료", "봉제중", "봉제완료", "출고완료"]
-                    e_status = st.selectbox("현재 상태", status_options, index=status_options.index(sel_row['status']) if sel_row['status'] in status_options else 0)
-                    st.divider()
-
-                    # 모든 필드 수정 가능하도록 배치
-                    ec1, ec2, ec4 = st.columns(3)
-                    e_customer = ec1.selectbox("발주처", customer_list, index=customer_list.index(sel_row['customer']) if sel_row['customer'] in customer_list else 0)
-                    e_name = ec2.text_input("제품명", value=sel_row['name'])
-                    e_stock = ec4.number_input("수량", value=int(sel_row['stock']), step=10)
-
-                    ec5, ec6, ec7, ec8 = st.columns(4)
-                    current_product_type = sel_row.get('product_type', sel_row.get('weaving_type'))
-                    e_product_type = ec5.selectbox("제품종류", product_type_names, index=product_type_names.index(current_product_type) if current_product_type in product_type_names else 0)
-                    e_yarn = ec6.text_input("사종", value=sel_row.get('yarn_type', ''))
-                    e_color = ec7.text_input("색상", value=sel_row.get('color', ''))
-                    e_weight = ec8.number_input("중량", value=int(sel_row.get('weight', 0)), step=10)
-
-                    ec9, ec10, ec11 = st.columns(3)
-                    e_size = ec9.text_input("사이즈", value=sel_row.get('size', ''))
-                    
-                    # [수정] 날짜 파싱 오류 방지 (시간 정보가 포함된 경우 처리)
-                    try:
-                        if sel_row.get('delivery_req_date'):
-                            default_date = pd.to_datetime(str(sel_row['delivery_req_date'])).date()
-                        else:
-                            default_date = datetime.date.today()
-                    except:
-                        default_date = datetime.date.today()
+                with st.expander("🛠️ 발주 내역 상세 수정", expanded=False):
+                    with st.form("edit_order_form"):
+                        st.write(f"선택된 발주건: **{sel_row['customer']} - {sel_row['name']}**")
                         
-                    e_del_date = ec10.date_input("납품요청일", default_date, format="YYYY-MM-DD")
-                    e_note = ec11.text_input("특이사항", value=sel_row.get('note', ''))
-                    
-                    ec12, ec13, ec14 = st.columns(3)
-                    e_del_to = ec12.text_input("납품처", value=sel_row.get('delivery_to', ''))
-                    e_del_contact = ec13.text_input("납품연락처", value=sel_row.get('delivery_contact', ''))
-                    e_del_addr = ec14.text_input("납품주소", value=sel_row.get('delivery_address', ''))
+                        # [추가] 상태 변경 기능 (관리자용 강제 변경)
+                        st.markdown("##### ⚠️ 관리자 상태 변경 (실수 복구용)")
+                        status_options = ["발주접수", "제직대기", "제직중", "제직완료", "염색출고", "염색중", "염색완료", "봉제중", "봉제완료", "출고완료"]
+                        e_status = st.selectbox("현재 상태", status_options, index=status_options.index(sel_row['status']) if sel_row['status'] in status_options else 0)
+                        st.divider()
 
-                    if st.form_submit_button("수정 저장"):
-                        db.collection("orders").document(sel_id).update({
-                            "status": e_status, # 상태 변경 반영
-                            "customer": e_customer,
-                            "name": e_name,
-                            "stock": e_stock,
-                            "product_type": e_product_type,
-                            "yarn_type": e_yarn,
-                            "color": e_color,
-                            "weight": e_weight,
-                            "size": e_size,
-                            "delivery_req_date": str(e_del_date),
-                            "note": e_note,
-                            "delivery_to": e_del_to,
-                            "delivery_contact": e_del_contact,
-                            "delivery_address": e_del_addr
-                        })
-                        st.success("수정되었습니다.")
-                        st.rerun()
+                        # 모든 필드 수정 가능하도록 배치
+                        ec1, ec2, ec4 = st.columns(3)
+                        e_customer = ec1.selectbox("발주처", customer_list, index=customer_list.index(sel_row['customer']) if sel_row['customer'] in customer_list else 0)
+                        e_name = ec2.text_input("제품명", value=sel_row['name'])
+                        e_stock = ec4.number_input("수량", value=int(sel_row['stock']), step=10)
+
+                        ec5, ec6, ec7, ec8 = st.columns(4)
+                        current_product_type = sel_row.get('product_type', sel_row.get('weaving_type'))
+                        e_product_type = ec5.selectbox("제품종류", product_type_names, index=product_type_names.index(current_product_type) if current_product_type in product_type_names else 0)
+                        e_yarn = ec6.text_input("사종", value=sel_row.get('yarn_type', ''))
+                        e_color = ec7.text_input("색상", value=sel_row.get('color', ''))
+                        e_weight = ec8.number_input("중량", value=int(sel_row.get('weight', 0)), step=10)
+
+                        ec9, ec10, ec11 = st.columns(3)
+                        e_size = ec9.text_input("사이즈", value=sel_row.get('size', ''))
+                        
+                        # [수정] 날짜 파싱 오류 방지 (시간 정보가 포함된 경우 처리)
+                        try:
+                            if sel_row.get('delivery_req_date'):
+                                default_date = pd.to_datetime(str(sel_row['delivery_req_date'])).date()
+                            else:
+                                default_date = datetime.date.today()
+                        except:
+                            default_date = datetime.date.today()
+                            
+                        e_del_date = ec10.date_input("납품요청일", default_date, format="YYYY-MM-DD")
+                        e_note = ec11.text_input("특이사항", value=sel_row.get('note', ''))
+                        
+                        ec12, ec13, ec14 = st.columns(3)
+                        e_del_to = ec12.text_input("납품처", value=sel_row.get('delivery_to', ''))
+                        e_del_contact = ec13.text_input("납품연락처", value=sel_row.get('delivery_contact', ''))
+                        e_del_addr = ec14.text_input("납품주소", value=sel_row.get('delivery_address', ''))
+
+                        if st.form_submit_button("수정 저장"):
+                            db.collection("orders").document(sel_id).update({
+                                "status": e_status, # 상태 변경 반영
+                                "customer": e_customer,
+                                "name": e_name,
+                                "stock": e_stock,
+                                "product_type": e_product_type,
+                                "yarn_type": e_yarn,
+                                "color": e_color,
+                                "weight": e_weight,
+                                "size": e_size,
+                                "delivery_req_date": str(e_del_date),
+                                "note": e_note,
+                                "delivery_to": e_del_to,
+                                "delivery_contact": e_del_contact,
+                                "delivery_address": e_del_addr
+                            })
+                            st.success("수정되었습니다.")
+                            st.rerun()
                 
                 # 삭제 확인 및 처리 (폼 밖에서 처리)
                 st.divider()

@@ -62,6 +62,11 @@ def render_weaving(db):
     # --- 1. 제직대기 탭 ---
     with tab_waiting:
         st.subheader("제직 대기 목록")
+        
+        # [NEW] 목록 갱신을 위한 키 초기화 (제직대기)
+        if "key_weaving_wait" not in st.session_state:
+            st.session_state["key_weaving_wait"] = 0
+            
         # '제직대기' 상태인 건만 가져오기 (발주현황에서 '제직대기'로 변경된 건)
         docs = db.collection("orders").where("status", "==", "제직대기").stream()
         rows = []
@@ -89,7 +94,7 @@ def render_weaving(db):
             
             st.write("🔽 제직기를 배정할 항목을 선택하세요.")
             # key="df_waiting" 추가로 사이드바 먹통 현상 해결
-            selection = st.dataframe(df[final_cols].rename(columns=col_map), use_container_width=True, on_select="rerun", selection_mode="single-row", key="df_waiting")
+            selection = st.dataframe(df[final_cols].rename(columns=col_map), use_container_width=True, on_select="rerun", selection_mode="single-row", key=f"df_waiting_{st.session_state['key_weaving_wait']}")
             
             if selection.selection.rows:
                 idx = selection.selection.rows[0]
@@ -134,6 +139,7 @@ def render_weaving(db):
                                 "completed_rolls": 0
                             })
                             st.success(f"제직을 시작합니다.")
+                            st.session_state["key_weaving_wait"] += 1 # 목록 선택 초기화
                             st.rerun()
                 
                 # 발주접수로 되돌리기 기능 추가
@@ -834,6 +840,11 @@ def render_dyeing(db):
     # --- 1. 염색 대기 탭 ---
     with tab_dye_wait:
         st.subheader("염색 대기 목록 (제직완료)")
+        
+        # [NEW] 목록 갱신을 위한 키 초기화 (염색대기)
+        if "key_dyeing_wait" not in st.session_state:
+            st.session_state["key_dyeing_wait"] = 0
+            
         # [수정] 안내 문구 삭제 요청 반영
         # st.info("💡 색번(Color Code)은 상단의 **[🎨 색번 설정]** 탭에서 등록할 수 있습니다.")
         docs = db.collection("orders").where("status", "==", "제직완료").stream()
@@ -860,7 +871,7 @@ def render_dyeing(db):
             final_cols = [c for c in display_cols if c in df.columns]
             
             st.write("🔽 염색 출고할 항목을 선택하세요.")
-            selection = st.dataframe(df[final_cols].rename(columns=col_map), use_container_width=True, on_select="rerun", selection_mode="single-row", key="df_dye_wait")
+            selection = st.dataframe(df[final_cols].rename(columns=col_map), use_container_width=True, on_select="rerun", selection_mode="single-row", key=f"df_dye_wait_{st.session_state['key_dyeing_wait']}")
             
             if selection.selection.rows:
                 idx = selection.selection.rows[0]
@@ -905,6 +916,7 @@ def render_dyeing(db):
                             "dyeing_color_name": sel_cn
                         })
                         st.success("염색중 상태로 변경되었습니다.")
+                        st.session_state["key_dyeing_wait"] += 1 # 목록 선택 초기화
                         st.rerun()
         else:
             st.info("염색 대기 중인 건이 없습니다.")
@@ -1226,6 +1238,11 @@ def render_sewing(db):
     # --- 1. 봉제 대기 탭 ---
     with tab_sew_wait:
         st.subheader("봉제 대기 목록 (염색완료)")
+        
+        # [NEW] 목록 갱신을 위한 키 초기화 (봉제대기)
+        if "key_sewing_wait" not in st.session_state:
+            st.session_state["key_sewing_wait"] = 0
+            
         docs = db.collection("orders").where("status", "==", "염색완료").stream()
         rows = []
         for doc in docs:
@@ -1275,7 +1292,7 @@ def render_sewing(db):
             with c_btn:
                 btn_print_inst = st.button("🖨️ 봉제작업지시서", use_container_width=True)
 
-            selection = st.dataframe(df[final_cols].rename(columns=col_map), use_container_width=True, on_select="rerun", selection_mode="multi-row", key="df_sew_wait")
+            selection = st.dataframe(df[final_cols].rename(columns=col_map), use_container_width=True, on_select="rerun", selection_mode="multi-row", key=f"df_sew_wait_{st.session_state['key_sewing_wait']}")
             
             # [수정] 인쇄 로직 분리
             if btn_print_inst:
@@ -1372,6 +1389,7 @@ def render_sewing(db):
                             db.collection("orders").document(sel_id).update(updates)
                             st.success("봉제 작업을 시작합니다.")
                         
+                        st.session_state["key_sewing_wait"] += 1 # 목록 선택 초기화
                         st.rerun()
                 elif len(selected_indices) > 1:
                     st.info("ℹ️ 봉제 시작 처리는 한 번에 하나의 항목만 가능합니다. (작업지시서는 다중 출력 가능)")

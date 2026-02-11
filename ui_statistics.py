@@ -4,7 +4,7 @@ import datetime
 import io
 import calendar
 import altair as alt
-try:
+try: # type: ignore
     import matplotlib.pyplot as plt # type: ignore
 except ImportError:
     plt = None
@@ -12,6 +12,14 @@ import base64
 import platform
 from firebase_admin import firestore
 from utils import get_partners, generate_report_html
+
+# [NEW] Matplotlib 한글 폰트 설정
+@st.cache_resource
+def setup_matplotlib_font():
+    if plt:
+        from matplotlib import font_manager # type: ignore
+        font_manager.fontManager.addfont('/usr/share/fonts/truetype/nanum/NanumGothic.ttf')
+        plt.rc('font', family='NanumGothic')
 
 def render_statistics(db):
     st.header("📈 통합 통계 분석")
@@ -129,6 +137,9 @@ def render_statistics(db):
         
         # Print
         if c_btn2.button("🖨️ 인쇄", key=f"print_{file_name}"):
+            # [NEW] 인쇄 시 폰트 설정 함수 호출
+            setup_matplotlib_font()
+
             chart_html = ""
             # 그래프 인쇄 옵션이 켜져있고, 그릴 데이터 컬럼이 지정된 경우
             if include_chart_print and chart_col and not df_data.empty and plt:
@@ -136,14 +147,6 @@ def render_statistics(db):
                     # Matplotlib을 사용하여 정적 이미지 생성
                     plt.figure(figsize=(10, 4))
                     
-                    # 한글 폰트 설정 시도
-                    system_name = platform.system()
-                    if system_name == 'Windows':
-                        plt.rc('font', family='Malgun Gothic')
-                    elif system_name == 'Darwin':
-                        plt.rc('font', family='AppleGothic')
-                    else:
-                        plt.rc('font', family='NanumGothic') # 리눅스 등
                     plt.rcParams['axes.unicode_minus'] = False
 
                     x = df_data.iloc[:, 0].astype(str) # 첫 번째 컬럼(그룹키)을 X축으로

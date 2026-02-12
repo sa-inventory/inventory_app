@@ -8,6 +8,15 @@ from firebase_admin import firestore
 def render_notice_board(db):
     st.title("📢 공지사항")
     
+    # [수정] 카드 레이아웃 및 링크 스타일 추가
+    st.markdown("""
+    <style>
+        .notice-badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.75em; font-weight: bold; margin-right: 5px; }
+        .badge-important { background-color: #ffebee; color: #c62828; }
+        .badge-normal { background-color: #e3f2fd; color: #1565c0; }
+    </style>
+    """, unsafe_allow_html=True)
+
     # 현재 사용자 정보
     current_user_name = st.session_state.get("user_name", "Unknown")
     current_user_id = st.session_state.get("user_id", "")
@@ -24,91 +33,110 @@ def render_notice_board(db):
     except Exception:
         pass # 인덱스 오류 등 예외 발생 시 무시 (최초 실행 시 발생 가능)
 
+    # [NEW] 화면 모드 초기화
+    if "notice_view_mode" not in st.session_state:
+        st.session_state["notice_view_mode"] = "list"
+    if "notice_list_key" not in st.session_state:
+        st.session_state["notice_list_key"] = 0
+    # [수정] URL 쿼리 파라미터를 사용하여 뷰 상태 관리 (브라우저 뒤로가기 지원)
+    if 'notice_id' in st.query_params:
+        st.session_state["notice_view_mode"] = 'detail'
+        st.session_state["selected_post_id"] = st.query_params['notice_id']
+    elif st.session_state["notice_view_mode"] == 'detail':
+        st.session_state["notice_view_mode"] = 'list'
+        st.session_state["selected_post_id"] = None
+        # [FIX] 뒤로가기 시 목록 선택 상태 초기화를 위해 키 증가
+        st.session_state["notice_list_key"] += 1
+
+    view_mode = st.session_state["notice_view_mode"]
+    selected_id = st.session_state.get("selected_post_id")
+
     # 공지사항 작성 (접기/펼치기)
-    with st.expander("✏️ 새 공지사항 작성"):
-        # [수정] st.form 제거하여 동적 UI(기간 설정) 즉시 반응하도록 변경
-        title = st.text_input("제목", key="np_title")
-        content = st.text_area("내용", height=100, key="np_content")
-        
-        c1, c2 = st.columns(2)
-        
-        # [NEW] 공지 대상 선택 (통합형)
-        # 사용자 목록 가져오기
-        users_ref = db.collection("users").stream()
-        users_opts = [f"{u.to_dict().get('username')} ({u.to_dict().get('name')})" for u in users_ref]
-        
-        # '전체 공지'를 옵션의 첫 번째에 추가
-        target_options = ["전체 공지"] + users_opts
-        
-        # 멀티 셀렉트 (기본값: 전체 공지)
-        selected_targets = c1.multiselect("공지 대상 선택", target_options, default=["전체 공지"], key="np_targets")
+    if view_mode == "list":
+        with st.expander("✏️ 새 공지사항 작성"):
+            # [수정] st.form 제거하여 동적 UI(기간 설정) 즉시 반응하도록 변경
+            title = st.text_input("제목", key="np_title")
+            content = st.text_area("내용", height=100, key="np_content")
             
-        # [NEW] 게시 기간 설정
-        c_t1, c_t2 = st.columns(2)
-        post_term = c_t1.radio("게시 기간", ["영구 게시", "기간 설정"], horizontal=True, key="np_term")
-        expiration_date = None
-        if post_term == "기간 설정":
-            exp_date = c_t2.date_input("게시 종료일", datetime.date.today() + datetime.timedelta(days=7), key="np_exp_date")
-            expiration_date = datetime.datetime.combine(exp_date, datetime.time.max)
+            c1, c2 = st.columns(2)
+            
+            # [NEW] 공지 대상 선택 (통합형)
+            # 사용자 목록 가져오기
+            users_ref = db.collection("users").stream()
+            users_opts = [f"{u.to_dict().get('username')} ({u.to_dict().get('name')})" for u in users_ref]
+            
+            # '전체 공지'를 옵션의 첫 번째에 추가
+            target_options = ["전체 공지"] + users_opts
+            
+            # 멀티 셀렉트 (기본값: 전체 공지)
+            selected_targets = c1.multiselect("공지 대상 선택", target_options, default=["전체 공지"], key="np_targets")
+                
+            # [NEW] 게시 기간 설정
+            c_t1, c_t2 = st.columns(2)
+            post_term = c_t1.radio("게시 기간", ["영구 게시", "기간 설정"], horizontal=True, key="np_term")
+            expiration_date = None
+            if post_term == "기간 설정":
+                exp_date = c_t2.date_input("게시 종료일", datetime.date.today() + datetime.timedelta(days=7), key="np_exp_date")
+                expiration_date = datetime.datetime.combine(exp_date, datetime.time.max)
 
-        # [NEW] 첨부파일 업로드
-        uploaded_file = st.file_uploader("첨부파일 (이미지/문서)", type=['png', 'jpg', 'jpeg', 'pdf', 'xlsx', 'txt'], key="np_file")
-        
-        is_important = st.checkbox("중요(상단 고정)", key="np_important")
-        
-        if st.button("등록", type="primary"):
-            if title and content:
-                if not selected_targets:
-                    st.error("공지 대상을 선택해주세요.")
-                    st.stop()
-
-                # 대상 처리 로직
-                if "전체 공지" in selected_targets:
-                    target_type = "전체공지"
-                    target_value = []
-                else:
-                    target_type = "대상선택"
-                    target_value = selected_targets
-
-                # 파일 처리 (Base64 인코딩하여 Firestore에 저장 - 용량 제한 주의)
-                file_data = None
-                file_name = None
-                if uploaded_file:
-                    if uploaded_file.size > 1024 * 1024: # 1MB 제한
-                        st.error("첨부파일은 1MB 이하여야 합니다.")
+            # [NEW] 첨부파일 업로드
+            uploaded_file = st.file_uploader("첨부파일 (이미지/문서)", type=['png', 'jpg', 'jpeg', 'pdf', 'xlsx', 'txt'], key="np_file")
+            
+            is_important = st.checkbox("중요(상단 고정)", key="np_important")
+            
+            if st.button("등록", type="primary"):
+                if title and content:
+                    if not selected_targets:
+                        st.error("공지 대상을 선택해주세요.")
                         st.stop()
-                    file_bytes = uploaded_file.read()
-                    file_data = base64.b64encode(file_bytes).decode('utf-8')
-                    file_name = uploaded_file.name
 
-                doc_data = {
-                    "title": title,
-                    "content": content,
-                    "author": current_user_name,
-                    "author_id": current_user_id,
-                    "created_at": datetime.datetime.now(),
-                    "is_important": is_important,
-                    "target_type": target_type,
-                    "target_value": target_value, # list or string
-                    "expiration_date": expiration_date,
-                    "file_name": file_name,
-                    "file_data": file_data,
-                    "views": 0
-                }
-                db.collection("posts").add(doc_data)
-                st.success("등록되었습니다.")
-                
-                # 입력 필드 초기화 (세션 상태 삭제)
-                keys_to_clear = ["np_title", "np_content", "np_targets", "np_term", "np_exp_date", "np_file", "np_important"]
-                for k in keys_to_clear:
-                    if k in st.session_state:
-                        del st.session_state[k]
-                
-                st.rerun()
-            else:
-                st.warning("제목과 내용을 입력하세요.")
+                    # 대상 처리 로직
+                    if "전체 공지" in selected_targets:
+                        target_type = "전체공지"
+                        target_value = []
+                    else:
+                        target_type = "대상선택"
+                        target_value = selected_targets
 
-    st.divider()
+                    # 파일 처리 (Base64 인코딩하여 Firestore에 저장 - 용량 제한 주의)
+                    file_data = None
+                    file_name = None
+                    if uploaded_file:
+                        if uploaded_file.size > 1024 * 1024: # 1MB 제한
+                            st.error("첨부파일은 1MB 이하여야 합니다.")
+                            st.stop()
+                        file_bytes = uploaded_file.read()
+                        file_data = base64.b64encode(file_bytes).decode('utf-8')
+                        file_name = uploaded_file.name
+
+                    doc_data = {
+                        "title": title,
+                        "content": content,
+                        "author": current_user_name,
+                        "author_id": current_user_id,
+                        "created_at": datetime.datetime.now(),
+                        "is_important": is_important,
+                        "target_type": target_type,
+                        "target_value": target_value, # list or string
+                        "expiration_date": expiration_date,
+                        "file_name": file_name,
+                        "file_data": file_data,
+                        "views": 0
+                    }
+                    db.collection("posts").add(doc_data)
+                    st.success("등록되었습니다.")
+                    
+                    # 입력 필드 초기화 (세션 상태 삭제)
+                    keys_to_clear = ["np_title", "np_content", "np_targets", "np_term", "np_exp_date", "np_file", "np_important"]
+                    for k in keys_to_clear:
+                        if k in st.session_state:
+                            del st.session_state[k]
+                    
+                    st.rerun()
+                else:
+                    st.warning("제목과 내용을 입력하세요.")
+
+        st.divider()
 
     # 공지사항 목록 조회 (최신순 30개)
     posts_ref = db.collection("posts").order_by("created_at", direction=firestore.Query.DESCENDING).limit(30)
@@ -149,31 +177,30 @@ def render_notice_board(db):
         # 필독/일반 정렬 (중요한 것 우선, 그 다음 최신순)
         visible_posts.sort(key=lambda x: (x.get('is_important', False), x.get('created_at', datetime.datetime.min)), reverse=True)
         
-        # [변경] 좌우 분할 레이아웃 (목록:상세 = 2:3)
-        c_list, c_detail = st.columns([2, 3])
-        
-        with c_list:
+        if view_mode == "list":
             st.markdown("### 📋 공지 목록")
+            st.caption("목록의 행 아무 곳이나 클릭하면 상세 화면으로 이동합니다.")
             
-            # [NEW] 데이터프레임 생성
+            # [수정] 데이터프레임으로 목록 표시
             df_rows = []
             for p in visible_posts:
                 is_imp = p.get('is_important', False)
-                
-                # 제목 처리 (중요 게시물 강조)
                 title_display = p['title']
-                if is_imp:
-                    title_display = f"🔥 {p['title']}"
+                
+                # [NEW] 아이콘 컬럼 데이터 생성
+                # 첨부파일: 디스켓(💾) 아이콘
+                file_icon = "💾" if p.get('file_name') else ""
                 
                 created_at = p.get('created_at')
                 date_str = created_at.strftime("%Y-%m-%d") if created_at else ""
                 
                 exp_date = p.get('expiration_date')
-                exp_str = exp_date.strftime("%Y-%m-%d") if exp_date else ""
+                exp_str = exp_date.strftime("%Y-%m-%d") if exp_date else "영구"
                 
                 df_rows.append({
                     "id": p['id'],
                     "제목": title_display,
+                    "첨부": file_icon,
                     "게시일자": date_str,
                     "작성자": p.get('author', ''),
                     "게시종료일": exp_str,
@@ -182,36 +209,48 @@ def render_notice_board(db):
             
             df = pd.DataFrame(df_rows)
             
-            # 스타일 적용 (중요 게시물 배경색)
+            # 스타일 적용 (중요 게시물 파란색 + 굵은 글씨)
             def highlight_important_row(row):
-                return ['background-color: #fff0f0; font-weight: bold;'] * len(row) if row['is_important'] else [''] * len(row)
+                if row['is_important']:
+                    return ['color: blue; font-weight: bold;'] * len(row)
+                return [''] * len(row)
             
             styled_df = df.style.apply(highlight_important_row, axis=1)
 
             selection = st.dataframe(
                 styled_df,
                 column_config={
-                    "id": None,
-                    "is_important": None,
-                    "제목": st.column_config.TextColumn("제목", width="medium"),
-                    "게시일자": st.column_config.TextColumn("게시일자", width="small"),
-                    "게시종료일": st.column_config.TextColumn("게시종료일", width="small"),
-                    "작성자": st.column_config.TextColumn("작성자", width="small"),
+                    "id": None, "is_important": None,
+                    "제목": st.column_config.TextColumn("제목", width="large"),
+                    "첨부": st.column_config.TextColumn("첨부", width=50, help="첨부파일 유무"),
+                    "작성자": st.column_config.TextColumn("작성자", width="small", help="작성자"),
+                    "게시일자": st.column_config.TextColumn("게시일자", width="small", help="게시 시작일"),
+                    "게시종료일": st.column_config.TextColumn("게시종료일", width="small", help="게시가 종료되는 날짜"),
                 },
-                column_order=["제목", "게시일자", "게시종료일", "작성자"],
-                use_container_width=True,
-                hide_index=True,
-                on_select="rerun",
-                selection_mode="single-row",
-                height=600,
-                key="notice_board_list_table"
+                column_order=["제목", "첨부", "작성자", "게시일자", "게시종료일"],
+                width="stretch", hide_index=True, on_select="rerun",
+                selection_mode="single-row", height=600, 
+                key=f"notice_board_list_table_{st.session_state['notice_list_key']}"
             )
-        
-        with c_detail:
+            
             if selection.selection.rows:
                 idx = selection.selection.rows[0]
-                selected_id = df.iloc[idx]['id']
-                post = next((p for p in visible_posts if p['id'] == selected_id), None)
+                st.session_state["selected_post_id"] = df.iloc[idx]['id']
+                st.session_state["notice_view_mode"] = "detail"
+                st.query_params["notice_id"] = df.iloc[idx]['id']
+                st.rerun()
+        
+        else: # Detail View
+            if st.button("⬅️ 목록으로 돌아가기"):
+                st.session_state["notice_view_mode"] = "list"
+                st.session_state["selected_post_id"] = None
+                st.session_state["notice_list_key"] += 1
+                st.query_params.clear()
+                st.rerun()
+
+            post = next((p for p in visible_posts if p['id'] == selected_id), None)
+            
+            if post:
                 
                 # 수정 모드 확인
                 is_editing = (st.session_state.get("edit_post_id") == post['id'])
@@ -327,11 +366,22 @@ def render_notice_board(db):
                             else:
                                 target_str = "-"
 
-                    st.subheader(f"{'🔥 ' if post.get('is_important') else ''}{post['title']}")
-                    st.caption(f"작성자: {post.get('author')} | 작성일: {post.get('created_at').strftime('%Y-%m-%d %H:%M') if post.get('created_at') else ''} | 대상: {target_str}")
+                    # [NEW] 상세 뷰 스타일링
+                    badge_html = ""
+                    if post.get('is_important'):
+                        badge_html = '<span class="notice-badge badge-important">중요</span>'
+                    else:
+                        badge_html = '<span class="notice-badge badge-normal">일반</span>'
+                        
+                    st.markdown(f"""
+                    <div style="border-bottom: 2px solid #eee; padding-bottom: 10px; margin-bottom: 20px;">
+                        <h3>{badge_html} {post['title']}</h3>
+                        <div class="notice-meta">작성자: {post.get('author')} | 작성일: {post.get('created_at').strftime('%Y-%m-%d %H:%M') if post.get('created_at') else ''} | 대상: {target_str}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
                     
                     st.markdown(f"""
-                    <div style="background-color: #f9f9f9; padding: 20px; border-radius: 5px; border: 1px solid #ddd; min-height: 150px; white-space: pre-wrap; color: #333;">
+                    <div style="background-color: #ffffff; padding: 20px; border-radius: 8px; border: 1px solid #e0e0e0; min-height: 300px; white-space: pre-wrap; color: #333; font-size: 1.05em; line-height: 1.6;">
                         {post['content']}
                     </div>
                     """, unsafe_allow_html=True)
@@ -354,9 +404,18 @@ def render_notice_board(db):
                         with c_del:
                             if st.button("삭제", key=f"del_post_{post['id']}"):
                                 db.collection("posts").document(post['id']).delete()
+                                st.session_state["notice_view_mode"] = "list"
+                                st.session_state["selected_post_id"] = None
+                                st.session_state["notice_list_key"] += 1
+                                st.query_params.clear()
                                 st.rerun()
             else:
-                st.info("👈 좌측 목록에서 공지사항을 선택하면 상세 내용이 표시됩니다.")
+                st.error("게시물을 찾을 수 없습니다.")
+                if st.button("목록으로"):
+                    st.session_state["notice_view_mode"] = "list"
+                    st.session_state["selected_post_id"] = None
+                    st.query_params.clear()
+                    st.rerun()
     else:
         st.info("등록된 공지사항이 없습니다.")
 

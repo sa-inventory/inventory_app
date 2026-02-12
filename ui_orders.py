@@ -91,7 +91,7 @@ def render_order_entry(db):
             st.write("🔽 발주할 제품을 목록에서 선택(클릭)하세요.")
             selection = st.dataframe(
                 df_filtered[final_cols].rename(columns=col_map),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
                 on_select="rerun",
                 selection_mode="single-row",
@@ -338,7 +338,7 @@ def render_order_entry(db):
                     },
                     column_order=["order_no", "date", "customer", "name", "stock", "status"],
                     hide_index=True,
-                    use_container_width=True,
+                    width="stretch",
                     on_select="rerun",
                     selection_mode="multi-row",
                     key=f"del_orders_selection_{st.session_state['del_orders_key']}"
@@ -451,7 +451,7 @@ def render_partner_order_status(db):
         st.write("🔽 상세 이력을 확인할 항목을 선택하세요.")
         selection = st.dataframe(
             df_display, 
-            use_container_width=True, 
+            width="stretch", 
             hide_index=True,
             on_select="rerun",
             selection_mode="single-row",
@@ -711,7 +711,7 @@ def render_order_status(db):
             st.write("🔽 목록에서 수정하거나 제직대기로 보낼 행을 선택(체크)하세요. (다중 선택 가능)")
             selection = st.dataframe(
                 df_display, 
-                use_container_width=True, 
+                width="stretch", 
                 hide_index=True,  # 맨 왼쪽 순번(0,1,2..) 숨기기
                 on_select="rerun", # 선택 시 리런
                 selection_mode="multi-row", # 다중 선택 가능으로 변경
@@ -841,7 +841,7 @@ def render_order_status(db):
                         "순서": st.column_config.NumberColumn("순서", width="small", disabled=True), # [수정] 직접 입력 방지
                     },
                     hide_index=True,
-                    use_container_width=True,
+                    width="stretch",
                     key=f"print_settings_editor_{st.session_state['print_settings_ver']}"
                 )
                 

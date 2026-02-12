@@ -17,9 +17,19 @@ from utils import get_partners, generate_report_html
 @st.cache_resource
 def setup_matplotlib_font():
     if plt:
-        from matplotlib import font_manager # type: ignore
-        font_manager.fontManager.addfont('/usr/share/fonts/truetype/nanum/NanumGothic.ttf')
-        plt.rc('font', family='NanumGothic')
+        system_name = platform.system()
+        if system_name == 'Windows':
+            plt.rc('font', family='Malgun Gothic')
+        elif system_name == 'Darwin': # Mac
+            plt.rc('font', family='AppleGothic')
+        else: # Linux
+            try:
+                from matplotlib import font_manager # type: ignore
+                font_manager.fontManager.addfont('/usr/share/fonts/truetype/nanum/NanumGothic.ttf')
+                plt.rc('font', family='NanumGothic')
+            except:
+                pass
+        plt.rcParams['axes.unicode_minus'] = False
 
 def render_statistics(db):
     st.header("📈 통합 통계 분석")
@@ -218,7 +228,7 @@ def render_statistics(db):
                 column_order=["선택", "customer", "총수량", "발주건수", "평균수량"],
                 column_config={"선택": st.column_config.CheckboxColumn(default=False)},
                 disabled=['customer', '총수량', '발주건수', '평균수량'],
-                hide_index=True, key="order_partner_selector"
+                width="stretch", hide_index=True, key="order_partner_selector"
             )
             selected_customers = edited_partner_stats[edited_partner_stats['선택']]['customer'].tolist()
             with c2: show_actions(partner_stats.drop(columns=['선택']), "발주처별_통계", "발주처별 수량 통계", chart_col='총수량')
@@ -253,7 +263,7 @@ def render_statistics(db):
                 chart = base.mark_line(point=alt.OverlayMarkDef(size=100, filled=True))
             
             c1.altair_chart(chart, use_container_width=True)
-            c1.dataframe(time_stats, use_container_width=True, hide_index=True)
+            c1.dataframe(time_stats, width="stretch", hide_index=True)
             with c1: show_actions(time_stats, f"발주추이_{group_label}", f"{group_label}별 발주 추이", chart_col='총수량')
         else:
             st.info("조회된 데이터가 없습니다.")
@@ -298,7 +308,7 @@ def render_statistics(db):
                 column_order=["선택", "machine_no", "총생산매수", "생산롤수", "총생산중량"],
                 column_config={"선택": st.column_config.CheckboxColumn(default=False)},
                 disabled=['machine_no', '총생산매수', '생산롤수', '총생산중량'],
-                hide_index=True, key="weaving_machine_selector"
+                width="stretch", hide_index=True, key="weaving_machine_selector"
             )
             selected_machines = edited_machine_stats[edited_machine_stats['선택']]['machine_no'].tolist()
             with c2: show_actions(machine_stats.drop(columns=['선택']), "제직기별_생산통계", "제직기별 생산량 통계", chart_col='총생산매수')
@@ -331,7 +341,7 @@ def render_statistics(db):
                 chart = base.mark_line(point=alt.OverlayMarkDef(size=100, filled=True))
                 
             c1.altair_chart(chart, use_container_width=True)
-            c1.dataframe(time_stats, use_container_width=True, hide_index=True)
+            c1.dataframe(time_stats, width="stretch", hide_index=True)
             with c1: show_actions(time_stats, f"생산추이_{group_label}", f"{group_label}별 생산량 추이", chart_col='총생산매수')
         else:
             st.info("조회된 데이터가 없습니다.")
@@ -373,7 +383,7 @@ def render_statistics(db):
                 column_order=["선택", "dyeing_partner", "총금액", "총수량", "작업건수"],
                 column_config={"선택": st.column_config.CheckboxColumn(default=False)},
                 disabled=['dyeing_partner', '총금액', '총수량', '작업건수'],
-                hide_index=True, key="dyeing_partner_selector"
+                width="stretch", hide_index=True, key="dyeing_partner_selector"
             )
             selected_partners = edited_partner_stats[edited_partner_stats['선택']]['dyeing_partner'].tolist()
             with c2: show_actions(partner_stats.drop(columns=['선택']), "염색업체별_실적", "염색업체별 실적 및 비용", chart_col='총금액')
@@ -406,7 +416,7 @@ def render_statistics(db):
                 chart = base.mark_line(point=alt.OverlayMarkDef(size=100, filled=True))
 
             c1.altair_chart(chart, use_container_width=True)
-            c1.dataframe(time_stats, use_container_width=True, hide_index=True)
+            c1.dataframe(time_stats, width="stretch", hide_index=True)
             with c1: show_actions(time_stats, f"염색비용추이_{group_label}", f"{group_label}별 염색 비용 추이", chart_col='총금액')
         else:
             st.info("조회된 데이터가 없습니다.")
@@ -450,7 +460,7 @@ def render_statistics(db):
                 column_order=["선택", "sewing_partner", "총생산수량", "총비용", "작업건수", "총불량수량"],
                 column_config={"선택": st.column_config.CheckboxColumn(default=False)},
                 disabled=['sewing_partner', '총생산수량', '총비용', '작업건수', '총불량수량'],
-                hide_index=True, key="sewing_partner_selector"
+                width="stretch", hide_index=True, key="sewing_partner_selector"
             )
             selected_partners = edited_partner_stats[edited_partner_stats['선택']]['sewing_partner'].tolist()
             with c2: show_actions(partner_stats.drop(columns=['선택']), "봉제업체별_실적", "봉제업체별 실적 및 비용", chart_col='총생산수량')
@@ -483,7 +493,7 @@ def render_statistics(db):
                 chart = base.mark_line(point=alt.OverlayMarkDef(size=100, filled=True))
 
             c1.altair_chart(chart, use_container_width=True)
-            c1.dataframe(time_stats, use_container_width=True, hide_index=True)
+            c1.dataframe(time_stats, width="stretch", hide_index=True)
             with c1: show_actions(time_stats, f"봉제수량추이_{group_label}", f"{group_label}별 봉제 수량 추이", chart_col='총생산수량')
         else:
             st.info("조회된 데이터가 없습니다.")
@@ -529,7 +539,7 @@ def render_statistics(db):
                 column_order=["선택", "shipping_carrier", "총운임비", "총수량", "출고건수"],
                 column_config={"선택": st.column_config.CheckboxColumn(default=False)},
                 disabled=['shipping_carrier', '총운임비', '총수량', '출고건수'],
-                hide_index=True, key="shipping_carrier_selector"
+                width="stretch", hide_index=True, key="shipping_carrier_selector"
             )
             selected_carriers = edited_carrier_stats[edited_carrier_stats['선택']]['shipping_carrier'].tolist()
             with c2: show_actions(carrier_stats.drop(columns=['선택']), "배송업체별_운임통계", "배송업체별 운임비 통계", chart_col='총운임비')
@@ -562,14 +572,14 @@ def render_statistics(db):
                 chart = base.mark_line(point=alt.OverlayMarkDef(size=100, filled=True))
 
             c1.altair_chart(chart, use_container_width=True)
-            c1.dataframe(time_stats, use_container_width=True, hide_index=True)
+            c1.dataframe(time_stats, width="stretch", hide_index=True)
             with c1: show_actions(time_stats, f"운임비추이_{group_label}", f"{group_label}별 운임비 지출 추이", chart_col='총운임비')
             
             st.divider()
             st.write("📋 거래처별 출고 실적")
             # [수정] 출고방법(shipping_method) 컬럼 추가
             cust_stats = df_chart.groupby(['customer', 'shipping_method']).agg(출고건수=('id', 'count'), 총수량=('stock', 'sum'), 총운임비=('shipping_cost', 'sum')).sort_values('총수량', ascending=False).reset_index()
-            st.dataframe(cust_stats, use_container_width=True, hide_index=True)
+            st.dataframe(cust_stats, width="stretch", hide_index=True)
             show_actions(cust_stats, "거래처별_출고실적", "거래처별 출고 실적")
         else:
             st.info("조회된 데이터가 없습니다.")

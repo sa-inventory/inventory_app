@@ -140,7 +140,7 @@ def manage_code_with_code(code_key, default_list, label):
 
     selection = st.dataframe(
         df,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         on_select="rerun",
         selection_mode="single-row",
@@ -220,7 +220,7 @@ def manage_code_with_code(code_key, default_list, label):
 def manage_code(code_key, default_list, label):
     current_list = get_common_codes(code_key, default_list)
     st.markdown(f"##### 📋 현재 등록된 {label}")
-    if current_list: st.dataframe(pd.DataFrame(current_list, columns=["명칭"]), use_container_width=True, hide_index=True)
+    if current_list: st.dataframe(pd.DataFrame(current_list, columns=["명칭"]), width="stretch", hide_index=True)
     else: st.info("등록된 항목이 없습니다.")
     st.divider()
     c1, c2 = st.columns(2)

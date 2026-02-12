@@ -94,7 +94,7 @@ def render_weaving(db):
             
             st.write("🔽 제직기를 배정할 항목을 선택하세요.")
             # key="df_waiting" 추가로 사이드바 먹통 현상 해결
-            selection = st.dataframe(df[final_cols].rename(columns=col_map), use_container_width=True, on_select="rerun", selection_mode="single-row", key=f"df_waiting_{st.session_state['key_weaving_wait']}")
+            selection = st.dataframe(df[final_cols].rename(columns=col_map), width="stretch", on_select="rerun", selection_mode="single-row", key=f"df_waiting_{st.session_state['key_weaving_wait']}")
             
             if selection.selection.rows:
                 idx = selection.selection.rows[0]
@@ -188,7 +188,7 @@ def render_weaving(db):
             
             st.write("🔽 완료 처리할 항목을 선택하세요.")
             # key="df_weaving" 추가
-            selection = st.dataframe(df[final_cols].rename(columns=col_map), use_container_width=True, on_select="rerun", selection_mode="single-row", key=f"df_weaving_{st.session_state['weaving_df_key']}")
+            selection = st.dataframe(df[final_cols].rename(columns=col_map), width="stretch", on_select="rerun", selection_mode="single-row", key=f"df_weaving_{st.session_state['weaving_df_key']}")
             
             if selection.selection.rows:
                 idx = selection.selection.rows[0]
@@ -465,7 +465,7 @@ def render_weaving(db):
             st.write("🔽 수정하거나 취소할 항목을 선택하세요.")
             selection = st.dataframe(
                 df_display, 
-                use_container_width=True, 
+                width="stretch", 
                 hide_index=True,
                 on_select="rerun",
                 selection_mode="single-row",
@@ -664,7 +664,7 @@ def render_weaving(db):
         if day_logs:
             df_day = pd.DataFrame(day_logs)
             df_day['log_time'] = df_day['log_time'].apply(lambda x: x.strftime('%H:%M') if hasattr(x, 'strftime') else str(x)[11:16])
-            st.dataframe(df_day[['log_time', 'machine_no', 'content', 'author']].rename(columns={'log_time':'시간','machine_no':'호기','content':'내용','author':'작성자'}), hide_index=True, use_container_width=True)
+            st.dataframe(df_day[['log_time', 'machine_no', 'content', 'author']].rename(columns={'log_time':'시간','machine_no':'호기','content':'내용','author':'작성자'}), hide_index=True, width="stretch")
             html_content += df_day[['log_time', 'machine_no', 'content', 'author']].rename(columns={'log_time':'시간','machine_no':'호기','content':'내용','author':'작성자'}).to_html(index=False, border=1)
         else:
             st.info("기록 없음")
@@ -683,7 +683,7 @@ def render_weaving(db):
         if night_logs:
             df_night = pd.DataFrame(night_logs)
             df_night['log_time'] = df_night['log_time'].apply(lambda x: x.strftime('%H:%M') if hasattr(x, 'strftime') else str(x)[11:16])
-            st.dataframe(df_night[['log_time', 'machine_no', 'content', 'author']].rename(columns={'log_time':'시간','machine_no':'호기','content':'내용','author':'작성자'}), hide_index=True, use_container_width=True)
+            st.dataframe(df_night[['log_time', 'machine_no', 'content', 'author']].rename(columns={'log_time':'시간','machine_no':'호기','content':'내용','author':'작성자'}), hide_index=True, width="stretch")
             html_content += df_night[['log_time', 'machine_no', 'content', 'author']].rename(columns={'log_time':'시간','machine_no':'호기','content':'내용','author':'작성자'}).to_html(index=False, border=1)
         else:
             st.info("기록 없음")
@@ -753,7 +753,7 @@ def render_weaving(db):
             final_cols = [c for c in display_cols if c in df.columns]
             df_display = df[final_cols].rename(columns=col_map)
             st.markdown(f"### 📄 {prod_date} 생산일지")
-            st.dataframe(df_display, hide_index=True, use_container_width=True)
+            st.dataframe(df_display, hide_index=True, width="stretch")
             
             # 엑셀 다운로드 준비
             buffer = io.BytesIO()
@@ -878,7 +878,7 @@ def render_dyeing(db):
             final_cols = [c for c in display_cols if c in df.columns]
             
             st.write("🔽 염색 출고할 항목을 선택하세요.")
-            selection = st.dataframe(df[final_cols].rename(columns=col_map), use_container_width=True, on_select="rerun", selection_mode="single-row", key=f"df_dye_wait_{st.session_state['key_dyeing_wait']}")
+            selection = st.dataframe(df[final_cols].rename(columns=col_map), width="stretch", on_select="rerun", selection_mode="single-row", key=f"df_dye_wait_{st.session_state['key_dyeing_wait']}")
             
             if selection.selection.rows:
                 idx = selection.selection.rows[0]
@@ -957,7 +957,7 @@ def render_dyeing(db):
             final_cols = [c for c in display_cols if c in df.columns]
             
             st.write("🔽 관리할 항목을 선택하세요.")
-            selection = st.dataframe(df[final_cols].rename(columns=col_map), use_container_width=True, on_select="rerun", selection_mode="single-row", key=f"df_dye_ing_{st.session_state['key_dyeing_ing']}")
+            selection = st.dataframe(df[final_cols].rename(columns=col_map), width="stretch", on_select="rerun", selection_mode="single-row", key=f"df_dye_ing_{st.session_state['key_dyeing_ing']}")
             
             if selection.selection.rows:
                 idx = selection.selection.rows[0]
@@ -1186,7 +1186,7 @@ def render_dyeing(db):
                 st.components.v1.html(print_html, height=0, width=0)
 
             st.write("🔽 수정하거나 취소할 항목을 선택하세요.")
-            selection = st.dataframe(df_display, use_container_width=True, on_select="rerun", selection_mode="single-row", key=f"df_dye_done_{st.session_state['key_dyeing_done']}")
+            selection = st.dataframe(df_display, width="stretch", on_select="rerun", selection_mode="single-row", key=f"df_dye_done_{st.session_state['key_dyeing_done']}")
             
             if selection.selection.rows:
                 idx = selection.selection.rows[0]
@@ -1311,7 +1311,7 @@ def render_sewing(db):
             with c_btn:
                 btn_print_inst = st.button("🖨️ 봉제작업지시서", use_container_width=True)
 
-            selection = st.dataframe(df[final_cols].rename(columns=col_map), use_container_width=True, on_select="rerun", selection_mode="multi-row", key=f"df_sew_wait_{st.session_state['key_sewing_wait']}")
+            selection = st.dataframe(df[final_cols].rename(columns=col_map), width="stretch", on_select="rerun", selection_mode="multi-row", key=f"df_sew_wait_{st.session_state['key_sewing_wait']}")
             
             # [수정] 인쇄 로직 분리
             if btn_print_inst:
@@ -1441,7 +1441,7 @@ def render_sewing(db):
             
             st.write("🔽 완료 처리할 항목을 선택하세요.")
             # [수정] 동적 키 적용하여 완료 후 선택 해제
-            selection = st.dataframe(df[final_cols].rename(columns=col_map), use_container_width=True, on_select="rerun", selection_mode="single-row", key=f"df_sew_ing_{st.session_state['sewing_ing_key']}")
+            selection = st.dataframe(df[final_cols].rename(columns=col_map), width="stretch", on_select="rerun", selection_mode="single-row", key=f"df_sew_ing_{st.session_state['sewing_ing_key']}")
             
             if selection.selection.rows:
                 idx = selection.selection.rows[0]
@@ -1683,7 +1683,7 @@ def render_sewing(db):
                 st.components.v1.html(print_html, height=0, width=0)
 
             st.write("🔽 수정하거나 취소할 항목을 선택하세요.")
-            selection = st.dataframe(df_display, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row", key=f"df_sew_done_{st.session_state['key_sewing_done']}")
+            selection = st.dataframe(df_display, width="stretch", hide_index=True, on_select="rerun", selection_mode="single-row", key=f"df_sew_done_{st.session_state['key_sewing_done']}")
             
             if selection.selection.rows:
                 idx = selection.selection.rows[0]

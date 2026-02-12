@@ -10,7 +10,7 @@ import io
 from utils import get_db, firestore
 from ui_orders import render_order_entry, render_order_status, render_partner_order_status
 from ui_production import render_weaving, render_dyeing, render_sewing
-from ui_management import render_shipping, render_inventory, render_product_master, render_partners, render_machines, render_codes, render_users, render_my_profile, render_company_settings
+from ui_management import render_shipping_operations, render_shipping_status, render_inventory, render_product_master, render_partners, render_machines, render_codes, render_users, render_my_profile, render_company_settings
 from ui_statistics import render_statistics
 from ui_board import render_notice_board, render_schedule
 
@@ -103,19 +103,6 @@ with st.sidebar:
     user_display = st.session_state.get("user_name", st.session_state.get("role"))
     st.write(f"환영합니다, **{user_display}**님!")
     
-    if st.button("로그아웃", use_container_width=True):
-        st.session_state["logged_in"] = False
-        st.session_state["role"] = None
-        if "user_name" in st.session_state:
-            del st.session_state["user_name"]
-        if "current_menu" in st.session_state:
-            del st.session_state["current_menu"]
-        st.rerun()
-    
-    if st.button("⚙️ 로그인 정보 설정", use_container_width=True):
-        st.session_state["current_menu"] = "로그인 정보 설정"
-        st.rerun()
-        
     st.divider()
     
     # 메뉴 선택 기능 추가
@@ -160,6 +147,9 @@ with st.sidebar:
             if st.button("🪡 봉제현황", use_container_width=True):
                 st.session_state["current_menu"] = "봉제현황"
                 st.rerun()
+            if st.button("📤 출고작업", use_container_width=True):
+                st.session_state["current_menu"] = "출고작업"
+                st.rerun()
             if st.button("🚚 출고현황", use_container_width=True):
                 st.session_state["current_menu"] = "출고현황"
                 st.rerun()
@@ -190,9 +180,26 @@ with st.sidebar:
                 if st.button("👤 사용자 관리", use_container_width=True):
                     st.session_state["current_menu"] = "사용자 관리"
                     st.rerun()
-            
-    menu = st.session_state["current_menu"]
+    
+    # [NEW] 하단 여백 추가 (버튼들을 아래로 밀어내기 위함)
+    st.markdown("<div style='margin-top: 50px;'></div>", unsafe_allow_html=True)
 
+    st.divider()
+    
+    if st.button("⚙️ 로그인 정보 설정", use_container_width=True):
+        st.session_state["current_menu"] = "로그인 정보 설정"
+        st.rerun()
+    
+    if st.button("로그아웃", use_container_width=True):
+        st.session_state["logged_in"] = False
+        st.session_state["role"] = None
+        if "user_name" in st.session_state:
+            del st.session_state["user_name"]
+        if "current_menu" in st.session_state:
+            del st.session_state["current_menu"]
+        st.rerun()
+ 
+menu = st.session_state["current_menu"]
 # 4. [메인 화면] 메뉴별 기능 구현
 if menu == "공지사항":
     render_notice_board(db)
@@ -211,8 +218,10 @@ elif menu == "염색현황":
     render_dyeing(db)
 elif menu == "봉제현황":
     render_sewing(db)
+elif menu == "출고작업":
+    render_shipping_operations(db)
 elif menu == "출고현황":
-    render_shipping(db)
+    render_shipping_status(db)
 elif menu == "재고현황":
     render_inventory(db)
 elif menu == "통합통계":

@@ -547,18 +547,25 @@ def render_weaving(db):
     with tab_worklog:
         st.subheader("작업일지 작성 및 조회")
         
+        # [NEW] 저장 성공 메시지 (리런 후 표시)
+        if st.session_state.get("worklog_saved"):
+            st.success("✅ 작업일지가 저장되었습니다.")
+            st.session_state["worklog_saved"] = False
+
         # Part 1: 일지 작성
         with st.expander("➕ 작업일지 작성하기", expanded=True):
-            with st.form("work_log_form"):
+            with st.form("work_log_form", clear_on_submit=True):
                 c1, c2, c3 = st.columns(3)
                 log_date = c1.date_input("작업일자", datetime.date.today())
                 shift = c2.radio("근무조", ["주간", "야간"], horizontal=True)
                 author = c3.text_input("작성자", value=st.session_state.get("role", ""))
 
                 c1, c2 = st.columns(2)
-                # 제직기 목록 가져오기
-                m_options = [f"{m['machine_no']}:{m['name']}" for m in machines_data]
-                machine_selection = c1.selectbox("관련 제직기", ["전체"] + m_options)
+                # [수정] 제직기 다중 선택 및 기타 옵션 추가
+                m_names = [m['name'] for m in machines_data]
+                machine_options = ["전체"] + m_names + ["기타"]
+                machine_selection = c1.multiselect("제직기", machine_options, default=[])
+                
                 log_time = c2.time_input("작성시간", datetime.datetime.now().time())
                 
                 content = st.text_area("작업 내용")
@@ -570,11 +577,18 @@ def render_weaving(db):
                     log_dt = datetime.datetime.combine(log_date, log_time)
                     machine_no_str = machine_selection.split(":")[0] if machine_selection != "전체" else "전체"
                     
+                    # [수정] 선택된 제직기들을 문자열로 변환
+                    if not machine_selection:
+                        machine_no_str = "-"
+                    else:
+                        machine_no_str = ", ".join(machine_selection)
+                    
                     # 1. 개별 로그 저장 (shift_logs 컬렉션)
                     db.collection("shift_logs").add({
                         "log_date": str(log_date),
                         "shift": shift,
                         "machine_no": machine_no_str,
+                        "machine_no": machine_no_str, # 이름 저장
                         "log_time": log_dt,
                         "content": content,
                         "author": author
@@ -587,7 +601,7 @@ def render_weaving(db):
                             note_key: handover_notes
                         }, merge=True)
                     
-                    st.success("작업일지가 저장되었습니다.")
+                    st.session_state["worklog_saved"] = True
                     st.rerun()
 
         # Part 2: 일지 조회
@@ -631,15 +645,15 @@ def render_weaving(db):
         # 인쇄 옵션 설정
         with st.expander("🖨️ 인쇄 옵션 설정"):
             po_c1, po_c2, po_c3, po_c4 = st.columns(4)
-            p_title = po_c1.text_input("제목", value=f"작업 일지 ({view_date})", key="wl_title")
+            p_title = po_c1.text_input("제목", value="작업 일지", key="wl_title")
             p_title_size = po_c2.number_input("제목 크기(px)", value=24, step=1, key="wl_ts")
             p_body_size = po_c3.number_input("본문 글자 크기(px)", value=12, step=1, key="wl_bs")
             p_padding = po_c4.number_input("셀 여백(px)", value=6, step=1, key="wl_pad")
             
             po_c5, po_c6, po_c7 = st.columns(3)
-            p_show_date = po_c5.checkbox("출력일시 표시", value=True, key="wl_sd")
-            p_date_pos = po_c6.selectbox("일시 위치", ["Right", "Left", "Center"], index=0, key="wl_dp")
-            p_date_size = po_c7.number_input("일시 글자 크기(px)", value=12, step=1, key="wl_ds")
+            p_show_date = po_c5.checkbox("출력일시 표시 (좌측상단)", value=True, key="wl_sd")
+            p_show_work_date = po_c6.checkbox("작성일자 표시 (우측상단)", value=True, key="wl_swd")
+            p_date_size = po_c7.number_input("일자 글자 크기(px)", value=12, step=1, key="wl_ds")
             
             st.caption("페이지 여백 (mm)")
             po_c8, po_c9, po_c10, po_c11 = st.columns(4)
@@ -650,25 +664,37 @@ def render_weaving(db):
 
         # 화면 표시 & 인쇄용 HTML 생성
         print_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        date_align = p_date_pos.lower()
-        date_display = "block" if p_show_date else "none"
+        print_date_display = "block" if p_show_date else "none"
+        work_date_display = "block" if p_show_work_date else "none"
 
         style = f"""<style>
             @page {{ margin: {p_m_top}mm {p_m_right}mm {p_m_bottom}mm {p_m_left}mm; }}
             body {{ font-family: 'Malgun Gothic', sans-serif; padding: 0; margin: 0; }}
             table {{ width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: {p_body_size}px; }}
             th, td {{ border: 1px solid #444; padding: {p_padding}px; text-align: left; }}
+            table {{ width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: {p_body_size}px; table-layout: fixed; }}
+            th, td {{ border: 1px solid #444; padding: {p_padding}px; text-align: left; word-wrap: break-word; }}
             th {{ background-color: #f0f0f0; text-align: center; font-weight: bold; }}
-            .header {{ text-align: center; margin-bottom: 10px; }}
+            
+            /* [수정] 컬럼 너비 조정 */
+            th:nth-child(1), td:nth-child(1) {{ width: 10%; text-align: center; }} /* 시간 */
+            th:nth-child(2), td:nth-child(2) {{ width: 15%; text-align: center; }} /* 제직기 */
+            th:nth-child(3), td:nth-child(3) {{ width: 65%; }} /* 내용 */
+            th:nth-child(4), td:nth-child(4) {{ width: 10%; text-align: center; }} /* 작성자 */
+            
+            .print-date {{ text-align: left; font-size: 10px; color: #555; margin-bottom: 5px; display: {print_date_display}; }}
+            .header {{ text-align: center; margin-bottom: 5px; }}
             .header h2 {{ font-size: {p_title_size}px; margin: 0; }}
-            .sub-header {{ text-align: {date_align}; font-size: {p_date_size}px; color: #555; margin-bottom: 10px; display: {date_display}; }}
+            .work-date {{ text-align: right; font-size: {p_date_size}px; font-weight: bold; margin-bottom: 10px; display: {work_date_display}; }}
+            
             .section-title {{ font-size: {p_body_size + 2}px; font-weight: bold; margin-top: 20px; margin-bottom: 5px; border-bottom: 2px solid #ddd; padding-bottom: 3px; }}
             .note-box {{ border: 1px solid #444; padding: 10px; min-height: 60px; font-size: {p_body_size}px; }}
         </style>"""
         
         html_content = f"<html><head><title>{p_title}</title>{style}</head><body>"
+        html_content += f"<div class='print-date'>출력일시: {print_now}</div>"
         html_content += f"<div class='header'><h2>{p_title}</h2></div>"
-        html_content += f"<div class='sub-header'>출력일시: {print_now}</div>"
+        html_content += f"<div class='work-date'>작성일자: {view_date}</div>"
         
         # 주간 섹션
         st.markdown("#### ☀️ 주간 작업")
@@ -676,11 +702,19 @@ def render_weaving(db):
         if day_logs:
             df_day = pd.DataFrame(day_logs)
             df_day['log_time'] = df_day['log_time'].apply(lambda x: x.strftime('%H:%M') if hasattr(x, 'strftime') else str(x)[11:16])
-            st.dataframe(df_day[['log_time', 'machine_no', 'content', 'author']].rename(columns={'log_time':'시간','machine_no':'호기','content':'내용','author':'작성자'}), hide_index=True, width="stretch")
-            html_content += df_day[['log_time', 'machine_no', 'content', 'author']].rename(columns={'log_time':'시간','machine_no':'호기','content':'내용','author':'작성자'}).to_html(index=False, border=1)
+            # [수정] 컬럼명 변경 (호기 -> 제직기)
+            st.dataframe(
+                df_day[['log_time', 'machine_no', 'content', 'author']].rename(columns={'log_time':'시간','machine_no':'제직기','content':'내용','author':'작성자'}), 
+                hide_index=True, 
+                use_container_width=True,
+                column_config={"시간": st.column_config.TextColumn(width=60), "제직기": st.column_config.TextColumn(width=80), "내용": st.column_config.TextColumn(width="large"), "작성자": st.column_config.TextColumn(width=80)}
+            )
+            html_content += df_day[['log_time', 'machine_no', 'content', 'author']].rename(columns={'log_time':'시간','machine_no':'제직기','content':'내용','author':'작성자'}).to_html(index=False, border=1)
         else:
             st.info("기록 없음")
             html_content += "<p>기록 없음</p>"
+            st.info("작성내역 없음")
+            html_content += "<p>작성내역 없음</p>"
             
         st.markdown("##### 📝 야간근무자 전달사항")
         d_note = notes_data.get('day_to_night_notes', '-')
@@ -695,11 +729,19 @@ def render_weaving(db):
         if night_logs:
             df_night = pd.DataFrame(night_logs)
             df_night['log_time'] = df_night['log_time'].apply(lambda x: x.strftime('%H:%M') if hasattr(x, 'strftime') else str(x)[11:16])
-            st.dataframe(df_night[['log_time', 'machine_no', 'content', 'author']].rename(columns={'log_time':'시간','machine_no':'호기','content':'내용','author':'작성자'}), hide_index=True, width="stretch")
-            html_content += df_night[['log_time', 'machine_no', 'content', 'author']].rename(columns={'log_time':'시간','machine_no':'호기','content':'내용','author':'작성자'}).to_html(index=False, border=1)
+            # [수정] 컬럼명 변경 (호기 -> 제직기)
+            st.dataframe(
+                df_night[['log_time', 'machine_no', 'content', 'author']].rename(columns={'log_time':'시간','machine_no':'제직기','content':'내용','author':'작성자'}), 
+                hide_index=True, 
+                use_container_width=True,
+                column_config={"시간": st.column_config.TextColumn(width=60), "제직기": st.column_config.TextColumn(width=80), "내용": st.column_config.TextColumn(width="large"), "작성자": st.column_config.TextColumn(width=80)}
+            )
+            html_content += df_night[['log_time', 'machine_no', 'content', 'author']].rename(columns={'log_time':'시간','machine_no':'제직기','content':'내용','author':'작성자'}).to_html(index=False, border=1)
         else:
             st.info("기록 없음")
             html_content += "<p>기록 없음</p>"
+            st.info("작성내역 없음")
+            html_content += "<p>작성내역 없음</p>"
 
         st.markdown("##### 📝 주간근무자 전달사항")
         n_note = notes_data.get('night_to_day_notes', '-')

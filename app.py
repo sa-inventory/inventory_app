@@ -136,10 +136,16 @@ with st.sidebar:
             st.rerun()
 
         st.subheader("메뉴 선택")
+        
+        # [NEW] 발주서접수 독립 배치
+        if st.button("📑 발주서접수", use_container_width=True):
+            st.session_state["current_menu"] = "발주서접수"
+            st.rerun()
+            
+        # [수정] 구분선 간격 조정을 위해 HTML hr 태그 사용
+        st.markdown("<hr style='margin-top: 0.5rem; margin-bottom: 1rem;'>", unsafe_allow_html=True)
+
         with st.expander("🏭 생산관리", expanded=True):
-            if st.button(" 발주서접수", use_container_width=True):
-                st.session_state["current_menu"] = "발주서접수"
-                st.rerun()
             if st.button("📊 발주현황", use_container_width=True):
                 st.session_state["current_menu"] = "발주현황"
                 st.rerun()

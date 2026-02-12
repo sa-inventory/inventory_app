@@ -1581,7 +1581,12 @@ def render_machines(db):
         st.subheader("제직기 등록 및 수정")
         st.info("호기 번호가 같으면 기존 정보가 수정(덮어쓰기)됩니다.")
         
-        with st.form("add_machine_form_new"):
+        # [NEW] 저장 성공 메시지
+        if st.session_state.get("machine_reg_success"):
+            st.success("✅ 제직기 정보가 저장되었습니다.")
+            st.session_state["machine_reg_success"] = False
+
+        with st.form("add_machine_form_new", clear_on_submit=True):
             c1, c2 = st.columns(2)
             new_no = c1.number_input("호기 번호 (No.)", min_value=1, step=1, help="정렬 순서 및 고유 ID로 사용됩니다.")
             new_name = c2.text_input("제직기 명칭", placeholder="예: 1호대")
@@ -1600,7 +1605,7 @@ def render_machines(db):
                     "jacquard_type": new_jacquard,
                     "note": new_note
                 })
-                st.success("저장되었습니다.")
+                st.session_state["machine_reg_success"] = True
                 st.rerun()
 
     with tab_list:

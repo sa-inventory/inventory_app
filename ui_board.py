@@ -33,6 +33,21 @@ def render_notice_board(db):
     except Exception:
         pass # 인덱스 오류 등 예외 발생 시 무시 (최초 실행 시 발생 가능)
 
+    # [NEW] 작성 중 상태 확인 (리런 시 닫힘 방지)
+    is_writing = (
+        st.session_state.get("np_title") or 
+        st.session_state.get("np_content") or 
+        st.session_state.get("np_file")
+    )
+
+    # [NEW] 공지사항 작성 폼 열림/닫힘 상태 관리
+    if "notice_expander_state" not in st.session_state:
+        st.session_state["notice_expander_state"] = False
+    
+    # 작성 중이면 열어두기 (등록 직후에는 is_writing이 False가 됨)
+    if is_writing:
+        st.session_state["notice_expander_state"] = True
+
     # [NEW] 화면 모드 초기화
     if "notice_view_mode" not in st.session_state:
         st.session_state["notice_view_mode"] = "list"
@@ -53,7 +68,8 @@ def render_notice_board(db):
 
     # 공지사항 작성 (접기/펼치기)
     if view_mode == "list":
-        with st.expander("✏️ 새 공지사항 작성"):
+        # [수정] expanded 상태를 세션 변수로 제어
+        with st.expander("✏️ 새 공지사항 작성", expanded=st.session_state["notice_expander_state"]):
             # [수정] st.form 제거하여 동적 UI(기간 설정) 즉시 반응하도록 변경
             title = st.text_input("제목", key="np_title")
             content = st.text_area("내용", height=100, key="np_content")
@@ -132,6 +148,8 @@ def render_notice_board(db):
                         if k in st.session_state:
                             del st.session_state[k]
                     
+                    # [NEW] 등록 후 폼 닫기
+                    st.session_state["notice_expander_state"] = False
                     st.rerun()
                 else:
                     st.warning("제목과 내용을 입력하세요.")
@@ -222,7 +240,8 @@ def render_notice_board(db):
                 column_config={
                     "id": None, "is_important": None,
                     "제목": st.column_config.TextColumn("제목", width="large"),
-                    "첨부": st.column_config.TextColumn("첨부", width=50, help="첨부파일 유무"),
+                    # [수정] 첨부 컬럼 너비 축소
+                    "첨부": st.column_config.TextColumn("첨부", width="small", help="첨부파일 유무"),
                     "작성자": st.column_config.TextColumn("작성자", width="small", help="작성자"),
                     "게시일자": st.column_config.TextColumn("게시일자", width="small", help="게시 시작일"),
                     "게시종료일": st.column_config.TextColumn("게시종료일", width="small", help="게시가 종료되는 날짜"),
@@ -245,6 +264,7 @@ def render_notice_board(db):
                 st.session_state["notice_view_mode"] = "list"
                 st.session_state["selected_post_id"] = None
                 st.session_state["notice_list_key"] += 1
+                st.session_state["notice_expander_state"] = False # [수정] 목록 복귀 시 작성 폼 닫기
                 st.query_params.clear()
                 st.rerun()
 
@@ -661,8 +681,19 @@ def render_schedule(db):
                 
                 # [수정] 작성자 본인 또는 관리자만 삭제 가능
                 if current_user_name == author_str or current_role == 'admin':
-                    if col2.button("삭제", key=f"del_sch_cal_{sch['id']}"):
-                        db.collection("schedules").document(sch['id']).delete()
-                        st.rerun()
+                    # [NEW] 삭제 확인 로직
+                    del_key = f"confirm_del_{sch['id']}"
+                    if st.session_state.get(del_key):
+                        if col2.button("✅", key=f"yes_{sch['id']}", help="삭제 확인"):
+                            db.collection("schedules").document(sch['id']).delete()
+                            del st.session_state[del_key]
+                            st.rerun()
+                        if col2.button("❌", key=f"no_{sch['id']}", help="취소"):
+                            del st.session_state[del_key]
+                            st.rerun()
+                    else:
+                        if col2.button("삭제", key=f"del_sch_cal_{sch['id']}"):
+                            st.session_state[del_key] = True
+                            st.rerun()
         else:
             st.info("📅 등록된 일정이 없습니다.")

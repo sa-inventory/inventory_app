@@ -125,6 +125,11 @@ with st.sidebar:
         # [NEW] 공지사항 버튼 독립 배치
         if st.button("📢 공지사항", use_container_width=True):
             st.session_state["current_menu"] = "공지사항"
+            # [NEW] 공지사항 목록 뷰 초기화
+            st.session_state["notice_view_mode"] = "list"
+            st.session_state["selected_post_id"] = None
+            st.session_state["notice_expander_state"] = False # [수정] 작성 폼 닫기
+            st.query_params.clear() # [수정] URL 파라미터 초기화 (상세보기 해제)
             st.rerun()
         if st.button("📅 업무일정", use_container_width=True):
             st.session_state["current_menu"] = "업무일정"

@@ -247,6 +247,10 @@ def render_shipping_status(db):
             if 'shipping_date' in df.columns:
                 df['shipping_date'] = df['shipping_date'].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isnull(x) and hasattr(x, 'strftime') else x)
 
+            # [NEW] 운임비 숫자형 변환 (안전장치)
+            if 'shipping_cost' in df.columns:
+                df['shipping_cost'] = pd.to_numeric(df['shipping_cost'], errors='coerce').fillna(0).astype(int)
+
             # [NEW] 공급가액 계산 (단가 * 수량)
             df['supply_amount'] = df.apply(lambda x: int(x.get('stock', 0)) * int(x.get('shipping_unit_price', 0)), axis=1)
 
@@ -276,7 +280,8 @@ def render_shipping_status(db):
                 sel_rows = df.iloc[sel_indices]
                 sum_qty = sel_rows['stock'].sum()
                 sum_amt = sel_rows['supply_amount'].sum()
-                st.info(f"📊 선택 항목 합계: 수량 **{sum_qty:,}** / 공급가액 **{sum_amt:,}원**")
+                sum_cost = sel_rows['shipping_cost'].sum()
+                st.info(f"📊 선택 항목 합계: 수량 **{sum_qty:,}** / 공급가액 **{sum_amt:,}원** / 운임비 **{sum_cost:,}원**")
             
             st.divider()
             
@@ -314,7 +319,21 @@ def render_shipping_status(db):
                 # 목록 인쇄
                 if lc2.button("🖨️ 목록 인쇄"):
                     print_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-                    print_df = df[final_cols].rename(columns=col_map)
+                    
+                    # [수정] 선택된 항목이 있으면 해당 항목만, 없으면 전체 목록 인쇄
+                    if selection.selection.rows:
+                        target_df = df.iloc[selection.selection.rows]
+                        print_title = f"{lp_title} (선택 항목)"
+                    else:
+                        target_df = df
+                        print_title = lp_title
+
+                    # 합계 계산
+                    total_qty = target_df['stock'].sum() if 'stock' in target_df.columns else 0
+                    total_amt = target_df['supply_amount'].sum() if 'supply_amount' in target_df.columns else 0
+                    total_cost = target_df['shipping_cost'].sum() if 'shipping_cost' in target_df.columns else 0
+                    
+                    print_df = target_df[final_cols].rename(columns=col_map)
                     
                     # 제외 컬럼 필터링
                     if lp_exclude_cols:
@@ -330,9 +349,10 @@ def render_shipping_status(db):
                             body {{ font-family: 'Malgun Gothic', sans-serif; padding: 0; margin: 0; }}
                             h2 {{ text-align: center; margin-bottom: 5px; font-size: {lp_title_size}px; }}
                             .info {{ text-align: right; font-size: 10px; margin-bottom: 10px; color: #555; }}
-                            table {{ width: 100%; border-collapse: collapse; font-size: {lp_body_size}px; }}
+                            table {{ width: 100%; border-collapse: collapse; font-size: {lp_body_size}px; margin-bottom: 10px; }}
                             th, td {{ border: 1px solid #444; padding: {lp_padding}px; text-align: center; }}
                             th {{ background-color: #f0f0f0; }}
+                            .summary {{ text-align: right; font-weight: bold; font-size: {lp_body_size + 2}px; margin-top: 10px; border-top: 2px solid #444; padding-top: 5px; }}
                             @media screen {{ body {{ display: none; }} }}
                         </style>
                     </head>
@@ -340,6 +360,9 @@ def render_shipping_status(db):
                         <h2>{lp_title}</h2>
                         <div class="info">출력일시: {print_now}</div>
                         {print_df.to_html(index=False)}
+                        <div class="summary">
+                            합계 - 수량: {total_qty:,} / 공급가액: {total_amt:,}원 / 운임비: {total_cost:,}원
+                        </div>
                     </body>
                     </html>
                     """

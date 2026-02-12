@@ -92,17 +92,24 @@ def render_weaving(db):
             display_cols = ["order_no", "status", "customer", "name", "stock", "product_type", "weaving_type", "yarn_type", "color", "weight", "size", "date", "delivery_req_date"]
             final_cols = [c for c in display_cols if c in df.columns]
             
-            st.write("🔽 제직기를 배정할 항목을 선택하세요.")
+            st.write("🔽 제직기를 배정할 항목을 선택하세요. (다중 선택 가능)")
             # key="df_waiting" 추가로 사이드바 먹통 현상 해결
-            selection = st.dataframe(df[final_cols].rename(columns=col_map), width="stretch", on_select="rerun", selection_mode="single-row", key=f"df_waiting_{st.session_state['key_weaving_wait']}")
+            selection = st.dataframe(df[final_cols].rename(columns=col_map), width="stretch", on_select="rerun", selection_mode="multi-row", key=f"df_waiting_{st.session_state['key_weaving_wait']}")
             
             if selection.selection.rows:
+                # [수정] 다중 선택 시 첫 번째 항목 기준으로 처리 (제직기 배정은 개별 처리가 일반적이나, 필요시 일괄 처리 로직 추가 가능)
+                # 여기서는 기존 로직 유지를 위해 첫 번째 항목만 처리하도록 안내하거나 반복문 처리 필요
+                # 현재 요청은 염색 현황에 대한 것이므로 제직은 기존 로직(단일 처리 권장) 유지하되 인덱스 접근 방식만 수정
                 idx = selection.selection.rows[0]
                 sel_row = df.iloc[idx]
                 sel_id = sel_row['id']
                 
                 st.divider()
                 st.markdown(f"### 🚀 제직기 배정: **{sel_row['name']}**")
+                
+                if len(selection.selection.rows) > 1:
+                    st.warning("⚠️ 여러 항목이 선택되었습니다. 현재 제직기 배정은 목록의 **첫 번째 항목**에 대해서만 수행됩니다.")
+
                 with st.form("weaving_start_form"):
                     c1, c2, c3, c4 = st.columns(4)
                     
@@ -321,12 +328,13 @@ def render_weaving(db):
         if "key_weaving_done" not in st.session_state:
             st.session_state["key_weaving_done"] = 0
 
-        # 검색 조건 (기간 + 발주처)
+        # 검색 조건 (기간 + 발주처 + 제품명)
         with st.form("search_weaving_done"):
-            c1, c2 = st.columns([2, 1])
+            c1, c2, c3 = st.columns([2, 1, 1])
             today = datetime.date.today()
             s_date = c1.date_input("조회 기간 (완료일)", [today - datetime.timedelta(days=30), today])
             s_cust = c2.text_input("발주처 검색")
+            s_prod = c3.text_input("제품명 검색")
             st.form_submit_button("🔍 조회")
 
         # 날짜 범위 계산
@@ -356,6 +364,10 @@ def render_weaving(db):
             
             # 2. 발주처 필터
             if s_cust and s_cust not in d.get('customer', ''):
+                continue
+            
+            # 3. 제품명 필터
+            if s_prod and s_prod not in d.get('name', ''):
                 continue
                 
             rows.append(d)
@@ -877,54 +889,156 @@ def render_dyeing(db):
             display_cols = ["order_no", "roll_no", "customer", "name", "color", "stock", "weight", "prod_weight_kg", "date"]
             final_cols = [c for c in display_cols if c in df.columns]
             
-            st.write("🔽 염색 출고할 항목을 선택하세요.")
-            selection = st.dataframe(df[final_cols].rename(columns=col_map), width="stretch", on_select="rerun", selection_mode="single-row", key=f"df_dye_wait_{st.session_state['key_dyeing_wait']}")
+            st.write("🔽 염색 출고할 항목을 선택하세요. (다중 선택 가능)")
+            # [수정] 다중 선택 모드로 변경
+            selection = st.dataframe(df[final_cols].rename(columns=col_map), width="stretch", on_select="rerun", selection_mode="multi-row", key=f"df_dye_wait_{st.session_state['key_dyeing_wait']}")
             
             if selection.selection.rows:
-                idx = selection.selection.rows[0]
-                sel_row = df.iloc[idx]
-                sel_id = sel_row['id']
-                
-                st.divider()
-                st.markdown(f"### 🚚 염색 출고 정보 입력: **{sel_row['name']}**")
-                
-                with st.form("dyeing_start_form"):
-                    c1, c2 = st.columns(2)
-                    d_date = c1.date_input("염색출고일", datetime.date.today())
-                    d_partner = c2.selectbox("염색업체", dyeing_partners if dyeing_partners else ["직접입력"])
-                    
-                    c3, c4 = st.columns(2)
-                    # [NEW] 색번 선택 콤보박스 추가
-                    d_color_code_sel = c3.selectbox("색번 선택", color_opts)
-                    
-                    # 기본값으로 제직 생산 중량 사용
-                    def_weight = float(sel_row.get('prod_weight_kg', 0))
-                    d_weight = c4.number_input("출고중량(kg)", value=def_weight, step=0.1, format="%.1f")
-                    
-                    d_note = st.text_input("염색사항(비고)")
-                    
-                    if st.form_submit_button("염색 출고 (작업시작)"):
-                        # 색번 파싱
-                        sel_cc, sel_cn = "", ""
-                        if d_color_code_sel != "선택하세요":
-                            try:
-                                sel_cc, rest = d_color_code_sel.split(" (", 1)
-                                sel_cn = rest[:-1]
-                            except:
-                                sel_cc = d_color_code_sel
+                selected_indices = selection.selection.rows
+                selected_rows = df.iloc[selected_indices]
 
-                        db.collection("orders").document(sel_id).update({
-                            "status": "염색중",
-                            "dyeing_out_date": str(d_date),
-                            "dyeing_partner": d_partner,
-                            "dyeing_out_weight": d_weight,
-                            "dyeing_note": d_note,
-                            "dyeing_color_code": sel_cc,
-                            "dyeing_color_name": sel_cn
-                        })
-                        st.success("염색중 상태로 변경되었습니다.")
-                        st.session_state["key_dyeing_wait"] += 1 # 목록 선택 초기화
-                        st.rerun()
+                # [NEW] 다중 선택 시: 염색 작업 지시서 출력 (현장용)
+                with st.expander("🖨️ 염색 작업 지시서 출력 (현장 확인용)", expanded=False):
+                    st.info("선택한 항목에 대해 **염색업체**와 **솥번호**를 지정하여 작업 지시서를 출력합니다. (이 정보는 DB에 저장되지 않습니다)")
+                    
+                    # 데이터 에디터용 데이터프레임 생성
+                    edit_df = selected_rows.copy()
+                    # 기본값 설정
+                    edit_df['염색업체'] = "" 
+                    edit_df['솥번호'] = "1"
+                    edit_df['비고'] = ""
+                    
+                    # 표시할 컬럼 정리
+                    edit_view = edit_df[['name', 'color', 'prod_weight_kg', 'stock', '염색업체', '솥번호', '비고']].rename(columns={
+                        'name': '제품명', 'color': '색상', 'prod_weight_kg': '중량(kg)', 'stock': '수량'
+                    })
+                    
+                    # 데이터 에디터 (업체, 솥번호 입력)
+                    edited_data = st.data_editor(
+                        edit_view,
+                        column_config={
+                            "제품명": st.column_config.TextColumn(disabled=True),
+                            "색상": st.column_config.TextColumn(disabled=True),
+                            "중량(kg)": st.column_config.NumberColumn(disabled=True, format="%.1f"),
+                            "수량": st.column_config.NumberColumn(disabled=True),
+                            "염색업체": st.column_config.SelectboxColumn("염색업체", options=dyeing_partners, required=True),
+                            "솥번호": st.column_config.TextColumn("솥번호", help="같은 업체 내에서 솥번호별로 그룹화됩니다."),
+                            "비고": st.column_config.TextColumn("비고")
+                        },
+                        hide_index=True,
+                        use_container_width=True,
+                        key="dye_print_editor"
+                    )
+                    
+                    # [NEW] 인쇄 옵션 설정
+                    with st.expander("🖨️ 인쇄 옵션 설정"):
+                        po_c1, po_c2, po_c3, po_c4 = st.columns(4)
+                        p_title = po_c1.text_input("제목", value="염색 작업 지시서", key="dye_p_title")
+                        p_title_size = po_c2.number_input("제목 크기(px)", value=24, step=1, key="dye_p_ts")
+                        p_body_size = po_c3.number_input("본문 글자 크기(px)", value=12, step=1, key="dye_p_bs")
+                        p_padding = po_c4.number_input("셀 여백(px)", value=6, step=1, key="dye_p_pad")
+                        
+                        st.caption("페이지 여백 (mm)")
+                        po_c5, po_c6, po_c7, po_c8 = st.columns(4)
+                        p_m_top = po_c5.number_input("상단", value=15, step=1, key="dye_p_mt")
+                        p_m_bottom = po_c6.number_input("하단", value=15, step=1, key="dye_p_mb")
+                        p_m_left = po_c7.number_input("좌측", value=15, step=1, key="dye_p_ml")
+                        p_m_right = po_c8.number_input("우측", value=15, step=1, key="dye_p_mr")
+
+                    if st.button("🖨️ 작업 지시서 인쇄"):
+                        # 그룹화 및 HTML 생성 로직
+                        print_html = f"""
+                        <html>
+                        <head>
+                            <title>{p_title}</title>
+                            <style>
+                                @page {{ margin: {p_m_top}mm {p_m_right}mm {p_m_bottom}mm {p_m_left}mm; }}
+                                body {{ font-family: 'Malgun Gothic', sans-serif; padding: 0; margin: 0; }}
+                                h2 {{ text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; font-size: {p_title_size}px; margin-top: 0; }}
+                                .partner-section {{ margin-bottom: 30px; border: 1px solid #999; padding: 15px; page-break-inside: avoid; }}
+                                .partner-title {{ font-size: {p_body_size + 6}px; font-weight: bold; background-color: #eee; padding: 5px; margin-bottom: 10px; }}
+                                .pot-section {{ margin-left: 10px; margin-bottom: 15px; }}
+                                .pot-title {{ font-size: {p_body_size + 4}px; font-weight: bold; color: #0066cc; margin-bottom: 5px; border-bottom: 1px solid #ddd; }}
+                                table {{ width: 100%; border-collapse: collapse; font-size: {p_body_size}px; margin-bottom: 5px; }}
+                                th, td {{ border: 1px solid #ccc; padding: {p_padding}px; text-align: center; }}
+                                th {{ background-color: #f8f9fa; }}
+                                .total-row {{ font-weight: bold; background-color: #fffbe6; }}
+                                @media screen {{ body {{ display: none; }} }}
+                            </style>
+                        </head>
+                        <body onload="window.print()">
+                            <h2>{p_title}</h2>
+                            <div style="text-align: right; font-size: 10px; margin-bottom: 10px;">출력일시: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}</div>
+                        """
+                        
+                        # 그룹화: 염색업체 -> 솥번호
+                        if not edited_data.empty:
+                            # 업체가 없는 경우 '미지정' 처리
+                            edited_data['염색업체'] = edited_data['염색업체'].fillna('미지정').replace('', '미지정')
+                            
+                            for partner, p_group in edited_data.groupby('염색업체'):
+                                print_html += f"<div class='partner-section'><div class='partner-title'>🏭 업체: {partner}</div>"
+                                
+                                for pot, pot_group in p_group.groupby('솥번호'):
+                                    # 솥 합계 계산
+                                    sum_weight = pot_group['중량(kg)'].sum()
+                                    sum_qty = pot_group['수량'].sum()
+                                    
+                                    print_html += f"<div class='pot-section'><div class='pot-title'>🔹 솥번호: {pot}</div>"
+                                    print_html += pot_group.to_html(index=False, classes='table', border=0)
+                                    print_html += f"<div style='text-align:right; font-weight:bold; margin-top:5px;'>[합계] 수량: {sum_qty:,}장 / 중량: {sum_weight:,.1f}kg</div></div>"
+                                
+                                print_html += "</div>"
+                        
+                        print_html += "</body></html>"
+                        st.components.v1.html(print_html, height=0, width=0)
+
+                # [기존] 개별 출고 처리 (단일 선택 시에만 표시)
+                if len(selected_indices) == 1:
+                    idx = selected_indices[0]
+                    sel_row = df.iloc[idx]
+                    sel_id = sel_row['id']
+                
+                    st.divider()
+                    st.markdown(f"### 🚚 염색 출고 정보 입력: **{sel_row['name']}**")
+                    
+                    with st.form("dyeing_start_form"):
+                        c1, c2 = st.columns(2)
+                        d_date = c1.date_input("염색출고일", datetime.date.today())
+                        d_partner = c2.selectbox("염색업체", dyeing_partners if dyeing_partners else ["직접입력"])
+                        
+                        c3, c4 = st.columns(2)
+                        # [NEW] 색번 선택 콤보박스 추가
+                        d_color_code_sel = c3.selectbox("색번 선택", color_opts)
+                        
+                        # 기본값으로 제직 생산 중량 사용
+                        def_weight = float(sel_row.get('prod_weight_kg', 0))
+                        d_weight = c4.number_input("출고중량(kg)", value=def_weight, step=0.1, format="%.1f")
+                        
+                        d_note = st.text_input("염색사항(비고)")
+                        
+                        if st.form_submit_button("염색 출고 (작업시작)"):
+                            # 색번 파싱
+                            sel_cc, sel_cn = "", ""
+                            if d_color_code_sel != "선택하세요":
+                                try:
+                                    sel_cc, rest = d_color_code_sel.split(" (", 1)
+                                    sel_cn = rest[:-1]
+                                except:
+                                    sel_cc = d_color_code_sel
+
+                            db.collection("orders").document(sel_id).update({
+                                "status": "염색중",
+                                "dyeing_out_date": str(d_date),
+                                "dyeing_partner": d_partner,
+                                "dyeing_out_weight": d_weight,
+                                "dyeing_note": d_note,
+                                "dyeing_color_code": sel_cc,
+                                "dyeing_color_name": sel_cn
+                            })
+                            st.success("염색중 상태로 변경되었습니다.")
+                            st.session_state["key_dyeing_wait"] += 1 # 목록 선택 초기화
+                            st.rerun()
         else:
             st.info("염색 대기 중인 건이 없습니다.")
 

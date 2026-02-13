@@ -40,7 +40,8 @@ def render_weaving(db):
                 m = machines_data[i+j]
                 m_no = str(m['machine_no'])
                 m_name = m['name']
-                m_desc = f"{m.get('model','')}\n{m.get('note','')}".strip()
+                # [수정] 모델명 제거하고 비고만 표시
+                m_desc = m.get('note', '').strip()
                 
                 with cols[j]:
                     if m_no in busy_machines:
@@ -48,7 +49,8 @@ def render_weaving(db):
                         roll_cnt = item.get('weaving_roll_count', 0)
                         # 진행률 표시
                         cur_roll = item.get('completed_rolls', 0) + 1
-                        st.error(f"**{m_name}**\n\n{item.get('name')}\n({cur_roll}/{roll_cnt}롤) / {int(item.get('stock', 0)):,}장")
+                        # [수정] 발주처 표시 추가 (발주처 / 품명 / 롤정보 / 수량)
+                        st.error(f"**{m_name}**\n\n{item.get('customer', '')}  \n{item.get('name')} ({cur_roll}/{roll_cnt}롤) / {int(item.get('stock', 0)):,}장")
                     else:
                         st.success(f"**{m_name}**\n\n대기중\n\n{m_desc}")
     

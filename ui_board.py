@@ -156,16 +156,48 @@ def render_notice_board(db):
 
         st.divider()
 
-    # 공지사항 목록 조회 (최신순 30개)
-    posts_ref = db.collection("posts").order_by("created_at", direction=firestore.Query.DESCENDING).limit(30)
-    posts = list(posts_ref.stream())
+    # [NEW] 검색 필터 세션 초기화
+    if "n_search_author" not in st.session_state: st.session_state["n_search_author"] = ""
+    if "n_search_keyword" not in st.session_state: st.session_state["n_search_keyword"] = ""
+    if "notice_page" not in st.session_state: st.session_state["notice_page"] = 1
+
+    # [NEW] 검색 UI
+    with st.expander("🔍 공지사항 검색", expanded=True):
+        c1, c2, c3, c4 = st.columns([1, 1, 0.3, 0.3])
+        s_author = c1.text_input("작성자", value=st.session_state["n_search_author"])
+        s_keyword = c2.text_input("제목+내용", value=st.session_state["n_search_keyword"])
+        
+        if c3.button("검색", type="primary", use_container_width=True, help="조건에 맞는 공지사항을 검색합니다."):
+            st.session_state["n_search_author"] = s_author
+            st.session_state["n_search_keyword"] = s_keyword
+            st.session_state["notice_page"] = 1 # 검색 시 1페이지로 초기화
+            st.session_state["notice_list_key"] += 1
+            st.rerun()
+            
+        if c4.button("전체조회", use_container_width=True, help="검색 조건을 초기화하고 전체 목록을 조회합니다."):
+            st.session_state["n_search_author"] = ""
+            st.session_state["n_search_keyword"] = ""
+            st.session_state["notice_page"] = 1
+            st.session_state["notice_list_key"] += 1
+            st.session_state["notice_view_mode"] = "list"
+            st.session_state["selected_post_id"] = None
+            st.query_params.clear()
+            st.rerun()
+
+    # 공지사항 목록 조회 (검색을 위해 전체 조회 후 필터링)
+    posts_ref = db.collection("posts").order_by("created_at", direction=firestore.Query.DESCENDING)
+    all_docs = list(posts_ref.stream())
     
-    if posts:
+    if all_docs:
         visible_posts = []
         
-        for p in posts:
-            p_data = p.to_dict()
-            p_data['id'] = p.id
+        # 검색 조건 준비
+        f_author = st.session_state["n_search_author"]
+        f_keyword = st.session_state["n_search_keyword"]
+        
+        for doc in all_docs:
+            p_data = doc.to_dict()
+            p_data['id'] = doc.id
             
             # [NEW] 권한 체크: 내가 볼 수 있는 글인가?
             # 1. 전체공지
@@ -189,29 +221,46 @@ def render_notice_board(db):
                         is_visible = True
                         break
             
-            if is_visible:
-                visible_posts.append(p_data)
+            if not is_visible: continue
+            
+            # [NEW] 검색 필터 적용
+            
+            # 2. 작성자
+            if f_author and f_author not in p_data.get('author', ''): continue
+            
+            # 3. 키워드 (제목+내용)
+            if f_keyword:
+                txt = f"{p_data.get('title', '')} {p_data.get('content', '')}"
+                if f_keyword not in txt: continue
+
+            visible_posts.append(p_data)
         
         # 필독/일반 정렬 (중요한 것 우선, 그 다음 최신순)
         visible_posts.sort(key=lambda x: (x.get('is_important', False), x.get('created_at', datetime.datetime.min)), reverse=True)
         
-        if view_mode == "list":
-            st.markdown("### 📋 공지 목록")
-            st.caption("목록의 행 아무 곳이나 클릭하면 상세 화면으로 이동합니다.")
-            
-            # [수정] 데이터프레임으로 목록 표시
+        # [NEW] 페이징 처리
+        items_per_page = 10
+        total_items = len(visible_posts)
+        total_pages = max(1, (total_items + items_per_page - 1) // items_per_page)
+        
+        if st.session_state["notice_page"] > total_pages: st.session_state["notice_page"] = total_pages
+        if st.session_state["notice_page"] < 1: st.session_state["notice_page"] = 1
+        
+        curr_page = st.session_state["notice_page"]
+        start_idx = (curr_page - 1) * items_per_page
+        end_idx = start_idx + items_per_page
+        
+        page_posts = visible_posts[start_idx:end_idx]
+
+        # 목록 렌더링 함수 (재사용)
+        def render_notice_list(posts, current_selected_id=None):
             df_rows = []
-            for p in visible_posts:
+            for p in posts:
                 is_imp = p.get('is_important', False)
                 title_display = p['title']
-                
-                # [NEW] 아이콘 컬럼 데이터 생성
-                # 첨부파일: 디스켓(💾) 아이콘
                 file_icon = "💾" if p.get('file_name') else ""
-                
                 created_at = p.get('created_at')
                 date_str = created_at.strftime("%Y-%m-%d") if created_at else ""
-                
                 exp_date = p.get('expiration_date')
                 exp_str = exp_date.strftime("%Y-%m-%d") if exp_date else "영구"
                 
@@ -234,8 +283,8 @@ def render_notice_board(db):
                 return [''] * len(row)
             
             styled_df = df.style.apply(highlight_important_row, axis=1)
-
-            selection = st.dataframe(
+            
+            return st.dataframe(
                 styled_df,
                 column_config={
                     "id": None, "is_important": None,
@@ -251,12 +300,34 @@ def render_notice_board(db):
                 selection_mode="single-row", height=600, 
                 key=f"notice_board_list_table_{st.session_state['notice_list_key']}"
             )
+
+        # 페이징 컨트롤 렌더링 함수
+        def render_pagination_controls():
+            col_prev, col_info, col_next = st.columns([1.2, 5, 1.2])
+            with col_prev:
+                if st.button("◀ 이전 페이지", disabled=(curr_page == 1), key="btn_prev_page", use_container_width=True):
+                    st.session_state["notice_page"] -= 1
+                    st.session_state["notice_list_key"] += 1
+                    st.rerun()
+            with col_info:
+                st.markdown(f"<div style='text-align: center; line-height: 35px;'>Page {curr_page} / {total_pages}</div>", unsafe_allow_html=True)
+            with col_next:
+                if st.button("다음 페이지 ▶", disabled=(curr_page == total_pages), key="btn_next_page", use_container_width=True):
+                    st.session_state["notice_page"] += 1
+                    st.session_state["notice_list_key"] += 1
+                    st.rerun()
+
+        if view_mode == "list":
+            st.markdown("### 📋 공지사항 목록")
+            
+            selection = render_notice_list(page_posts)
+            render_pagination_controls()
             
             if selection.selection.rows:
                 idx = selection.selection.rows[0]
-                st.session_state["selected_post_id"] = df.iloc[idx]['id']
+                st.session_state["selected_post_id"] = page_posts[idx]['id']
                 st.session_state["notice_view_mode"] = "detail"
-                st.query_params["notice_id"] = df.iloc[idx]['id']
+                st.query_params["notice_id"] = page_posts[idx]['id']
                 st.rerun()
         
         else: # Detail View
@@ -416,26 +487,40 @@ def render_notice_board(db):
                     # 수정/삭제 버튼 (본인 또는 관리자만)
                     if current_role == "admin" or current_user_id == post.get("author_id"):
                         st.divider()
-                        c_edit, c_del = st.columns([1, 10])
+                        c_space, c_edit, c_del = st.columns([8, 1, 1])
                         with c_edit:
-                            if st.button("수정", key=f"edit_btn_{post['id']}"):
+                            if st.button("수정", key=f"edit_btn_{post['id']}", use_container_width=True):
                                 st.session_state["edit_post_id"] = post['id']
                                 st.rerun()
                         with c_del:
-                            if st.button("삭제", key=f"del_post_{post['id']}"):
+                            if st.button("삭제", key=f"del_post_{post['id']}", use_container_width=True):
                                 db.collection("posts").document(post['id']).delete()
                                 st.session_state["notice_view_mode"] = "list"
                                 st.session_state["selected_post_id"] = None
                                 st.session_state["notice_list_key"] += 1
                                 st.query_params.clear()
                                 st.rerun()
-            else:
-                st.error("게시물을 찾을 수 없습니다.")
-                if st.button("목록으로"):
-                    st.session_state["notice_view_mode"] = "list"
-                    st.session_state["selected_post_id"] = None
-                    st.query_params.clear()
+            
+            # [NEW] 상세 화면 하단에 목록 표시
+            st.divider()
+            st.markdown("### 📋 공지사항 목록")
+            
+            selection = render_notice_list(page_posts, current_selected_id=selected_id)
+            render_pagination_controls()
+            
+            if selection.selection.rows:
+                idx = selection.selection.rows[0]
+                new_id = page_posts[idx]['id']
+                if new_id != selected_id:
+                    st.session_state["selected_post_id"] = new_id
+                    st.query_params["notice_id"] = new_id
                     st.rerun()
+            else:
+                # [수정] 선택 해제 시 목록으로 돌아가기
+                st.session_state["notice_view_mode"] = "list"
+                st.session_state["selected_post_id"] = None
+                st.query_params.clear()
+                st.rerun()
     else:
         st.info("등록된 공지사항이 없습니다.")
 

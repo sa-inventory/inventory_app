@@ -258,7 +258,9 @@ def render_notice_board(db):
             for p in posts:
                 is_imp = p.get('is_important', False)
                 title_display = p['title']
-                file_icon = "💾" if p.get('file_name') else ""
+                if p.get('file_name'):
+                    title_display = f"{title_display} [💾첨부파일]"
+                
                 created_at = p.get('created_at')
                 date_str = created_at.strftime("%Y-%m-%d") if created_at else ""
                 exp_date = p.get('expiration_date')
@@ -267,7 +269,6 @@ def render_notice_board(db):
                 df_rows.append({
                     "id": p['id'],
                     "제목": title_display,
-                    "첨부": file_icon,
                     "게시일자": date_str,
                     "작성자": p.get('author', ''),
                     "게시종료일": exp_str,
@@ -279,7 +280,7 @@ def render_notice_board(db):
             # 스타일 적용 (중요 게시물 파란색 + 굵은 글씨)
             def highlight_important_row(row):
                 if row['is_important']:
-                    return ['color: blue; font-weight: bold;'] * len(row)
+                    return ['color: red; font-weight: bold;'] * len(row)
                 return [''] * len(row)
             
             styled_df = df.style.apply(highlight_important_row, axis=1)
@@ -288,14 +289,12 @@ def render_notice_board(db):
                 styled_df,
                 column_config={
                     "id": None, "is_important": None,
-                    "제목": st.column_config.TextColumn("제목", width="large"),
-                    # [수정] 첨부 컬럼 너비 축소
-                    "첨부": st.column_config.TextColumn("첨부", width="small", help="첨부파일 유무"),
-                    "작성자": st.column_config.TextColumn("작성자", width="small", help="작성자"),
-                    "게시일자": st.column_config.TextColumn("게시일자", width="small", help="게시 시작일"),
-                    "게시종료일": st.column_config.TextColumn("게시종료일", width="small", help="게시가 종료되는 날짜"),
+                    "제목": st.column_config.TextColumn("제목", width=600),
+                    "작성자": st.column_config.TextColumn("작성자", width=80, help="작성자"),
+                    "게시일자": st.column_config.TextColumn("게시일자", width=100, help="게시 시작일"),
+                    "게시종료일": st.column_config.TextColumn("게시종료일", width=100, help="게시가 종료되는 날짜"),
                 },
-                column_order=["제목", "첨부", "작성자", "게시일자", "게시종료일"],
+                column_order=["제목", "작성자", "게시일자", "게시종료일"],
                 width="stretch", hide_index=True, on_select="rerun",
                 selection_mode="single-row", height=600, 
                 key=f"notice_board_list_table_{st.session_state['notice_list_key']}"

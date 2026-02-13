@@ -205,21 +205,25 @@ def render_notice_board(db):
             # 3. 관리자
             # 4. 나에게 온 공지 (대상선택)
             
-            t_type = p_data.get('target_type', '전체공지')
+            t_type = p_data.get('target_type')
             t_val = p_data.get('target_value')
             author_id = p_data.get('author_id')
             
             is_visible = False
-            if t_type == "전체공지":
+            
+            # 1. 관리자나 작성자는 무조건 봄
+            if current_role == "admin" or author_id == current_user_id:
                 is_visible = True
-            elif current_role == "admin" or author_id == current_user_id:
+            # 2. 대상선택인 경우 본인 포함 여부 확인
+            elif t_type == "대상선택":
+                if isinstance(t_val, list):
+                    for target in t_val:
+                        if target.startswith(f"{current_user_id} ("):
+                            is_visible = True
+                            break
+            # 3. 그 외(전체공지, None, 빈값 등)는 모두 전체 공개로 간주
+            else:
                 is_visible = True
-            elif t_type == "대상선택" and isinstance(t_val, list):
-                # "아이디 (이름)" 형식에서 아이디가 포함되어 있는지 확인
-                for target in t_val:
-                    if target.startswith(f"{current_user_id} ("):
-                        is_visible = True
-                        break
             
             if not is_visible: continue
             

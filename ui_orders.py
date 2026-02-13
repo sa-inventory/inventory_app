@@ -65,7 +65,7 @@ def render_order_entry(db):
         final_cols = [c for c in display_cols if c in df_products.columns]
 
         # 검색 필터 추가
-        with st.expander("🔍 제품 검색 필터", expanded=True):
+        with st.expander("🔍 제품 검색조건", expanded=True):
             f1, f2, f3, f4 = st.columns(4)
             
             # 필터 옵션 생성 (전체 + 고유값)
@@ -78,8 +78,8 @@ def render_order_entry(db):
             
             s_type = f1.selectbox("제품종류", get_options("product_type"), key="filter_pt")
             s_yarn = f2.selectbox("사종", get_options("yarn_type"), key="filter_yt")
-            s_weight = f3.selectbox("중량", get_options("weight"), key="filter_wt")
-            s_size = f4.selectbox("사이즈", get_options("size"), key="filter_sz")
+            s_weight = f3.selectbox("중량(g)", get_options("weight"), key="filter_wt")
+            s_size = f4.selectbox("사이즈(폭*길이)", get_options("size"), key="filter_sz")
 
         # 필터링 적용
         df_filtered = df_products.copy()

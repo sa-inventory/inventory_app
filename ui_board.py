@@ -69,7 +69,7 @@ def render_notice_board(db):
     # 공지사항 작성 (접기/펼치기)
     if view_mode == "list":
         # [수정] expanded 상태를 세션 변수로 제어
-        with st.expander("✏️ 새 공지사항 작성", expanded=st.session_state["notice_expander_state"]):
+        with st.expander("✏️ 새로운 공지사항 작성하기", expanded=st.session_state["notice_expander_state"]):
             # [수정] st.form 제거하여 동적 UI(기간 설정) 즉시 반응하도록 변경
             title = st.text_input("제목", key="np_title")
             content = st.text_area("내용", height=100, key="np_content")
@@ -530,16 +530,52 @@ def render_schedule(db):
     current_role = st.session_state.get("role", "user")
 
     # 1. 달력 컨트롤 (년/월 선택)
-    c1, c2, c3 = st.columns([1, 1, 4])
     today = datetime.date.today()
     
     if "cal_year" not in st.session_state: st.session_state["cal_year"] = today.year
     if "cal_month" not in st.session_state: st.session_state["cal_month"] = today.month
     
+    # [수정] 기존 레이아웃(좌측 정렬) 복원 및 삼각형 버튼 적용
+    # [수정] 컨트롤 영역 너비를 줄여서(1.2 -> 1) 더 컴팩트하게 조정
+    c1, c2, c3 = st.columns([1, 1, 5])
+    
     with c1:
-        sel_year = st.number_input("년도", value=st.session_state["cal_year"], step=1, key="input_cal_year")
+        # 년도: [◀] [YYYY년] [▶]
+        yc1, yc2, yc3 = st.columns([0.25, 0.5, 0.25])
+        with yc1:
+            # [수정] use_container_width=True 제거하여 버튼 크기 최소화
+            if st.button("◀", key="btn_prev_year"):
+                st.session_state["cal_year"] -= 1
+                st.rerun()
+        with yc2:
+            st.markdown(f"<div style='text-align: center; line-height: 2.3rem; font-weight: bold;'>{st.session_state['cal_year']}년</div>", unsafe_allow_html=True)
+        with yc3:
+            if st.button("▶", key="btn_next_year"):
+                st.session_state["cal_year"] += 1
+                st.rerun()
+
     with c2:
-        sel_month = st.number_input("월", min_value=1, max_value=12, value=st.session_state["cal_month"], step=1, key="input_cal_month")
+        # 월: [◀] [MM월] [▶]
+        mc1, mc2, mc3 = st.columns([0.25, 0.5, 0.25])
+        with mc1:
+            if st.button("◀", key="btn_prev_month"):
+                st.session_state["cal_month"] -= 1
+                if st.session_state["cal_month"] < 1:
+                    st.session_state["cal_month"] = 12
+                    st.session_state["cal_year"] -= 1
+                st.rerun()
+        with mc2:
+            st.markdown(f"<div style='text-align: center; line-height: 2.3rem; font-weight: bold;'>{st.session_state['cal_month']}월</div>", unsafe_allow_html=True)
+        with mc3:
+            if st.button("▶", key="btn_next_month"):
+                st.session_state["cal_month"] += 1
+                if st.session_state["cal_month"] > 12:
+                    st.session_state["cal_month"] = 1
+                    st.session_state["cal_year"] += 1
+                st.rerun()
+
+    sel_year = st.session_state["cal_year"]
+    sel_month = st.session_state["cal_month"]
         
     # 2. 일정 데이터 조회
     # 해당 월의 시작일과 종료일 계산
@@ -707,7 +743,7 @@ def render_schedule(db):
     c_add, c_list = st.columns([1, 2])
     
     with c_add:
-        st.subheader("➕ 일정 등록")
+        st.subheader("➕ 일정 등록하기")
         # [수정] st.form 제거 (라디오 버튼 즉시 반응을 위해)
         s_date = st.date_input("날짜", datetime.date(sel_year, sel_month, today.day))
         
@@ -739,7 +775,7 @@ def render_schedule(db):
                 st.warning("내용을 입력하세요.")
 
     with c_list:
-        st.subheader(f"📋 {sel_month}월 일정 목록 (삭제)")
+        st.subheader(f"📋 {sel_month}월 일정 목록")
         # 현재 달력에 표시된 일정 목록 표시
         month_schedules = []
         for day in sorted(schedule_map.keys()):

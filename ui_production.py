@@ -11,8 +11,8 @@ def render_weaving(db):
         st.session_state["weaving_df_key"] = 0
     st.info("발주된 건을 확인하고 제직 작업을 지시하거나, 완료된 건을 염색 공정으로 넘깁니다.")
 
-    # 1. 제직기 가동 현황 (Dashboard)
-    st.subheader("🏭 제직기 가동 현황")
+    # 1. 제직기별 제직 현황 (Dashboard)
+    st.subheader("🏭 제직기별 제직 현황")
     
     # 제직기 설정 가져오기
     machines_docs = list(db.collection("machines").order_by("machine_no").stream())
@@ -554,55 +554,61 @@ def render_weaving(db):
 
         # Part 1: 일지 작성
         with st.expander("➕ 작업일지 작성하기", expanded=True):
-            with st.form("work_log_form", clear_on_submit=True):
-                c1, c2, c3 = st.columns(3)
-                log_date = c1.date_input("작업일자", datetime.date.today())
-                shift = c2.radio("근무조", ["주간", "야간"], horizontal=True)
-                author = c3.text_input("작성자", value=st.session_state.get("role", ""))
+            # [수정] st.form 제거하여 라디오 버튼 즉시 반응하도록 변경 (라벨 동적 변경을 위해)
+            if "wl_form_key" not in st.session_state:
+                st.session_state["wl_form_key"] = 0
 
-                c1, c2 = st.columns(2)
-                # [수정] 제직기 다중 선택 및 기타 옵션 추가
-                m_names = [m['name'] for m in machines_data]
-                machine_options = ["전체"] + m_names + ["기타"]
-                machine_selection = c1.multiselect("제직기", machine_options, default=[])
+            c1, c2, c3 = st.columns(3)
+            # key에 접미사를 붙여 저장 후 초기화(새로운 키=새로운 위젯) 효과 구현
+            log_date = c1.date_input("작업일자", datetime.date.today(), key=f"wl_date_{st.session_state['wl_form_key']}")
+            shift = c2.radio("근무조", ["주간", "야간"], horizontal=True, key=f"wl_shift_{st.session_state['wl_form_key']}")
+            
+            default_author = st.session_state.get("user_name", st.session_state.get("role", ""))
+            author = c3.text_input("작성자", value=default_author, key=f"wl_author_{st.session_state['wl_form_key']}")
+
+            c1, c2 = st.columns(2)
+            # [수정] 제직기 다중 선택 및 기타 옵션 추가
+            m_names = [m['name'] for m in machines_data]
+            machine_options = ["전체"] + m_names + ["기타"]
+            machine_selection = c1.multiselect("제직기", machine_options, default=[], key=f"wl_machines_{st.session_state['wl_form_key']}")
+            
+            log_time = c2.time_input("작성시간", datetime.datetime.now().time(), key=f"wl_time_{st.session_state['wl_form_key']}")
+            
+            content = st.text_area("작업 내용", key=f"wl_content_{st.session_state['wl_form_key']}")
+            
+            # [핵심] 근무조 선택에 따라 라벨 동적 변경 (st.form 밖이므로 즉시 반영됨)
+            handover_label = "야간근무자 전달사항" if shift == "주간" else "주간근무자 전달사항"
+            handover_notes = st.text_area(handover_label, help="다음 근무조에게 전달할 내용을 입력하세요.", key=f"wl_note_{st.session_state['wl_form_key']}")
+            
+            if st.button("일지 저장", type="primary"):
+                log_dt = datetime.datetime.combine(log_date, log_time)
                 
-                log_time = c2.time_input("작성시간", datetime.datetime.now().time())
+                # [수정] 선택된 제직기들을 문자열로 변환
+                if not machine_selection:
+                    machine_no_str = "-"
+                else:
+                    machine_no_str = ", ".join(machine_selection)
                 
-                content = st.text_area("작업 내용")
+                # 1. 개별 로그 저장 (shift_logs 컬렉션)
+                db.collection("shift_logs").add({
+                    "log_date": str(log_date),
+                    "shift": shift,
+                    "machine_no": machine_no_str,
+                    "log_time": log_dt,
+                    "content": content,
+                    "author": author
+                })
                 
-                handover_label = "야간근무자 전달사항" if shift == "주간" else "주간근무자 전달사항"
-                handover_notes = st.text_area(handover_label, help="다음 근무조에게 전달할 내용을 입력하세요.")
+                # 2. 전달사항 저장 (handover_notes 컬렉션)
+                if handover_notes:
+                    note_key = "day_to_night_notes" if shift == "주간" else "night_to_day_notes"
+                    db.collection("handover_notes").document(str(log_date)).set({
+                        note_key: handover_notes
+                    }, merge=True)
                 
-                if st.form_submit_button("일지 저장"):
-                    log_dt = datetime.datetime.combine(log_date, log_time)
-                    machine_no_str = machine_selection.split(":")[0] if machine_selection != "전체" else "전체"
-                    
-                    # [수정] 선택된 제직기들을 문자열로 변환
-                    if not machine_selection:
-                        machine_no_str = "-"
-                    else:
-                        machine_no_str = ", ".join(machine_selection)
-                    
-                    # 1. 개별 로그 저장 (shift_logs 컬렉션)
-                    db.collection("shift_logs").add({
-                        "log_date": str(log_date),
-                        "shift": shift,
-                        "machine_no": machine_no_str,
-                        "machine_no": machine_no_str, # 이름 저장
-                        "log_time": log_dt,
-                        "content": content,
-                        "author": author
-                    })
-                    
-                    # 2. 전달사항 저장 (handover_notes 컬렉션)
-                    if handover_notes:
-                        note_key = "day_to_night_notes" if shift == "주간" else "night_to_day_notes"
-                        db.collection("handover_notes").document(str(log_date)).set({
-                            note_key: handover_notes
-                        }, merge=True)
-                    
-                    st.session_state["worklog_saved"] = True
-                    st.rerun()
+                st.session_state["worklog_saved"] = True
+                st.session_state["wl_form_key"] += 1 # 키 변경으로 입력 폼 초기화
+                st.rerun()
 
         # Part 2: 일지 조회
         st.divider()

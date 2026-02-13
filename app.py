@@ -59,6 +59,8 @@ if not st.session_state["logged_in"]:
                             st.session_state["user_id"] = login_id
                             st.session_state["department"] = user_data.get("department", "")
                             st.session_state["linked_partner"] = user_data.get("linked_partner", "")
+                            # [NEW] 권한 목록 세션 저장
+                            st.session_state["permissions"] = user_data.get("permissions", [])
                             if "current_menu" in st.session_state:
                                 del st.session_state["current_menu"]
                             st.rerun()
@@ -101,7 +103,7 @@ if not st.session_state["logged_in"]:
 with st.sidebar:
     st.markdown("<h2 style='text-align: center; margin-bottom: 20px;'>🏭 세안타올<br>생산관리 시스템</h2>", unsafe_allow_html=True)
     user_display = st.session_state.get("user_name", st.session_state.get("role"))
-    st.write(f"환영합니다, **{user_display}**님!")
+    st.write(f"환영합니다.  **{user_display}**님!")
     
     st.divider()
     
@@ -112,6 +114,14 @@ with st.sidebar:
             st.session_state["current_menu"] = "발주현황(거래처)"
         else:
             st.session_state["current_menu"] = "공지사항"
+
+    # [NEW] 권한 확인 헬퍼 함수
+    def check_access(menu_name):
+        # 관리자는 모든 메뉴 접근 가능
+        if st.session_state.get("role") == "admin": return True
+        # 사용자는 permissions 목록에 있는 메뉴만 접근 가능
+        user_perms = st.session_state.get("permissions", [])
+        return menu_name in user_perms
 
     # [NEW] 거래처(partner) 계정일 경우 메뉴 간소화
     if st.session_state.get("role") == "partner":
@@ -138,55 +148,70 @@ with st.sidebar:
         st.subheader("메뉴 선택")
         
         # [NEW] 발주서접수 독립 배치
-        if st.button("📑 발주서접수", use_container_width=True):
-            st.session_state["current_menu"] = "발주서접수"
-            st.rerun()
+        if check_access("발주서접수"):
+            if st.button("📑 발주서접수", use_container_width=True):
+                st.session_state["current_menu"] = "발주서접수"
+                st.rerun()
             
         # [수정] 구분선 간격 조정을 위해 HTML hr 태그 사용
         st.markdown("<hr style='margin-top: 0.5rem; margin-bottom: 1rem;'>", unsafe_allow_html=True)
 
         with st.expander("🏭 생산관리", expanded=True):
-            if st.button("📊 발주현황", use_container_width=True):
-                st.session_state["current_menu"] = "발주현황"
-                st.rerun()
-            if st.button("🧵 제직현황", use_container_width=True):
-                st.session_state["current_menu"] = "제직현황"
-                st.rerun()
-            if st.button("🎨 염색현황", use_container_width=True):
-                st.session_state["current_menu"] = "염색현황"
-                st.rerun()
-            if st.button("🪡 봉제현황", use_container_width=True):
-                st.session_state["current_menu"] = "봉제현황"
-                st.rerun()
-            if st.button("📤 출고작업", use_container_width=True):
-                st.session_state["current_menu"] = "출고작업"
-                st.rerun()
-            if st.button("🚚 출고현황", use_container_width=True):
-                st.session_state["current_menu"] = "출고현황"
-                st.rerun()
-            if st.button("📦 재고현황", use_container_width=True):
-                st.session_state["current_menu"] = "재고현황"
-                st.rerun()
-            if st.button("📈 공정별통계", use_container_width=True):
-                st.session_state["current_menu"] = "통합통계"
-                st.rerun()
+            if check_access("발주현황"):
+                if st.button("📊 발주현황", use_container_width=True):
+                    st.session_state["current_menu"] = "발주현황"
+                    st.rerun()
+            if check_access("제직현황"):
+                if st.button("🧵 제직현황", use_container_width=True):
+                    st.session_state["current_menu"] = "제직현황"
+                    st.rerun()
+            if check_access("염색현황"):
+                if st.button("🎨 염색현황", use_container_width=True):
+                    st.session_state["current_menu"] = "염색현황"
+                    st.rerun()
+            if check_access("봉제현황"):
+                if st.button("🪡 봉제현황", use_container_width=True):
+                    st.session_state["current_menu"] = "봉제현황"
+                    st.rerun()
+            if check_access("출고현황"): # 출고작업/출고현황 통합 권한으로 처리하거나 분리 가능 (여기선 출고현황 권한으로 둘 다 제어 예시)
+                if st.button("📤 출고작업", use_container_width=True):
+                    st.session_state["current_menu"] = "출고작업"
+                    st.rerun()
+                if st.button("🚚 출고현황", use_container_width=True):
+                    st.session_state["current_menu"] = "출고현황"
+                    st.rerun()
+            if check_access("재고현황"):
+                if st.button("📦 재고현황", use_container_width=True):
+                    st.session_state["current_menu"] = "재고현황"
+                    st.rerun()
+            # 통계 메뉴 권한이 별도로 없다면 관리자 전용 혹은 기본 표시 (여기선 관리자만 보이게 설정 예시)
+            if st.session_state.get("role") == "admin": 
+                if st.button("📈 공정별통계", use_container_width=True):
+                    st.session_state["current_menu"] = "통합통계"
+                    st.rerun()
 
         with st.expander("⚙️ 기초정보관리", expanded=True):
-            if st.button("📦 제품 관리", use_container_width=True):
-                st.session_state["current_menu"] = "제품 관리"
-                st.rerun()
-            if st.button("🏢 거래처관리", use_container_width=True):
-                st.session_state["current_menu"] = "거래처관리"
-                st.rerun()
-            if st.button("🏭 제직기관리", use_container_width=True):
-                st.session_state["current_menu"] = "제직기관리"
-                st.rerun()
-            if st.button("📝 제품코드설정", use_container_width=True):
-                st.session_state["current_menu"] = "제품코드설정"
-                st.rerun()
-            if st.button("🏢 자사 정보 설정", use_container_width=True):
-                st.session_state["current_menu"] = "자사 정보 설정"
-                st.rerun()
+            if check_access("제품 관리"):
+                if st.button("📦 제품 관리", use_container_width=True):
+                    st.session_state["current_menu"] = "제품 관리"
+                    st.rerun()
+            if check_access("거래처관리"):
+                if st.button("🏢 거래처관리", use_container_width=True):
+                    st.session_state["current_menu"] = "거래처관리"
+                    st.rerun()
+            if check_access("제직기관리"):
+                if st.button("🏭 제직기관리", use_container_width=True):
+                    st.session_state["current_menu"] = "제직기관리"
+                    st.rerun()
+            if check_access("제품코드설정"):
+                if st.button("📝 제품코드설정", use_container_width=True):
+                    st.session_state["current_menu"] = "제품코드설정"
+                    st.rerun()
+            # 회사정보 설정은 관리자 전용
+            if st.session_state.get("role") == "admin":
+                if st.button("🏢 회사정보 설정", use_container_width=True):
+                    st.session_state["current_menu"] = "회사정보 설정"
+                    st.rerun()
             if st.session_state.get("role") == "admin":
                 if st.button("👤 사용자 관리", use_container_width=True):
                     st.session_state["current_menu"] = "사용자 관리"
@@ -247,7 +272,7 @@ elif menu == "제품코드설정":
     render_codes(db)
 elif menu == "사용자 관리":
     render_users(db)
-elif menu == "자사 정보 설정":
+elif menu == "회사정보 설정":
     render_company_settings(db)
 elif menu == "로그인 정보 설정":
     render_my_profile(db)

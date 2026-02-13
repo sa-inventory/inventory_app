@@ -1794,6 +1794,12 @@ def render_users(db):
         
         with tab2:
             st.subheader("신규 사용자 등록")
+            
+            # [NEW] 등록 성공 메시지 표시 (리런 후 확인)
+            if "user_reg_success" in st.session_state:
+                st.success(st.session_state["user_reg_success"])
+                del st.session_state["user_reg_success"]
+
             # [수정] st.form 제거하여 동적 UI(권한 변경 시 거래처 선택) 즉시 반응하도록 변경
             c1, c2 = st.columns(2)
             u_id = c1.text_input("아이디 (ID)", key="new_u_id")
@@ -1827,7 +1833,10 @@ def render_users(db):
                             "created_at": datetime.datetime.now(),
                             "linked_partner": u_linked_partner
                         })
-                        st.success(f"사용자 {u_name}({u_id}) 등록 완료!")
+                        
+                        # [수정] 메시지를 세션에 저장하고 리런 (화면 갱신 후 메시지 표시 및 필드 초기화)
+                        st.session_state["user_reg_success"] = f"✅ 사용자 {u_name}({u_id}) 등록이 완료되었습니다."
+                        
                         keys_to_clear = ["new_u_id", "new_u_pw", "new_u_name", "new_u_role", "new_u_dept", "new_u_phone", "new_u_lp", "new_u_perms"]
                         for k in keys_to_clear:
                             if k in st.session_state: del st.session_state[k]
@@ -1891,95 +1900,7 @@ def render_my_profile(db):
                 st.info("변경할 내용이 없습니다.")
 
 def render_company_settings(db):
-    st.header("🏢 자사 정보 설정")
-    st.info("거래명세서 등 출력물에 표시될 우리 회사의 정보를 등록합니다.")
-    
-    doc_ref = db.collection("settings").document("company_info")
-    doc = doc_ref.get()
-    data = doc.to_dict() if doc.exists else {}
-    
-    # 세션 상태 초기화 (편집 모드 여부)
-    if "company_edit_mode" not in st.session_state:
-        st.session_state["company_edit_mode"] = False
-    
-    # 데이터가 없으면 강제로 편집 모드
-    if not data:
-        st.session_state["company_edit_mode"] = True
-
-    if st.session_state["company_edit_mode"]:
-        # [편집 모드]
-        with st.form("company_info_form"):
-            c1, c2 = st.columns(2)
-            name = c1.text_input("상호(회사명)", value=data.get("name", ""))
-            rep_name = c2.text_input("대표자명", value=data.get("rep_name", ""))
-            
-            c3, c4 = st.columns(2)
-            biz_num = c3.text_input("사업자등록번호", value=data.get("biz_num", ""))
-            address = c4.text_input("사업장 주소", value=data.get("address", ""))
-            
-            c5, c6 = st.columns(2)
-            phone = c5.text_input("전화번호", value=data.get("phone", ""))
-            fax = c6.text_input("팩스번호", value=data.get("fax", ""))
-            
-            c7, c8 = st.columns(2)
-            biz_type = c7.text_input("업태", value=data.get("biz_type", ""))
-            biz_item = c8.text_input("종목", value=data.get("biz_item", ""))
-            
-            email = st.text_input("이메일", value=data.get("email", ""))
-            
-            c9, c10 = st.columns(2)
-            bank_name = c9.text_input("거래은행", value=data.get("bank_name", ""))
-            bank_account = c10.text_input("계좌번호", value=data.get("bank_account", ""))
-            
-            note = st.text_area("비고 / 하단 문구", value=data.get("note", ""), help="명세서 하단에 들어갈 안내 문구 등을 입력하세요.")
-            
-            c_btn1, c_btn2 = st.columns([1, 1])
-            if c_btn1.form_submit_button("저장", type="primary"):
-                new_data = {
-                    "name": name, "rep_name": rep_name, "biz_num": biz_num, "address": address,
-                    "phone": phone, "fax": fax, "biz_type": biz_type, "biz_item": biz_item,
-                    "email": email, "bank_name": bank_name, "bank_account": bank_account, "note": note
-                }
-                doc_ref.set(new_data)
-                st.session_state["company_edit_mode"] = False
-                st.success("회사 정보가 저장되었습니다.")
-                st.rerun()
-            
-            if data and c_btn2.form_submit_button("취소"):
-                st.session_state["company_edit_mode"] = False
-                st.rerun()
-    else:
-        # [조회 모드]
-        c1, c2 = st.columns(2)
-        c1.text_input("상호(회사명)", value=data.get("name", ""), disabled=True)
-        c2.text_input("대표자명", value=data.get("rep_name", ""), disabled=True)
-        
-        c3, c4 = st.columns(2)
-        c3.text_input("사업자등록번호", value=data.get("biz_num", ""), disabled=True)
-        c4.text_input("사업장 주소", value=data.get("address", ""), disabled=True)
-        
-        c5, c6 = st.columns(2)
-        c5.text_input("전화번호", value=data.get("phone", ""), disabled=True)
-        c6.text_input("팩스번호", value=data.get("fax", ""), disabled=True)
-        
-        c7, c8 = st.columns(2)
-        c7.text_input("업태", value=data.get("biz_type", ""), disabled=True)
-        c8.text_input("종목", value=data.get("biz_item", ""), disabled=True)
-        
-        st.text_input("이메일", value=data.get("email", ""), disabled=True)
-        
-        c9, c10 = st.columns(2)
-        c9.text_input("거래은행", value=data.get("bank_name", ""), disabled=True)
-        c10.text_input("계좌번호", value=data.get("bank_account", ""), disabled=True)
-        
-        st.text_area("비고 / 하단 문구", value=data.get("note", ""), disabled=True)
-        
-        if st.button("수정"):
-            st.session_state["company_edit_mode"] = True
-            st.rerun()
-
-def render_company_settings(db):
-    st.header("🏢 자사 정보 설정")
+    st.header("🏢 회사정보 설정")
     st.info("거래명세서 등 출력물에 표시될 우리 회사의 정보를 등록합니다.")
     
     doc_ref = db.collection("settings").document("company_info")

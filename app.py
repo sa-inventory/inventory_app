@@ -6,6 +6,7 @@ import datetime
 import json
 import pandas as pd
 import io
+import uuid
 # [NEW] 분리한 utils 파일에서 공통 함수 임포트
 from utils import get_db, firestore
 from ui_orders import render_order_entry, render_order_status, render_partner_order_status
@@ -33,6 +34,28 @@ db = get_db()
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
     st.session_state["role"] = None
+
+# [NEW] 자동 로그인 처리 (URL의 session_id 확인)
+if not st.session_state["logged_in"]:
+    session_id = st.query_params.get("session_id")
+    if session_id:
+        # DB에서 세션 정보 확인
+        session_doc = db.collection("sessions").document(session_id).get()
+        if session_doc.exists:
+            s_data = session_doc.to_dict()
+            user_id = s_data.get("user_id")
+            
+            # 사용자 정보 로드 및 로그인 상태 복원
+            user_doc = db.collection("users").document(user_id).get()
+            if user_doc.exists:
+                user_data = user_doc.to_dict()
+                st.session_state["logged_in"] = True
+                st.session_state["role"] = user_data.get("role", "user")
+                st.session_state["user_name"] = user_data.get("name", user_id)
+                st.session_state["user_id"] = user_id
+                st.session_state["department"] = user_data.get("department", "")
+                st.session_state["linked_partner"] = user_data.get("linked_partner", "")
+                st.session_state["permissions"] = user_data.get("permissions", [])
 
 # 로그인 화면 처리
 if not st.session_state["logged_in"]:
@@ -63,6 +86,14 @@ if not st.session_state["logged_in"]:
                             st.session_state["permissions"] = user_data.get("permissions", [])
                             if "current_menu" in st.session_state:
                                 del st.session_state["current_menu"]
+                            
+                            # [NEW] 세션 생성 및 URL 저장 (새로고침 유지용)
+                            new_session_id = str(uuid.uuid4())
+                            db.collection("sessions").document(new_session_id).set({
+                                "user_id": login_id,
+                                "created_at": datetime.datetime.now()
+                            })
+                            st.query_params["session_id"] = new_session_id
                             st.rerun()
                         else:
                             st.error("비밀번호가 일치하지 않습니다.")
@@ -90,6 +121,14 @@ if not st.session_state["logged_in"]:
                                 st.session_state["linked_partner"] = user_data.get("linked_partner")
                                 if "current_menu" in st.session_state:
                                     del st.session_state["current_menu"]
+                                
+                                # [NEW] 세션 생성 및 URL 저장
+                                new_session_id = str(uuid.uuid4())
+                                db.collection("sessions").document(new_session_id).set({
+                                    "user_id": p_id,
+                                    "created_at": datetime.datetime.now()
+                                })
+                                st.query_params["session_id"] = new_session_id
                                 st.rerun()
                             else:
                                 st.error("비밀번호가 일치하지 않습니다.")
@@ -227,6 +266,12 @@ with st.sidebar:
         st.rerun()
     
     if st.button("로그아웃", use_container_width=True):
+        # [NEW] 로그아웃 시 세션 삭제 및 URL 초기화
+        session_id = st.query_params.get("session_id")
+        if session_id:
+            db.collection("sessions").document(session_id).delete()
+        st.query_params.clear()
+
         st.session_state["logged_in"] = False
         st.session_state["role"] = None
         if "user_name" in st.session_state:

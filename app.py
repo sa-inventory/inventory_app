@@ -341,6 +341,11 @@ with st.sidebar:
             del st.session_state["user_name"]
         if "current_menu" in st.session_state:
             del st.session_state["current_menu"]
+        
+        # [수정] 로그아웃 시 달력 상태 초기화
+        if "cal_year" in st.session_state: del st.session_state["cal_year"]
+        if "cal_month" in st.session_state: del st.session_state["cal_month"]
+
         st.rerun()
  
 menu = st.session_state["current_menu"]
@@ -381,7 +386,7 @@ elif menu == "제직기관리":
 elif menu == "사용자 관리":
     render_users(db, sub_menu)
 elif menu == "회사정보 관리":
-    render_company_settings(db, sub_menu)
+    render_company_settings(db)
 elif menu == "로그인 정보 설정":
     render_my_profile(db)
 else:

@@ -9,12 +9,19 @@ from firebase_admin import firestore
 def render_notice_board(db):
     st.title("공지사항")
     
-    # [수정] 카드 레이아웃 및 링크 스타일 추가
+    # [수정] 공지사항 배지 및 테이블 스타일 정의
     st.markdown("""
     <style>
         .notice-badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.75em; font-weight: bold; margin-right: 5px; }
         .badge-important { background-color: #ffebee; color: #c62828; }
         .badge-normal { background-color: #e3f2fd; color: #1565c0; }
+        /* 데이터프레임 헤더 가운데 정렬 */
+        .stDataFrame th {
+            text-align: center !important;
+        }
+        .stDataFrame th > div {
+            justify-content: center !important;
+        }
     </style>
     """, unsafe_allow_html=True)
 
@@ -49,113 +56,14 @@ def render_notice_board(db):
     if is_writing:
         st.session_state["notice_expander_state"] = True
 
-    # [NEW] 화면 모드 초기화
-    if "notice_view_mode" not in st.session_state:
-        st.session_state["notice_view_mode"] = "list"
     if "notice_list_key" not in st.session_state:
         st.session_state["notice_list_key"] = 0
-    # [수정] URL 쿼리 파라미터를 사용하여 뷰 상태 관리 (브라우저 뒤로가기 지원)
+    
+    # [수정] URL 쿼리 파라미터 확인 (외부 링크 접속 시)
     if 'notice_id' in st.query_params:
-        st.session_state["notice_view_mode"] = 'detail'
         st.session_state["selected_post_id"] = st.query_params['notice_id']
-    elif st.session_state["notice_view_mode"] == 'detail':
-        st.session_state["notice_view_mode"] = 'list'
-        st.session_state["selected_post_id"] = None
-        # [FIX] 뒤로가기 시 목록 선택 상태 초기화를 위해 키 증가
-        st.session_state["notice_list_key"] += 1
 
-    view_mode = st.session_state["notice_view_mode"]
     selected_id = st.session_state.get("selected_post_id")
-
-    # 공지사항 작성 (접기/펼치기)
-    if view_mode == "list":
-        # [수정] expanded 상태를 세션 변수로 제어
-        with st.expander("새로운 공지사항 작성하기", expanded=st.session_state["notice_expander_state"]):
-            # [수정] st.form 제거하여 동적 UI(기간 설정) 즉시 반응하도록 변경
-            title = st.text_input("제목", key="np_title")
-            content = st.text_area("내용", height=100, key="np_content")
-            
-            c1, c2 = st.columns(2)
-            
-            # [NEW] 공지 대상 선택 (통합형)
-            # 사용자 목록 가져오기
-            users_ref = db.collection("users").stream()
-            users_opts = [f"{u.to_dict().get('username')} ({u.to_dict().get('name')})" for u in users_ref]
-            
-            # '전체 공지'를 옵션의 첫 번째에 추가
-            target_options = ["전체 공지"] + users_opts
-            
-            # 멀티 셀렉트 (기본값: 전체 공지)
-            selected_targets = c1.multiselect("공지 대상 선택", target_options, default=["전체 공지"], key="np_targets")
-                
-            # [NEW] 게시 기간 설정
-            c_t1, c_t2 = st.columns(2)
-            post_term = c_t1.radio("게시 기간", ["영구 게시", "기간 설정"], horizontal=True, key="np_term")
-            expiration_date = None
-            if post_term == "기간 설정":
-                exp_date = c_t2.date_input("게시 종료일", datetime.date.today() + datetime.timedelta(days=7), key="np_exp_date")
-                expiration_date = datetime.datetime.combine(exp_date, datetime.time.max)
-
-            # [NEW] 첨부파일 업로드
-            uploaded_file = st.file_uploader("첨부파일 (이미지/문서)", type=['png', 'jpg', 'jpeg', 'pdf', 'xlsx', 'txt'], key="np_file")
-            
-            is_important = st.checkbox("중요(상단 고정)", key="np_important")
-            
-            if st.button("등록", type="primary"):
-                if title and content:
-                    if not selected_targets:
-                        st.error("공지 대상을 선택해주세요.")
-                        st.stop()
-
-                    # 대상 처리 로직
-                    if "전체 공지" in selected_targets:
-                        target_type = "전체공지"
-                        target_value = []
-                    else:
-                        target_type = "대상선택"
-                        target_value = selected_targets
-
-                    # 파일 처리 (Base64 인코딩하여 Firestore에 저장 - 용량 제한 주의)
-                    file_data = None
-                    file_name = None
-                    if uploaded_file:
-                        if uploaded_file.size > 1024 * 1024: # 1MB 제한
-                            st.error("첨부파일은 1MB 이하여야 합니다.")
-                            st.stop()
-                        file_bytes = uploaded_file.read()
-                        file_data = base64.b64encode(file_bytes).decode('utf-8')
-                        file_name = uploaded_file.name
-
-                    doc_data = {
-                        "title": title,
-                        "content": content,
-                        "author": current_user_name,
-                        "author_id": current_user_id,
-                        "created_at": datetime.datetime.now(),
-                        "is_important": is_important,
-                        "target_type": target_type,
-                        "target_value": target_value, # list or string
-                        "expiration_date": expiration_date,
-                        "file_name": file_name,
-                        "file_data": file_data,
-                        "views": 0
-                    }
-                    db.collection("posts").add(doc_data)
-                    st.success("등록되었습니다.")
-                    
-                    # 입력 필드 초기화 (세션 상태 삭제)
-                    keys_to_clear = ["np_title", "np_content", "np_targets", "np_term", "np_exp_date", "np_file", "np_important"]
-                    for k in keys_to_clear:
-                        if k in st.session_state:
-                            del st.session_state[k]
-                    
-                    # [NEW] 등록 후 폼 닫기
-                    st.session_state["notice_expander_state"] = False
-                    st.rerun()
-                else:
-                    st.warning("제목과 내용을 입력하세요.")
-
-        st.divider()
 
     # [NEW] 검색 필터 세션 초기화
     if "n_search_author" not in st.session_state: st.session_state["n_search_author"] = ""
@@ -180,7 +88,6 @@ def render_notice_board(db):
             st.session_state["n_search_keyword"] = ""
             st.session_state["notice_page"] = 1
             st.session_state["notice_list_key"] += 1
-            st.session_state["notice_view_mode"] = "list"
             st.session_state["selected_post_id"] = None
             st.query_params.clear()
             st.rerun()
@@ -257,60 +164,13 @@ def render_notice_board(db):
         
         page_posts = visible_posts[start_idx:end_idx]
 
-        # 목록 렌더링 함수 (재사용)
-        def render_notice_list(posts, current_selected_id=None):
-            df_rows = []
-            for p in posts:
-                is_imp = p.get('is_important', False)
-                title_display = p['title']
-                if p.get('file_name'):
-                    title_display = f"{title_display} [💾첨부파일]"
-                
-                created_at = p.get('created_at')
-                date_str = created_at.strftime("%Y-%m-%d") if created_at else ""
-                exp_date = p.get('expiration_date')
-                exp_str = exp_date.strftime("%Y-%m-%d") if exp_date else "영구"
-                
-                df_rows.append({
-                    "id": p['id'],
-                    "제목": title_display,
-                    "게시일자": date_str,
-                    "작성자": p.get('author', ''),
-                    "게시종료일": exp_str,
-                    "is_important": is_imp
-                })
-            
-            df = pd.DataFrame(df_rows)
-            
-            # 스타일 적용 (중요 게시물 파란색 + 굵은 글씨)
-            def highlight_important_row(row):
-                if row['is_important']:
-                    return ['color: red; font-weight: bold;'] * len(row)
-                return [''] * len(row)
-            
-            styled_df = df.style.apply(highlight_important_row, axis=1)
-            
-            return st.dataframe(
-                styled_df,
-                column_config={
-                    "id": None, "is_important": None,
-                    "제목": st.column_config.TextColumn("제목", width=600),
-                    "작성자": st.column_config.TextColumn("작성자", width=80, help="작성자"),
-                    "게시일자": st.column_config.TextColumn("게시일자", width=100, help="게시 시작일"),
-                    "게시종료일": st.column_config.TextColumn("게시종료일", width=100, help="게시가 종료되는 날짜"),
-                },
-                column_order=["제목", "작성자", "게시일자", "게시종료일"],
-                width="stretch", hide_index=True, on_select="rerun",
-                selection_mode="single-row", height=600, 
-                key=f"notice_board_list_table_{st.session_state['notice_list_key']}"
-            )
-
         # 페이징 컨트롤 렌더링 함수
         def render_pagination_controls():
             col_prev, col_info, col_next = st.columns([1.2, 5, 1.2])
             with col_prev:
                 if st.button("◀ 이전 페이지", disabled=(curr_page == 1), key="btn_prev_page", use_container_width=True):
                     st.session_state["notice_page"] -= 1
+                    st.session_state["selected_post_id"] = None # 페이지 이동 시 선택 해제
                     st.session_state["notice_list_key"] += 1
                     st.rerun()
             with col_info:
@@ -318,30 +178,166 @@ def render_notice_board(db):
             with col_next:
                 if st.button("다음 페이지 ▶", disabled=(curr_page == total_pages), key="btn_next_page", use_container_width=True):
                     st.session_state["notice_page"] += 1
+                    st.session_state["selected_post_id"] = None # 페이지 이동 시 선택 해제
                     st.session_state["notice_list_key"] += 1
                     st.rerun()
 
-        if view_mode == "list":
-            st.markdown("### 공지사항 목록")
+        # [NEW] 테이블 형태의 목록 렌더링 함수
+        def render_notice_list(posts):
+            df_rows = []
+            for p in posts:
+                is_imp = p.get('is_important', False)
+                
+                title_display = p['title']
+                if p.get('file_name'):
+                    title_display += " 📎"
+                
+                created_at = p.get('created_at')
+                date_str = created_at.strftime("%Y-%m-%d") if created_at else ""
+                exp_date = p.get('expiration_date')
+                exp_str = exp_date.strftime("%Y-%m-%d") if exp_date else "영구"
+                
+                df_rows.append({
+                    "id": p['id'], "is_important": is_imp, "제목": title_display,
+                    "작성자": p.get('author', ''), "게시일": date_str, "게시종료일": exp_str,
+                })
             
-            selection = render_notice_list(page_posts)
-            render_pagination_controls()
+            if not df_rows: return None
+
+            df = pd.DataFrame(df_rows)
             
-            if selection.selection.rows:
-                idx = selection.selection.rows[0]
-                st.session_state["selected_post_id"] = page_posts[idx]['id']
-                st.session_state["notice_view_mode"] = "detail"
-                st.query_params["notice_id"] = page_posts[idx]['id']
+            def highlight_important(row):
+                return ['color: #c62828; font-weight: bold;'] * len(row) if row.is_important else [''] * len(row)
+
+            styled_df = df.style.apply(highlight_important, axis=1)
+
+            return st.dataframe(
+                styled_df,
+                column_config={
+                    "id": None, "is_important": None,
+                    "제목": st.column_config.TextColumn("제목", width="large"),
+                    "작성자": st.column_config.TextColumn("작성자", width="small"),
+                    "게시일": st.column_config.TextColumn("게시일", width="small"),
+                    "게시종료일": st.column_config.TextColumn("게시종료일", width="small"),
+                },
+                column_order=["제목", "작성자", "게시일", "게시종료일"],
+                hide_index=True, on_select="rerun", selection_mode="single-row",
+                use_container_width=True,
+                key=f"notice_board_list_table_{st.session_state['notice_list_key']}"
+            )
+
+        # --- [변경] 목록 상시 표시 ---
+        st.markdown("### 공지사항 목록")
+        
+        selection = render_notice_list(page_posts)
+        render_pagination_controls()
+        
+        # 목록에서 선택 시 ID 업데이트
+        if selection and selection.selection.rows:
+            idx = selection.selection.rows[0]
+            new_selected_id = page_posts[idx]['id']
+            if new_selected_id != selected_id:
+                st.session_state["selected_post_id"] = new_selected_id
+                st.query_params["notice_id"] = new_selected_id
                 st.rerun()
         
-        else: # Detail View
-            if st.button("목록으로 돌아가기"):
-                st.session_state["notice_view_mode"] = "list"
-                st.session_state["selected_post_id"] = None
-                st.session_state["notice_list_key"] += 1
-                st.session_state["notice_expander_state"] = False # [수정] 목록 복귀 시 작성 폼 닫기
-                st.query_params.clear()
-                st.rerun()
+        st.divider()
+
+        # --- [변경] 하단 영역: 상세 내용 또는 글쓰기 폼 ---
+        if not selected_id:
+            # 선택된 글이 없을 때: 글쓰기 폼 표시
+            with st.expander("새로운 공지사항 작성하기", expanded=st.session_state["notice_expander_state"]):
+                title = st.text_input("제목", key="np_title")
+                content = st.text_area("내용", height=100, key="np_content")
+                
+                c1, c2 = st.columns(2)
+                
+                # [NEW] 공지 대상 선택 (통합형)
+                # 사용자 목록 가져오기
+                users_ref = db.collection("users").stream()
+                users_opts = [f"{u.to_dict().get('username')} ({u.to_dict().get('name')})" for u in users_ref]
+                
+                # '전체 공지'를 옵션의 첫 번째에 추가
+                target_options = ["전체 공지"] + users_opts
+                
+                # 멀티 셀렉트 (기본값: 전체 공지)
+                selected_targets = c1.multiselect("공지 대상 선택", target_options, default=["전체 공지"], key="np_targets")
+                    
+                # [NEW] 게시 기간 설정
+                c_t1, c_t2 = st.columns(2)
+                post_term = c_t1.radio("게시 기간", ["영구 게시", "기간 설정"], horizontal=True, key="np_term")
+                expiration_date = None
+                if post_term == "기간 설정":
+                    exp_date = c_t2.date_input("게시 종료일", datetime.date.today() + datetime.timedelta(days=7), key="np_exp_date")
+                    expiration_date = datetime.datetime.combine(exp_date, datetime.time.max)
+
+                # [NEW] 첨부파일 업로드
+                uploaded_file = st.file_uploader("첨부파일 (이미지/문서)", type=['png', 'jpg', 'jpeg', 'pdf', 'xlsx', 'txt'], key="np_file")
+                
+                is_important = st.checkbox("중요(상단 고정)", key="np_important")
+                
+                if st.button("등록", type="primary"):
+                    if title and content:
+                        if not selected_targets:
+                            st.error("공지 대상을 선택해주세요.")
+                            st.stop()
+
+                        # 대상 처리 로직
+                        if "전체 공지" in selected_targets:
+                            target_type = "전체공지"
+                            target_value = []
+                        else:
+                            target_type = "대상선택"
+                            target_value = selected_targets
+
+                        # 파일 처리 (Base64 인코딩하여 Firestore에 저장 - 용량 제한 주의)
+                        file_data = None
+                        file_name = None
+                        if uploaded_file:
+                            if uploaded_file.size > 1024 * 1024: # 1MB 제한
+                                st.error("첨부파일은 1MB 이하여야 합니다.")
+                                st.stop()
+                            file_bytes = uploaded_file.read()
+                            file_data = base64.b64encode(file_bytes).decode('utf-8')
+                            file_name = uploaded_file.name
+
+                        doc_data = {
+                            "title": title,
+                            "content": content,
+                            "author": current_user_name,
+                            "author_id": current_user_id,
+                            "created_at": datetime.datetime.now(),
+                            "is_important": is_important,
+                            "target_type": target_type,
+                            "target_value": target_value, # list or string
+                            "expiration_date": expiration_date,
+                            "file_name": file_name,
+                            "file_data": file_data,
+                            "views": 0
+                        }
+                        db.collection("posts").add(doc_data)
+                        st.success("등록되었습니다.")
+                        
+                        # 입력 필드 초기화 (세션 상태 삭제)
+                        keys_to_clear = ["np_title", "np_content", "np_targets", "np_term", "np_exp_date", "np_file", "np_important"]
+                        for k in keys_to_clear:
+                            if k in st.session_state:
+                                del st.session_state[k]
+                        
+                        # [NEW] 등록 후 폼 닫기
+                        st.session_state["notice_expander_state"] = False
+                        st.rerun()
+                    else:
+                        st.warning("제목과 내용을 입력하세요.")
+        
+        else: # Detail View (선택된 글이 있을 때)
+            c_back1, c_back2 = st.columns([6, 1])
+            with c_back2:
+                if st.button("닫기", use_container_width=True, help="상세 내용을 닫습니다."):
+                    st.session_state["selected_post_id"] = None
+                    st.session_state["notice_list_key"] += 1
+                    st.query_params.clear()
+                    st.rerun()
 
             post = next((p for p in visible_posts if p['id'] == selected_id), None)
             
@@ -499,34 +495,10 @@ def render_notice_board(db):
                         with c_del:
                             if st.button("삭제", key=f"del_post_{post['id']}", use_container_width=True):
                                 db.collection("posts").document(post['id']).delete()
-                                st.session_state["notice_view_mode"] = "list"
                                 st.session_state["selected_post_id"] = None
                                 st.session_state["notice_list_key"] += 1
                                 st.query_params.clear()
                                 st.rerun()
-            
-            # [NEW] 상세 화면 하단에 목록 표시
-            st.divider()
-            st.markdown("### 공지사항 목록")
-            
-            selection = render_notice_list(page_posts, current_selected_id=selected_id)
-            render_pagination_controls()
-            
-            if selection.selection.rows:
-                idx = selection.selection.rows[0]
-                new_id = page_posts[idx]['id']
-                if new_id != selected_id:
-                    st.session_state["selected_post_id"] = new_id
-                    st.query_params["notice_id"] = new_id
-                    st.rerun()
-            else:
-                # [수정] 선택 해제 시 목록으로 돌아가기
-                st.session_state["notice_view_mode"] = "list"
-                st.session_state["selected_post_id"] = None
-                st.query_params.clear()
-                st.rerun()
-    else:
-        st.info("등록된 공지사항이 없습니다.")
 
 def render_schedule(db):
     st.title("업무일정 (Calendar)")
@@ -583,7 +555,7 @@ def render_schedule(db):
                     else:
                         st.warning("기간을 먼저 올바르게 선택해주세요.")
 
-                color_map = {"빨간색": "#d93025", "파란색": "#1a73e8", "초록색": "#1e8e3e", "주황색": "#f97d00", "보라색": "#9334e6"}
+                color_map = {"검정색": "#333333", "빨간색": "#d93025", "파란색": "#1a73e8", "초록색": "#1e8e3e", "주황색": "#f97d00", "보라색": "#9334e6"}
                 h_color_name = st.selectbox("표시 색상", list(color_map.keys()), key="h_color_name_input")
                 
                 if st.button("등록"):
@@ -659,44 +631,47 @@ def render_schedule(db):
                     st.info("등록된 특정일이 없습니다.")
         st.divider()
 
-    # [수정] 기존 레이아웃(좌측 정렬) 복원 및 삼각형 버튼 적용
-    # [수정] 컨트롤 영역 너비를 줄여서(1.2 -> 1) 더 컴팩트하게 조정
-    c1, c2, c3 = st.columns([1, 1, 5])
+    # [수정] 달력 컨트롤 및 필터 레이아웃 변경
+    c_header_left, c_header_center, c_header_right = st.columns([1, 3, 1])
     
-    with c1:
-        # 년도: [◀] [YYYY년] [▶]
-        yc1, yc2, yc3 = st.columns([0.25, 0.5, 0.25])
-        with yc1:
-            # [수정] use_container_width=True 제거하여 버튼 크기 최소화
-            if st.button("◀", key="btn_prev_year"):
+    with c_header_left:
+        if st.button("오늘날짜보기", key="btn_today", use_container_width=True, help="오늘 날짜가 속한 달로 이동합니다."):
+            today = datetime.date.today()
+            st.session_state["cal_year"] = today.year
+            st.session_state["cal_month"] = today.month
+            st.rerun()
+
+    with c_header_center:
+        # 중앙 정렬을 위한 컬럼 분할 (이전년, 이전월, 현재, 다음월, 다음년) - 간격 조정을 위해 spacer 추가
+        _, nc1, nc2, nc3, nc4, nc5, _ = st.columns([1.5, 0.3, 0.3, 1.2, 0.3, 0.3, 1.5])
+        with nc1:
+            if st.button("«", key="btn_prev_year", help="이전 년도"):
                 st.session_state["cal_year"] -= 1
                 st.rerun()
-        with yc2:
-            st.markdown(f"<div style='text-align: center; line-height: 2.3rem; font-weight: bold;'>{st.session_state['cal_year']}년</div>", unsafe_allow_html=True)
-        with yc3:
-            if st.button("▶", key="btn_next_year"):
-                st.session_state["cal_year"] += 1
-                st.rerun()
-
-    with c2:
-        # 월: [◀] [MM월] [▶]
-        mc1, mc2, mc3 = st.columns([0.25, 0.5, 0.25])
-        with mc1:
-            if st.button("◀", key="btn_prev_month"):
+        with nc2:
+            if st.button("◀", key="btn_prev_month", help="이전 달"):
                 st.session_state["cal_month"] -= 1
                 if st.session_state["cal_month"] < 1:
                     st.session_state["cal_month"] = 12
                     st.session_state["cal_year"] -= 1
                 st.rerun()
-        with mc2:
-            st.markdown(f"<div style='text-align: center; line-height: 2.3rem; font-weight: bold;'>{st.session_state['cal_month']}월</div>", unsafe_allow_html=True)
-        with mc3:
-            if st.button("▶", key="btn_next_month"):
+        with nc3:
+            st.markdown(f"<h3 style='text-align: center; margin: 0; padding-top: 5px;'>{st.session_state['cal_year']}. {st.session_state['cal_month']:02d}</h3>", unsafe_allow_html=True)
+        with nc4:
+            if st.button("▶", key="btn_next_month", help="다음 달"):
                 st.session_state["cal_month"] += 1
                 if st.session_state["cal_month"] > 12:
                     st.session_state["cal_month"] = 1
                     st.session_state["cal_year"] += 1
                 st.rerun()
+        with nc5:
+            if st.button("»", key="btn_next_year", help="다음 년도"):
+                st.session_state["cal_year"] += 1
+                st.rerun()
+
+    with c_header_right:
+        # [NEW] 내 일정 필터
+        show_my_only = st.checkbox("내가 등록한 일정만 보기", key="sch_filter_mine")
 
     sel_year = st.session_state["cal_year"]
     sel_month = st.session_state["cal_month"]
@@ -716,13 +691,21 @@ def render_schedule(db):
     holidays_ref = db.collection("holidays").where("date", ">=", s_str).where("date", "<=", e_str).stream()
     holiday_map = {doc.id: doc.to_dict() for doc in holidays_ref}
 
-    schedules_ref = db.collection("schedules").where("date", ">=", s_str).where("date", "<=", e_str).stream()
+    # [수정] 일정 데이터 조회 (필터 적용)
+    schedules_query = db.collection("schedules").where("date", ">=", s_str).where("date", "<=", e_str)
+    
+    schedules_ref = schedules_query.stream()
     
     # 날짜별 일정 매핑
     schedule_map = {}
     for doc in schedules_ref:
         d = doc.to_dict()
         d['id'] = doc.id
+        
+        # [NEW] 메모리 상에서 작성자 필터링 (복합 인덱스 오류 방지)
+        if show_my_only and d.get('author') != current_user_name:
+            continue
+            
         d_date = d.get('date') # YYYY-MM-DD
         if d_date:
             day_int = int(d_date.split('-')[2])
@@ -880,27 +863,116 @@ def render_schedule(db):
     
     st.divider()
     
-    # 4. 일정 관리 (추가/삭제)
-    c_add, c_list = st.columns([1, 2])
+    # 4. 일정 관리 (추가/삭제) - [수정] 레이아웃 변경
+    st.subheader(f"{sel_month}월 일정 목록")
     
-    with c_add:
-        st.subheader("일정 등록하기")
-        # [수정] 기간 선택 가능하도록 변경 (리스트 전달)
-        s_dates = st.date_input("날짜 (기간 선택 가능)", [datetime.date(sel_year, sel_month, today.day)], help="시작일과 종료일을 선택하여 기간을 지정할 수 있습니다.")
+    final_schedules = []
+
+    # 1. 특정일(휴일) 데이터 처리 (미리 병합)
+    holiday_groups_map = {}
+    for h_date_str, h_data in holiday_map.items():
+        h_year, h_month, _ = map(int, h_date_str.split('-'))
+        if h_year == sel_year and h_month == sel_month:
+            gid = h_data.get('group_id', f"single_h_{h_date_str}")
+            if gid not in holiday_groups_map:
+                holiday_groups_map[gid] = {'dates': [], 'name': '', 'color': h_data.get('color', '#d93025')}
+            holiday_groups_map[gid]['dates'].append(h_date_str)
+            if h_data.get('name'):
+                holiday_groups_map[gid]['name'] = h_data.get('name')
+    
+    for gid, info in holiday_groups_map.items():
+        dates = sorted(info['dates'])
+        if not dates: continue
         
-        # 기간 선택 여부 확인
+        holiday_sch = {
+            'id': f"holiday_grp_{gid}", 'date': dates[0], 'end_date': dates[-1],
+            'content': info.get('name'), 'author': '관리자', 'is_all_day': True,
+            'type': '긴급', 'color': info.get('color', '#d93025'),
+            'is_holiday': True, 'merged_ids': [] 
+        }
+        final_schedules.append(holiday_sch)
+    
+    # 2. 일반 일정 데이터 처리 (병합 로직 적용)
+    raw_schedules = [sch for day in sorted(schedule_map.keys()) for sch in schedule_map[day]]
+    raw_schedules.sort(key=lambda x: (x.get('date', ''), x.get('time', '00:00')))
+    
+    merged_normal_schedules = []
+    if raw_schedules:
+        curr = raw_schedules[0].copy()
+        curr['end_date'] = curr['date']
+        curr['merged_ids'] = [curr['id']]
+        
+        for next_sch in raw_schedules[1:]:
+            is_same_meta = (curr['content'] == next_sch['content'] and curr.get('author') == next_sch.get('author') and curr.get('type') == next_sch.get('type') and curr.get('time') == next_sch.get('time'))
+            curr_gid, next_gid = curr.get('group_id'), next_sch.get('group_id')
+            is_same_group = (curr_gid is not None) and (curr_gid == next_gid)
+            
+            is_consecutive = False
+            try:
+                is_consecutive = (datetime.datetime.strptime(next_sch['date'], "%Y-%m-%d").date() - datetime.datetime.strptime(curr['end_date'], "%Y-%m-%d").date()).days == 1
+            except: pass
+            
+            should_merge = is_same_meta and (is_same_group or (curr_gid is None and next_gid is None and is_consecutive))
+            
+            if should_merge:
+                curr['end_date'] = next_sch['date']
+                curr['merged_ids'].append(next_sch['id'])
+            else:
+                merged_normal_schedules.append(curr)
+                curr = next_sch.copy()
+                curr['end_date'] = curr['date']
+                curr['merged_ids'] = [curr['id']]
+        merged_normal_schedules.append(curr)
+        
+    final_schedules.extend(merged_normal_schedules)
+    final_schedules.sort(key=lambda x: (x.get('date', ''), x.get('time', '00:00')))
+    
+    if final_schedules:
+        for sch in final_schedules:
+            col1, col2 = st.columns([5, 1])
+            date_str = f"{sch['date']} ~ {sch['end_date']}" if sch['date'] != sch['end_date'] else sch['date']
+            time_display = "하루일정" if sch.get('is_all_day', True) else sch.get('time', '')
+            author_str, content_str, custom_color = sch.get('author', 'Unknown'), sch['content'], sch.get('color', None)
+            
+            if sch.get('is_holiday'):
+                icon = f'<span style="color:{custom_color}; font-weight:bold;">●</span>'
+                col1.markdown(f"{icon} <span style='color:{custom_color}; font-weight:bold;'>{date_str}</span> &nbsp; <span style='color:{custom_color};'>{content_str}</span>", unsafe_allow_html=True)
+            else:
+                icon = "🚨" if sch.get('type') == "긴급" else "📅"
+                col1.markdown(f"{icon} **{date_str}** &nbsp; ` {time_display} ` &nbsp; **{author_str}**: {content_str}", unsafe_allow_html=True)
+            
+            if not sch.get('is_holiday') and (current_user_name == author_str or current_role == 'admin'):
+                del_key = f"confirm_del_{sch['id']}"
+                if st.session_state.get(del_key):
+                    if col2.button("✅", key=f"yes_{sch['id']}", help="삭제 확인"):
+                        batch = db.batch()
+                        for mid in sch['merged_ids']: batch.delete(db.collection("schedules").document(mid))
+                        batch.commit()
+                        del st.session_state[del_key]
+                        st.rerun()
+                    if col2.button("❌", key=f"no_{sch['id']}", help="취소"):
+                        del st.session_state[del_key]
+                        st.rerun()
+                else:
+                    if col2.button("삭제", key=f"del_sch_cal_{sch['id']}"):
+                        st.session_state[del_key] = True
+                        st.rerun()
+    else:
+        st.info("📅 등록된 일정이 없습니다.")
+
+    st.divider()
+
+    with st.expander("일정 등록하기"):
+        s_dates = st.date_input("날짜 (기간 선택 가능)", [datetime.date(sel_year, sel_month, today.day)], help="시작일과 종료일을 선택하여 기간을 지정할 수 있습니다.")
         is_range = len(s_dates) == 2 and s_dates[0] != s_dates[1]
         
-        # [수정] 시간 설정 옵션 (기간 선택 시 비활성화)
         if is_range:
             time_opt = "하루일정"
             st.info("💡 기간 일정은 '하루일정'으로 고정됩니다.")
             s_time = None
         else:
             time_opt = st.radio("시간 설정", ["하루일정", "시간 설정"], horizontal=True)
-            s_time = None
-            if time_opt == "시간 설정":
-                s_time = st.time_input("시간", datetime.datetime.now().time())
+            s_time = st.time_input("시간", datetime.datetime.now().time()) if time_opt == "시간 설정" else None
             
         s_content = st.text_input("내용")
         s_type = st.selectbox("구분", ["일반", "긴급"])
@@ -908,31 +980,17 @@ def render_schedule(db):
         if st.button("일정 추가", type="primary"):
             if s_content:
                 batch = db.batch()
-                # [NEW] 그룹 ID 생성 (기간 일정을 위해)
                 group_id = str(uuid.uuid4()) if is_range else None
                 
-                # 날짜 리스트 생성
                 target_dates = []
                 if is_range:
-                    start_d, end_d = s_dates
-                    delta = end_d - start_d
-                    for i in range(delta.days + 1):
-                        target_dates.append(start_d + datetime.timedelta(days=i))
-                else:
-                    target_dates.append(s_dates[0])
+                    for i in range((s_dates[1] - s_dates[0]).days + 1): target_dates.append(s_dates[0] + datetime.timedelta(days=i))
+                else: target_dates.append(s_dates[0])
                 
                 for d in target_dates:
                     doc_ref = db.collection("schedules").document()
-                    doc_data = {
-                        "date": str(d),
-                        "content": s_content,
-                        "type": s_type,
-                        "author": current_user_name,
-                        "is_all_day": (time_opt == "하루일정"),
-                        "group_id": group_id # [NEW] 그룹 ID 저장
-                    }
-                    if time_opt == "시간 설정" and s_time:
-                        doc_data["time"] = s_time.strftime("%H:%M")
+                    doc_data = {"date": str(d), "content": s_content, "type": s_type, "author": current_user_name, "is_all_day": (time_opt == "하루일정"), "group_id": group_id}
+                    if time_opt == "시간 설정" and s_time: doc_data["time"] = s_time.strftime("%H:%M")
                     batch.set(doc_ref, doc_data)
                 
                 batch.commit()
@@ -940,142 +998,3 @@ def render_schedule(db):
                 st.rerun()
             else:
                 st.warning("내용을 입력하세요.")
-
-    with c_list:
-        st.subheader(f"{sel_month}월 일정 목록")
-        
-        final_schedules = []
-
-        # 1. 특정일(휴일) 데이터 처리 (미리 병합)
-        holiday_groups_map = {}
-        for h_date_str, h_data in holiday_map.items():
-            h_year, h_month, _ = map(int, h_date_str.split('-'))
-            if h_year == sel_year and h_month == sel_month:
-                gid = h_data.get('group_id', f"single_h_{h_date_str}")
-                if gid not in holiday_groups_map:
-                    holiday_groups_map[gid] = {'dates': [], 'name': '', 'color': h_data.get('color', '#d93025')}
-                holiday_groups_map[gid]['dates'].append(h_date_str)
-                if h_data.get('name'):
-                    holiday_groups_map[gid]['name'] = h_data.get('name')
-        
-        for gid, info in holiday_groups_map.items():
-            dates = sorted(info['dates'])
-            if not dates: continue
-            
-            holiday_sch = {
-                'id': f"holiday_grp_{gid}",
-                'date': dates[0],
-                'end_date': dates[-1],
-                'content': info.get('name'),
-                'author': '관리자',
-                'is_all_day': True,
-                'type': '긴급',
-                'color': info.get('color', '#d93025'),
-                'is_holiday': True,
-                'merged_ids': [] 
-            }
-            final_schedules.append(holiday_sch)
-        
-        # 2. 일반 일정 데이터 처리 (병합 로직 적용)
-        raw_schedules = []
-        for day in sorted(schedule_map.keys()):
-            for sch in schedule_map[day]:
-                raw_schedules.append(sch)
-        
-        # 날짜/시간 정렬
-        raw_schedules.sort(key=lambda x: (x.get('date', ''), x.get('time', '00:00')))
-        
-        merged_normal_schedules = []
-        if raw_schedules:
-            curr = raw_schedules[0].copy()
-            curr['end_date'] = curr['date']
-            curr['merged_ids'] = [curr['id']]
-            
-            for next_sch in raw_schedules[1:]:
-                # 병합 조건: 메타데이터 일치 AND (같은 그룹ID OR 연속된 날짜)
-                is_same_meta = (
-                    curr['content'] == next_sch['content'] and
-                    curr.get('author') == next_sch.get('author') and
-                    curr.get('type') == next_sch.get('type') and
-                    curr.get('time') == next_sch.get('time')
-                )
-                
-                curr_gid = curr.get('group_id')
-                next_gid = next_sch.get('group_id')
-                is_same_group = (curr_gid is not None) and (curr_gid == next_gid)
-                
-                is_consecutive = False
-                try:
-                    curr_end_dt = datetime.datetime.strptime(curr['end_date'], "%Y-%m-%d").date()
-                    next_dt = datetime.datetime.strptime(next_sch['date'], "%Y-%m-%d").date()
-                    is_consecutive = (next_dt - curr_end_dt).days == 1
-                except:
-                    pass
-                
-                should_merge = False
-                if is_same_meta:
-                    if is_same_group: should_merge = True
-                    elif curr_gid is None and next_gid is None and is_consecutive: should_merge = True
-                
-                if should_merge:
-                    curr['end_date'] = next_sch['date']
-                    curr['merged_ids'].append(next_sch['id'])
-                else:
-                    merged_normal_schedules.append(curr)
-                    curr = next_sch.copy()
-                    curr['end_date'] = curr['date']
-                    curr['merged_ids'] = [curr['id']]
-            merged_normal_schedules.append(curr)
-            
-        final_schedules.extend(merged_normal_schedules)
-        
-        # 3. 최종 정렬 (시작일 기준)
-        final_schedules.sort(key=lambda x: (x.get('date', ''), x.get('time', '00:00')))
-        
-        if final_schedules:
-            for sch in final_schedules:
-                col1, col2 = st.columns([5, 1])
-                date_str = sch['date']
-                if sch['date'] != sch['end_date']:
-                    date_str = f"{sch['date']} ~ {sch['end_date']}"
-                
-                time_display = "하루일정"
-                if not sch.get('is_all_day', True):
-                    time_display = sch.get('time', '')
-                
-                author_str = sch.get('author', 'Unknown')
-                content_str = sch['content']
-                custom_color = sch.get('color', None)
-                
-                # [수정] 특정일인 경우 색상 아이콘 추가
-                if sch['id'].startswith('holiday_'):
-                    icon = f'<span style="color:{custom_color}; font-weight:bold;">●</span>'
-                    # [NEW] 관리자가 지정한 색상으로 텍스트 표시
-                    col1.markdown(f"{icon} <span style='color:{custom_color}; font-weight:bold;'>{date_str}</span> &nbsp; ` {time_display} ` &nbsp; **{author_str}**: <span style='color:{custom_color};'>{content_str}</span>", unsafe_allow_html=True)
-                else:
-                    icon = "🚨" if sch.get('type') == "긴급" else "📅"
-                    col1.markdown(f"{icon} **{date_str}** &nbsp; ` {time_display} ` &nbsp; **{author_str}**: {content_str}", unsafe_allow_html=True)
-                
-                # [수정] 일반 일정에 대해서만 삭제 버튼 표시
-                if not sch['id'].startswith('holiday_'):
-                    if current_user_name == author_str or current_role == 'admin':
-                        # [NEW] 삭제 확인 로직
-                        del_key = f"confirm_del_{sch['id']}"
-                        if st.session_state.get(del_key):
-                            if col2.button("✅", key=f"yes_{sch['id']}", help="삭제 확인"):
-                                # [수정] 병합된 일정 일괄 삭제
-                                batch = db.batch()
-                                for mid in sch['merged_ids']:
-                                    batch.delete(db.collection("schedules").document(mid))
-                                batch.commit()
-                                del st.session_state[del_key]
-                                st.rerun()
-                            if col2.button("❌", key=f"no_{sch['id']}", help="취소"):
-                                del st.session_state[del_key]
-                                st.rerun()
-                        else:
-                            if col2.button("삭제", key=f"del_sch_cal_{sch['id']}"):
-                                st.session_state[del_key] = True
-                                st.rerun()
-        else:
-            st.info("📅 등록된 일정이 없습니다.")

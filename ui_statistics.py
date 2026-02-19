@@ -32,7 +32,7 @@ def setup_matplotlib_font():
         plt.rcParams['axes.unicode_minus'] = False
 
 def render_statistics(db, sub_menu):
-    st.header("통합 통계 분석")
+    st.header(sub_menu)
     st.info("발주부터 출고까지 전 공정의 현황을 년도별/월별/기간별로 분석합니다.")
     
     # --- 공통 조회 조건 ---
@@ -186,8 +186,8 @@ def render_statistics(db, sub_menu):
             html = generate_report_html(p_title, df_data, "", options, chart_html)
             st.components.v1.html(html, height=0, width=0)
 
-    # --- 1. 발주 통계 ---
-    if sub_menu == "발주 통계":
+    # --- 1. 발주내역 ---
+    if sub_menu == "발주내역":
         st.subheader("발주 수량 및 건수 통계")
         df_order = df.copy()
         if start_dt and end_dt:
@@ -211,16 +211,14 @@ def render_statistics(db, sub_menu):
             df_order['group_key'] = df_order.apply(lambda x: get_group_key(x, 'date'), axis=1)
             group_label = stat_type.replace('별', '')
             
-            c1, c2 = st.columns(2)
-            
-            # 1. 우측: 거래처별 통계 및 선택 (먼저 처리하여 필터링 기준 마련)
-            c2.write(f"**거래처별 발주 현황**")
+            # 1. 상단: 거래처별 통계 및 선택 (먼저 처리하여 필터링 기준 마련)
+            st.write(f"**거래처별 발주 현황**")
             partner_stats = df_order.groupby('customer').agg(발주건수=('order_no', 'nunique'), 총수량=('stock', 'sum')).reset_index()
             partner_stats['평균수량'] = partner_stats['총수량'] / partner_stats['발주건수']
             partner_stats = partner_stats.sort_values('총수량', ascending=False)
             
             partner_stats['선택'] = False
-            edited_partner_stats = c2.data_editor(
+            edited_partner_stats = st.data_editor(
                 partner_stats,
                 column_order=["선택", "customer", "총수량", "발주건수", "평균수량"],
                 column_config={"선택": st.column_config.CheckboxColumn(default=False)},
@@ -228,10 +226,12 @@ def render_statistics(db, sub_menu):
                 width="stretch", hide_index=True, key="order_partner_selector"
             )
             selected_customers = edited_partner_stats[edited_partner_stats['선택']]['customer'].tolist()
-            with c2: show_actions(partner_stats.drop(columns=['선택']), "발주처별_통계", "발주처별 수량 통계", chart_col='총수량')
+            show_actions(partner_stats.drop(columns=['선택']), "발주처별_통계", "발주처별 수량 통계", chart_col='총수량')
             
             # [NEW] 비교 모드 토글
-            compare_mode = c2.toggle("업체별 비교", key="order_compare")
+            compare_mode = st.toggle("업체별 비교", key="order_compare")
+
+            st.divider()
 
             # 2. 데이터 필터링
             if selected_customers:
@@ -239,8 +239,8 @@ def render_statistics(db, sub_menu):
             else:
                 df_chart = df_order.copy()
 
-            # 3. 좌측: 시계열 차트 (필터링된 데이터 기반)
-            c1.write(f"**{group_label}별 발주 추이**")
+            # 3. 하단: 시계열 차트 (필터링된 데이터 기반)
+            st.write(f"**{group_label}별 발주 추이**")
             
             # 비교 모드에 따라 그룹화 방식 변경
             if compare_mode and selected_customers:
@@ -259,14 +259,15 @@ def render_statistics(db, sub_menu):
             else:
                 chart = base.mark_line(point=alt.OverlayMarkDef(size=100, filled=True))
             
-            c1.altair_chart(chart, use_container_width=True)
-            c1.dataframe(time_stats, width="stretch", hide_index=True)
-            with c1: show_actions(time_stats, f"발주추이_{group_label}", f"{group_label}별 발주 추이", chart_col='총수량')
+            st.dataframe(time_stats, width="stretch", hide_index=True)
+            with st.expander("📈 그래프 보기", expanded=True):
+                st.altair_chart(chart, use_container_width=True)
+            show_actions(time_stats, f"발주추이_{group_label}", f"{group_label}별 발주 추이", chart_col='총수량')
         else:
             st.info("조회된 데이터가 없습니다.")
 
-    # --- 2. 제직 통계 ---
-    elif sub_menu == "제직 통계":
+    # --- 2. 제직내역 ---
+    elif sub_menu == "제직내역":
         st.subheader("제직 생산량 통계")
         df_weav = df.dropna(subset=['weaving_end_time']).copy()
         if start_dt and end_dt:
@@ -290,17 +291,15 @@ def render_statistics(db, sub_menu):
             df_weav['group_key'] = df_weav.apply(lambda x: get_group_key(x, 'weaving_end_time'), axis=1)
             group_label = stat_type.replace('별', '')
             
-            c1, c2 = st.columns(2)
-            
-            # 1. 우측: 제직기별 통계 및 선택
-            c2.write("**제직기별 생산량**")
+            # 1. 상단: 제직기별 통계 및 선택
+            st.write("**제직기별 생산량**")
             if 'machine_no' in df_weav.columns:
                 machine_stats = df_weav.groupby('machine_no').agg(생산롤수=('id', 'count'), 총생산매수=('real_stock', 'sum'), 총생산중량=('prod_weight_kg', 'sum')).sort_values('총생산매수', ascending=False).reset_index()
             else:
                 machine_stats = pd.DataFrame(columns=['machine_no', '생산롤수', '총생산매수', '총생산중량'])
 
             machine_stats['선택'] = False
-            edited_machine_stats = c2.data_editor(
+            edited_machine_stats = st.data_editor(
                 machine_stats,
                 column_order=["선택", "machine_no", "총생산매수", "생산롤수", "총생산중량"],
                 column_config={"선택": st.column_config.CheckboxColumn(default=False)},
@@ -308,10 +307,12 @@ def render_statistics(db, sub_menu):
                 width="stretch", hide_index=True, key="weaving_machine_selector"
             )
             selected_machines = edited_machine_stats[edited_machine_stats['선택']]['machine_no'].tolist()
-            with c2: show_actions(machine_stats.drop(columns=['선택']), "제직기별_생산통계", "제직기별 생산량 통계", chart_col='총생산매수')
+            show_actions(machine_stats.drop(columns=['선택']), "제직기별_생산통계", "제직기별 생산량 통계", chart_col='총생산매수')
 
             # [NEW] 비교 모드 토글
-            compare_mode = c2.toggle("제직기별 비교", key="weaving_compare")
+            compare_mode = st.toggle("제직기별 비교", key="weaving_compare")
+
+            st.divider()
 
             # 2. 데이터 필터링
             if selected_machines:
@@ -319,8 +320,8 @@ def render_statistics(db, sub_menu):
             else:
                 df_chart = df_weav.copy()
 
-            # 3. 좌측: 시계열 차트
-            c1.write(f"**{group_label}별 생산량 추이**")
+            # 3. 하단: 시계열 차트
+            st.write(f"**{group_label}별 생산량 추이**")
             
             if compare_mode and selected_machines:
                 group_cols = ['group_key', 'machine_no']
@@ -337,14 +338,15 @@ def render_statistics(db, sub_menu):
             else:
                 chart = base.mark_line(point=alt.OverlayMarkDef(size=100, filled=True))
                 
-            c1.altair_chart(chart, use_container_width=True)
-            c1.dataframe(time_stats, width="stretch", hide_index=True)
-            with c1: show_actions(time_stats, f"생산추이_{group_label}", f"{group_label}별 생산량 추이", chart_col='총생산매수')
+            st.dataframe(time_stats, width="stretch", hide_index=True)
+            with st.expander("📈 그래프 보기", expanded=True):
+                st.altair_chart(chart, use_container_width=True)
+            show_actions(time_stats, f"생산추이_{group_label}", f"{group_label}별 생산량 추이", chart_col='총생산매수')
         else:
             st.info("조회된 데이터가 없습니다.")
 
-    # --- 3. 염색 통계 ---
-    elif sub_menu == "염색 통계":
+    # --- 3. 염색내역 ---
+    elif sub_menu == "염색내역":
         st.subheader("염색 입고 및 비용 통계")
         df_dye = df.dropna(subset=['dyeing_in_date']).copy()
         if start_dt and end_dt:
@@ -368,14 +370,12 @@ def render_statistics(db, sub_menu):
             df_dye['group_key'] = df_dye.apply(lambda x: get_group_key(x, 'dyeing_in_date'), axis=1)
             group_label = stat_type.replace('별', '')
             
-            c1, c2 = st.columns(2)
-            
-            # 1. 우측: 업체별 통계 및 선택
-            c2.write("**업체별 실적**")
+            # 1. 상단: 업체별 통계 및 선택
+            st.write("**업체별 실적**")
             partner_stats = df_dye.groupby('dyeing_partner').agg(작업건수=('id', 'count'), 총수량=('stock', 'sum'), 총금액=('dyeing_amount', 'sum')).sort_values('총금액', ascending=False).reset_index()
 
             partner_stats['선택'] = False
-            edited_partner_stats = c2.data_editor(
+            edited_partner_stats = st.data_editor(
                 partner_stats,
                 column_order=["선택", "dyeing_partner", "총금액", "총수량", "작업건수"],
                 column_config={"선택": st.column_config.CheckboxColumn(default=False)},
@@ -383,10 +383,12 @@ def render_statistics(db, sub_menu):
                 width="stretch", hide_index=True, key="dyeing_partner_selector"
             )
             selected_partners = edited_partner_stats[edited_partner_stats['선택']]['dyeing_partner'].tolist()
-            with c2: show_actions(partner_stats.drop(columns=['선택']), "염색업체별_실적", "염색업체별 실적 및 비용", chart_col='총금액')
+            show_actions(partner_stats.drop(columns=['선택']), "염색업체별_실적", "염색업체별 실적 및 비용", chart_col='총금액')
 
             # [NEW] 비교 모드 토글
-            compare_mode = c2.toggle("업체별 비교", key="dyeing_compare")
+            compare_mode = st.toggle("업체별 비교", key="dyeing_compare")
+
+            st.divider()
 
             # 2. 데이터 필터링
             if selected_partners:
@@ -394,8 +396,8 @@ def render_statistics(db, sub_menu):
             else:
                 df_chart = df_dye.copy()
 
-            # 3. 좌측: 시계열 차트
-            c1.write(f"**{group_label}별 염색 비용 추이**")
+            # 3. 하단: 시계열 차트
+            st.write(f"**{group_label}별 염색 비용 추이**")
             
             if compare_mode and selected_partners:
                 group_cols = ['group_key', 'dyeing_partner']
@@ -412,14 +414,15 @@ def render_statistics(db, sub_menu):
             else:
                 chart = base.mark_line(point=alt.OverlayMarkDef(size=100, filled=True))
 
-            c1.altair_chart(chart, use_container_width=True)
-            c1.dataframe(time_stats, width="stretch", hide_index=True)
-            with c1: show_actions(time_stats, f"염색비용추이_{group_label}", f"{group_label}별 염색 비용 추이", chart_col='총금액')
+            st.dataframe(time_stats, width="stretch", hide_index=True)
+            with st.expander("📈 그래프 보기", expanded=True):
+                st.altair_chart(chart, use_container_width=True)
+            show_actions(time_stats, f"염색비용추이_{group_label}", f"{group_label}별 염색 비용 추이", chart_col='총금액')
         else:
             st.info("조회된 데이터가 없습니다.")
 
-    # --- 4. 봉제 통계 ---
-    elif sub_menu == "봉제 통계":
+    # --- 4. 봉제내역 ---
+    elif sub_menu == "봉제내역":
         st.subheader("봉제 생산 및 비용 통계")
         df_sew = df.dropna(subset=['sewing_end_date']).copy()
         if start_dt and end_dt:
@@ -445,14 +448,12 @@ def render_statistics(db, sub_menu):
             df_sew['group_key'] = df_sew.apply(lambda x: get_group_key(x, 'sewing_end_date'), axis=1)
             group_label = stat_type.replace('별', '')
             
-            c1, c2 = st.columns(2)
-            
-            # 1. 우측: 업체별 통계 및 선택
-            c2.write("**업체별 실적 및 비용**")
+            # 1. 상단: 업체별 통계 및 선택
+            st.write("**업체별 실적 및 비용**")
             partner_stats = df_sew.groupby('sewing_partner').agg(작업건수=('id', 'count'), 총생산수량=('stock', 'sum'), 총불량수량=('sewing_defect_qty', 'sum'), 총비용=('sewing_amount', 'sum')).sort_values('총생산수량', ascending=False).reset_index()
 
             partner_stats['선택'] = False
-            edited_partner_stats = c2.data_editor(
+            edited_partner_stats = st.data_editor(
                 partner_stats,
                 column_order=["선택", "sewing_partner", "총생산수량", "총비용", "작업건수", "총불량수량"],
                 column_config={"선택": st.column_config.CheckboxColumn(default=False)},
@@ -460,10 +461,12 @@ def render_statistics(db, sub_menu):
                 width="stretch", hide_index=True, key="sewing_partner_selector"
             )
             selected_partners = edited_partner_stats[edited_partner_stats['선택']]['sewing_partner'].tolist()
-            with c2: show_actions(partner_stats.drop(columns=['선택']), "봉제업체별_실적", "봉제업체별 실적 및 비용", chart_col='총생산수량')
+            show_actions(partner_stats.drop(columns=['선택']), "봉제업체별_실적", "봉제업체별 실적 및 비용", chart_col='총생산수량')
 
             # [NEW] 비교 모드 토글
-            compare_mode = c2.toggle("업체별 비교", key="sewing_compare")
+            compare_mode = st.toggle("업체별 비교", key="sewing_compare")
+
+            st.divider()
 
             # 2. 데이터 필터링
             if selected_partners:
@@ -471,8 +474,8 @@ def render_statistics(db, sub_menu):
             else:
                 df_chart = df_sew.copy()
 
-            # 3. 좌측: 시계열 차트
-            c1.write(f"**{group_label}별 봉제 수량 추이**")
+            # 3. 하단: 시계열 차트
+            st.write(f"**{group_label}별 봉제 수량 추이**")
             
             if compare_mode and selected_partners:
                 group_cols = ['group_key', 'sewing_partner']
@@ -489,14 +492,15 @@ def render_statistics(db, sub_menu):
             else:
                 chart = base.mark_line(point=alt.OverlayMarkDef(size=100, filled=True))
 
-            c1.altair_chart(chart, use_container_width=True)
-            c1.dataframe(time_stats, width="stretch", hide_index=True)
-            with c1: show_actions(time_stats, f"봉제수량추이_{group_label}", f"{group_label}별 봉제 수량 추이", chart_col='총생산수량')
+            st.dataframe(time_stats, width="stretch", hide_index=True)
+            with st.expander("📈 그래프 보기", expanded=True):
+                st.altair_chart(chart, use_container_width=True)
+            show_actions(time_stats, f"봉제수량추이_{group_label}", f"{group_label}별 봉제 수량 추이", chart_col='총생산수량')
         else:
             st.info("조회된 데이터가 없습니다.")
 
-    # --- 5. 출고/운임 통계 ---
-    elif sub_menu == "출고/운임 통계":
+    # --- 5. 출고/운임내역 ---
+    elif sub_menu == "출고/운임내역":
         st.subheader("출고 실적 및 운임비 통계")
         df_ship = df.dropna(subset=['shipping_date']).copy()
         if start_dt and end_dt:
@@ -524,14 +528,12 @@ def render_statistics(db, sub_menu):
             df_ship['group_key'] = df_ship.apply(lambda x: get_group_key(x, 'shipping_date'), axis=1)
             group_label = stat_type.replace('별', '')
             
-            c1, c2 = st.columns(2)
-            
-            # 1. 우측: 배송업체별 통계 및 선택
-            c2.write("**배송업체별 운임비**")
+            # 1. 상단: 배송업체별 통계 및 선택
+            st.write("**배송업체별 운임비**")
             carrier_stats = df_ship.groupby('shipping_carrier').agg(출고건수=('id', 'count'), 총수량=('stock', 'sum'), 총운임비=('shipping_cost', 'sum')).sort_values('총운임비', ascending=False).reset_index()
 
             carrier_stats['선택'] = False
-            edited_carrier_stats = c2.data_editor(
+            edited_carrier_stats = st.data_editor(
                 carrier_stats,
                 column_order=["선택", "shipping_carrier", "총운임비", "총수량", "출고건수"],
                 column_config={"선택": st.column_config.CheckboxColumn(default=False)},
@@ -539,10 +541,12 @@ def render_statistics(db, sub_menu):
                 width="stretch", hide_index=True, key="shipping_carrier_selector"
             )
             selected_carriers = edited_carrier_stats[edited_carrier_stats['선택']]['shipping_carrier'].tolist()
-            with c2: show_actions(carrier_stats.drop(columns=['선택']), "배송업체별_운임통계", "배송업체별 운임비 통계", chart_col='총운임비')
+            show_actions(carrier_stats.drop(columns=['선택']), "배송업체별_운임통계", "배송업체별 운임비 통계", chart_col='총운임비')
 
             # [NEW] 비교 모드 토글
-            compare_mode = c2.toggle("업체별 비교", key="shipping_compare")
+            compare_mode = st.toggle("업체별 비교", key="shipping_compare")
+
+            st.divider()
 
             # 2. 데이터 필터링
             if selected_carriers:
@@ -550,8 +554,8 @@ def render_statistics(db, sub_menu):
             else:
                 df_chart = df_ship.copy()
 
-            # 3. 좌측: 시계열 차트
-            c1.write(f"**{group_label}별 운임비 지출 추이**")
+            # 3. 하단: 시계열 차트
+            st.write(f"**{group_label}별 운임비 지출 추이**")
             
             if compare_mode and selected_carriers:
                 group_cols = ['group_key', 'shipping_carrier']
@@ -568,9 +572,10 @@ def render_statistics(db, sub_menu):
             else:
                 chart = base.mark_line(point=alt.OverlayMarkDef(size=100, filled=True))
 
-            c1.altair_chart(chart, use_container_width=True)
-            c1.dataframe(time_stats, width="stretch", hide_index=True)
-            with c1: show_actions(time_stats, f"운임비추이_{group_label}", f"{group_label}별 운임비 지출 추이", chart_col='총운임비')
+            st.dataframe(time_stats, width="stretch", hide_index=True)
+            with st.expander("📈 그래프 보기", expanded=True):
+                st.altair_chart(chart, use_container_width=True)
+            show_actions(time_stats, f"운임비추이_{group_label}", f"{group_label}별 운임비 지출 추이", chart_col='총운임비')
             
             st.divider()
             st.write("📋 거래처별 출고 실적")

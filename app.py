@@ -276,12 +276,12 @@ with st.sidebar:
                         menu_item("재고 임의 등록", "재고현황")
 
         if st.session_state.get("role") == "admin":
-            with st.expander("통계분석", expanded=(cm == "통합통계")):
-                menu_item("발주 통계", "통합통계")
-                menu_item("제직 통계", "통합통계")
-                menu_item("염색 통계", "통합통계")
-                menu_item("봉제 통계", "통합통계")
-                menu_item("출고/운임 통계", "통합통계")
+            with st.expander("관리내역", expanded=(cm == "관리내역")):
+                menu_item("발주내역", "관리내역")
+                menu_item("제직내역", "관리내역")
+                menu_item("염색내역", "관리내역")
+                menu_item("봉제내역", "관리내역")
+                menu_item("출고/운임내역", "관리내역")
 
         # [수정] 하위 메뉴 권한이 하나라도 있을 때만 상위 메뉴 표시
         has_basic_info_access = check_access("제품 관리") or check_access("거래처관리") or check_access("제직기관리") or check_access("제품코드설정")
@@ -370,7 +370,7 @@ elif menu == "출고현황":
     render_shipping_status(db, sub_menu)
 elif menu == "재고현황":
     render_inventory(db, sub_menu)
-elif menu == "통합통계":
+elif menu == "관리내역":
     render_statistics(db, sub_menu)
 elif menu == "제품 관리":
     render_product_master(db, sub_menu)

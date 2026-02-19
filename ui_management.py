@@ -1573,8 +1573,8 @@ def render_machines(db, sub_menu):
     st.header("제직기 관리")
     
     if sub_menu == "제직기 등록":
-        st.subheader("제직기 등록 및 수정")
-        st.info("호기 번호가 같으면 기존 정보가 수정(덮어쓰기)됩니다.")
+        st.subheader("제직기 등록")
+        st.info("신규 제직기를 등록합니다. 이미 등록된 호기 번호는 사용할 수 없습니다.")
         
         # [NEW] 저장 성공 메시지
         if st.session_state.get("machine_reg_success"):
@@ -1592,16 +1592,20 @@ def render_machines(db, sub_menu):
             new_note = st.text_input("특이사항/메모")
             
             if st.form_submit_button("저장"):
-                db.collection("machines").document(str(new_no)).set({
-                    "machine_no": new_no,
-                    "name": new_name,
-                    "model": new_model,
-                    "loom_type": new_loom,
-                    "jacquard_type": new_jacquard,
-                    "note": new_note
-                })
-                st.session_state["machine_reg_success"] = True
-                st.rerun()
+                doc_ref = db.collection("machines").document(str(new_no))
+                if doc_ref.get().exists:
+                    st.error(f"⛔ 이미 등록된 호기 번호입니다: {new_no}호기")
+                else:
+                    doc_ref.set({
+                        "machine_no": new_no,
+                        "name": new_name,
+                        "model": new_model,
+                        "loom_type": new_loom,
+                        "jacquard_type": new_jacquard,
+                        "note": new_note
+                    })
+                    st.session_state["machine_reg_success"] = True
+                    st.rerun()
 
     elif sub_menu == "제직기 목록":
         st.subheader("제직기 목록")

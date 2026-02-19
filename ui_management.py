@@ -1794,29 +1794,34 @@ def render_users(db, sub_menu):
                 st.success(st.session_state["user_reg_success"])
                 del st.session_state["user_reg_success"]
 
+            # [NEW] 입력 폼 초기화를 위한 키 생성
+            if "user_reg_key" not in st.session_state:
+                st.session_state["user_reg_key"] = 0
+            rk = st.session_state["user_reg_key"]
+
             # [수정] st.form 제거하여 동적 UI(권한 변경 시 거래처 선택) 즉시 반응하도록 변경
             c1, c2 = st.columns(2)
-            u_id = c1.text_input("아이디 (ID)", key="new_u_id")
-            u_pw = c2.text_input("비밀번호", type="password", key="new_u_pw")
+            u_id = c1.text_input("아이디 (ID)", key=f"new_u_id_{rk}")
+            u_pw = c2.text_input("비밀번호", type="password", key=f"new_u_pw_{rk}")
             c3, c4 = st.columns(2)
-            u_name = c3.text_input("이름", key="new_u_name")
-            u_role = c4.selectbox("권한", ["user", "admin", "partner"], key="new_u_role")
+            u_name = c3.text_input("이름", key=f"new_u_name_{rk}")
+            u_role = c4.selectbox("권한", ["user", "admin", "partner"], key=f"new_u_role_{rk}")
             c5, c6 = st.columns(2)
-            u_dept = c5.text_input("부서/직책", key="new_u_dept")
-            u_phone = c6.text_input("연락처", key="new_u_phone")
+            u_dept = c5.text_input("부서/직책", key=f"new_u_dept_{rk}")
+            u_phone = c6.text_input("연락처", key=f"new_u_phone_{rk}")
             
             u_linked_partner = ""
             if u_role == "partner":
                 partners = get_partners("발주처")
                 if partners:
-                    u_linked_partner = st.selectbox("연동 거래처 (발주처)", partners, key="new_u_lp")
+                    u_linked_partner = st.selectbox("연동 거래처 (발주처)", partners, key=f"new_u_lp_{rk}")
                 else:
                     st.warning("등록된 발주처가 없습니다.")
             
             default_perms = ["발주현황"] if u_role == "partner" else ["발주서접수", "발주현황"]
-            u_perms = st.multiselect("접근 가능 메뉴", all_menus, default=default_perms, key="new_u_perms")
+            u_perms = st.multiselect("접근 가능 메뉴", all_menus, default=default_perms, key=f"new_u_perms_{rk}")
             
-            if st.button("사용자 등록", type="primary", key="btn_add_new_user"):
+            if st.button("사용자 등록", type="primary", key=f"btn_add_new_user_{rk}"):
                 if u_id and u_pw and u_name:
                     if db.collection("users").document(u_id).get().exists:
                         st.error("이미 존재하는 아이디입니다.")
@@ -1831,9 +1836,8 @@ def render_users(db, sub_menu):
                         # [수정] 메시지를 세션에 저장하고 리런 (화면 갱신 후 메시지 표시 및 필드 초기화)
                         st.session_state["user_reg_success"] = f"✅ 사용자 {u_name}({u_id}) 등록이 완료되었습니다."
                         
-                        keys_to_clear = ["new_u_id", "new_u_pw", "new_u_name", "new_u_role", "new_u_dept", "new_u_phone", "new_u_lp", "new_u_perms"]
-                        for k in keys_to_clear:
-                            if k in st.session_state: del st.session_state[k]
+                        # [수정] 키를 증가시켜 입력 필드 초기화
+                        st.session_state["user_reg_key"] += 1
                         st.rerun()
                 else:
                     st.warning("아이디, 비밀번호, 이름은 필수 입력입니다.")

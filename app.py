@@ -76,25 +76,29 @@ if not st.session_state["logged_in"]:
                     if user_doc.exists:
                         user_data = user_doc.to_dict()
                         if user_data.get("password") == login_pw:
-                            st.session_state["logged_in"] = True
-                            st.session_state["role"] = user_data.get("role", "user")
-                            st.session_state["user_name"] = user_data.get("name", login_id)
-                            st.session_state["user_id"] = login_id
-                            st.session_state["department"] = user_data.get("department", "")
-                            st.session_state["linked_partner"] = user_data.get("linked_partner", "")
-                            # [NEW] 권한 목록 세션 저장
-                            st.session_state["permissions"] = user_data.get("permissions", [])
-                            if "current_menu" in st.session_state:
-                                del st.session_state["current_menu"]
-                            
-                            # [NEW] 세션 생성 및 URL 저장 (새로고침 유지용)
-                            new_session_id = str(uuid.uuid4())
-                            db.collection("sessions").document(new_session_id).set({
-                                "user_id": login_id,
-                                "created_at": datetime.datetime.now()
-                            })
-                            st.query_params["session_id"] = new_session_id
-                            st.rerun()
+                            # [NEW] 직원 로그인 탭에서 거래처 계정 로그인 차단
+                            if user_data.get("role") == "partner":
+                                st.error("거래처 계정입니다. '거래처 로그인' 탭을 이용해주세요.")
+                            else:
+                                st.session_state["logged_in"] = True
+                                st.session_state["role"] = user_data.get("role", "user")
+                                st.session_state["user_name"] = user_data.get("name", login_id)
+                                st.session_state["user_id"] = login_id
+                                st.session_state["department"] = user_data.get("department", "")
+                                st.session_state["linked_partner"] = user_data.get("linked_partner", "")
+                                # [NEW] 권한 목록 세션 저장
+                                st.session_state["permissions"] = user_data.get("permissions", [])
+                                if "current_menu" in st.session_state:
+                                    del st.session_state["current_menu"]
+                                
+                                # [NEW] 세션 생성 및 URL 저장 (새로고침 유지용)
+                                new_session_id = str(uuid.uuid4())
+                                db.collection("sessions").document(new_session_id).set({
+                                    "user_id": login_id,
+                                    "created_at": datetime.datetime.now()
+                                })
+                                st.query_params["session_id"] = new_session_id
+                                st.rerun()
                         else:
                             st.error("비밀번호가 일치하지 않습니다.")
                     else:
@@ -140,7 +144,22 @@ if not st.session_state["logged_in"]:
 
 # 3. [왼쪽 사이드바] 상품 등록 기능
 with st.sidebar:
-    st.markdown("<h2 style='text-align: center; margin-bottom: 20px;'>🏭 세안타올<br>생산관리 시스템</h2>", unsafe_allow_html=True)
+    # [NEW] 회사 정보 가져오기 (상호명 표시용)
+    try:
+        comp_info_ref = db.collection("settings").document("company_info").get()
+        if comp_info_ref.exists:
+            company_name = comp_info_ref.to_dict().get("name", "세안타올")
+        else:
+            company_name = "세안타올"
+    except:
+        company_name = "세안타올"
+    # [수정] 회사명 글씨 크기 확대 및 스타일 개선
+    st.markdown(f"""
+        <div style='text-align: center; margin-bottom: 20px;'>
+            <h1 style='margin:0; font-size: 2.2rem; font-weight: 700;'>🏢 {company_name}</h1>
+            <h3 style='margin:0; font-size: 1.5rem; color: #333; font-weight: 600; margin-top: 5px;'>생산관리 시스템</h3>
+        </div>
+    """, unsafe_allow_html=True)
     user_display = st.session_state.get("user_name", st.session_state.get("role"))
     st.write(f"환영합니다.  **{user_display}**님!")
     
@@ -153,6 +172,10 @@ with st.sidebar:
             st.session_state["current_menu"] = "발주현황(거래처)"
         else:
             st.session_state["current_menu"] = "공지사항"
+    
+    # [NEW] 하위 메뉴 상태 초기화
+    if "current_sub_menu" not in st.session_state:
+        st.session_state["current_sub_menu"] = None
 
     # [NEW] 권한 확인 헬퍼 함수
     def check_access(menu_name):
@@ -162,108 +185,143 @@ with st.sidebar:
         user_perms = st.session_state.get("permissions", [])
         return menu_name in user_perms
 
+    # [NEW] 메뉴 아이템 생성 헬퍼 함수
+    def menu_item(label, main_menu, sub_menu=None):
+        # sub_menu가 없으면 label을 사용
+        effective_sub_menu = sub_menu if sub_menu is not None else label
+        
+        # 현재 선택된 메뉴와 같으면 강조 스타일 적용
+        is_selected = (st.session_state.get("current_menu") == main_menu and 
+                       st.session_state.get("current_sub_menu") == effective_sub_menu)
+        
+        # 버튼 대신 st.markdown을 사용해 클릭 가능한 링크처럼 구현 (더 깔끔함)
+        button_style = "background-color: #e6f3ff; color: #1c62b0; font-weight: bold;" if is_selected else "background-color: #f0f2f6;"
+        
+        if st.button(label, use_container_width=True, key=f"menu_{main_menu}_{effective_sub_menu}"):
+            st.session_state["current_menu"] = main_menu
+            st.session_state["current_sub_menu"] = effective_sub_menu
+            
+            # 공지사항 메뉴 클릭 시 특별 처리
+            if main_menu == "공지사항":
+                st.session_state["notice_view_mode"] = "list"
+                st.session_state["selected_post_id"] = None
+                st.session_state["notice_expander_state"] = False
+                st.query_params.clear()
+            st.rerun()
+
     # [NEW] 거래처(partner) 계정일 경우 메뉴 간소화
     if st.session_state.get("role") == "partner":
-        st.info(f"🏢 **{st.session_state.get('linked_partner')}** 전용")
-        if st.button("📊 발주 현황 조회", use_container_width=True):
-            st.session_state["current_menu"] = "발주현황(거래처)"
-            st.rerun()
+        st.info(f"**{st.session_state.get('linked_partner')}** 전용")
+        menu_item("발주 현황 조회", "발주현황(거래처)")
             
     else:
-        # [기존] 내부 직원용 메뉴
-        # [NEW] 공지사항 버튼 독립 배치
-        if st.button("📢 공지사항", use_container_width=True):
-            st.session_state["current_menu"] = "공지사항"
-            # [NEW] 공지사항 목록 뷰 초기화
-            st.session_state["notice_view_mode"] = "list"
-            st.session_state["selected_post_id"] = None
-            st.session_state["notice_expander_state"] = False # [수정] 작성 폼 닫기
-            st.query_params.clear() # [수정] URL 파라미터 초기화 (상세보기 해제)
-            st.rerun()
-        if st.button("📅 업무일정", use_container_width=True):
-            st.session_state["current_menu"] = "업무일정"
-            st.rerun()
-
-        st.subheader("메뉴 선택")
+        # [NEW] 직원용 전체 메뉴 구조
+        cm = st.session_state.get("current_menu")
         
-        # [NEW] 발주서접수 독립 배치
+        # [NEW] 메뉴 버튼 스타일링 (위치 기반 지정)
+        # [수정] CSS 방식 대신 이모지를 사용하여 직관적으로 구분 (더 안정적임)
+        menu_item("📢 공지사항", "공지사항")
+        menu_item("🗓️ 업무일정", "업무일정")
+        
+        st.divider()
+
         if check_access("발주서접수"):
-            if st.button("📑 발주서접수", use_container_width=True):
-                st.session_state["current_menu"] = "발주서접수"
-                st.rerun()
-            
-        # [수정] 구분선 간격 조정을 위해 HTML hr 태그 사용
-        st.markdown("<hr style='margin-top: 0.5rem; margin-bottom: 1rem;'>", unsafe_allow_html=True)
+            menu_item("📝 발주서접수", "발주서접수", "개별 접수")
+            # [수정] 구분선이 잘 보이도록 색상(#ccc)을 진하게 하고 마진 조정
+            st.markdown("<hr style='margin: 1rem 0; border: none; border-top: 1px solid #ccc;' />", unsafe_allow_html=True)
 
-        with st.expander("🏭 생산관리", expanded=True):
-            if check_access("발주현황"):
-                if st.button("📊 발주현황", use_container_width=True):
-                    st.session_state["current_menu"] = "발주현황"
-                    st.rerun()
-            if check_access("제직현황"):
-                if st.button("🧵 제직현황", use_container_width=True):
-                    st.session_state["current_menu"] = "제직현황"
-                    st.rerun()
-            if check_access("염색현황"):
-                if st.button("🎨 염색현황", use_container_width=True):
-                    st.session_state["current_menu"] = "염색현황"
-                    st.rerun()
-            if check_access("봉제현황"):
-                if st.button("🪡 봉제현황", use_container_width=True):
-                    st.session_state["current_menu"] = "봉제현황"
-                    st.rerun()
-            if check_access("출고현황"): # 출고작업/출고현황 통합 권한으로 처리하거나 분리 가능 (여기선 출고현황 권한으로 둘 다 제어 예시)
-                if st.button("📤 출고작업", use_container_width=True):
-                    st.session_state["current_menu"] = "출고작업"
-                    st.rerun()
-                if st.button("🚚 출고현황", use_container_width=True):
-                    st.session_state["current_menu"] = "출고현황"
-                    st.rerun()
-            if check_access("재고현황"):
-                if st.button("📦 재고현황", use_container_width=True):
-                    st.session_state["current_menu"] = "재고현황"
-                    st.rerun()
-            # 통계 메뉴 권한이 별도로 없다면 관리자 전용 혹은 기본 표시 (여기선 관리자만 보이게 설정 예시)
-            if st.session_state.get("role") == "admin": 
-                if st.button("📈 공정별통계", use_container_width=True):
-                    st.session_state["current_menu"] = "통합통계"
-                    st.rerun()
+        if check_access("발주현황"):
+            with st.expander("발주현황", expanded=(cm == "발주현황")):
+                menu_item("발주현황 조회", "발주현황")
+                if st.session_state.get("role") == "admin":
+                    menu_item("발주내역삭제(엑셀업로드)", "발주현황")
 
-        with st.expander("⚙️ 기초정보관리", expanded=True):
-            if check_access("제품 관리"):
-                if st.button("📦 제품 관리", use_container_width=True):
-                    st.session_state["current_menu"] = "제품 관리"
-                    st.rerun()
-            if check_access("거래처관리"):
-                if st.button("🏢 거래처관리", use_container_width=True):
-                    st.session_state["current_menu"] = "거래처관리"
-                    st.rerun()
-            if check_access("제직기관리"):
-                if st.button("🏭 제직기관리", use_container_width=True):
-                    st.session_state["current_menu"] = "제직기관리"
-                    st.rerun()
-            if check_access("제품코드설정"):
-                if st.button("📝 제품코드설정", use_container_width=True):
-                    st.session_state["current_menu"] = "제품코드설정"
-                    st.rerun()
-            # 회사정보 설정은 관리자 전용
-            if st.session_state.get("role") == "admin":
-                if st.button("🏢 회사정보 설정", use_container_width=True):
-                    st.session_state["current_menu"] = "회사정보 설정"
-                    st.rerun()
-            if st.session_state.get("role") == "admin":
-                if st.button("👤 사용자 관리", use_container_width=True):
-                    st.session_state["current_menu"] = "사용자 관리"
-                    st.rerun()
+        # [수정] 하위 메뉴 권한이 하나라도 있을 때만 상위 메뉴 표시
+        has_production_access = check_access("제직현황") or check_access("염색현황") or check_access("봉제현황")
+        if has_production_access:
+            with st.expander("생산관리", expanded=(cm in ["제직현황", "염색현황", "봉제현황"])):
+                if check_access("제직현황"):
+                    with st.expander("제직현황", expanded=(cm == "제직현황")):
+                        menu_item("제직대기 목록", "제직현황")
+                        menu_item("제직중 목록", "제직현황")
+                        menu_item("제직완료 목록", "제직현황")
+                        menu_item("작업일지", "제직현황")
+                        menu_item("생산일지", "제직현황")
+                if check_access("염색현황"):
+                    with st.expander("염색현황", expanded=(cm == "염색현황")):
+                        menu_item("염색 대기 목록", "염색현황")
+                        menu_item("염색중 목록", "염색현황")
+                        menu_item("염색 완료 목록", "염색현황")
+                        menu_item("색번 설정", "염색현황")
+                if check_access("봉제현황"):
+                    with st.expander("봉제현황", expanded=(cm == "봉제현황")):
+                        menu_item("봉제 대기 목록", "봉제현황")
+                        menu_item("봉제중 목록", "봉제현황")
+                        menu_item("봉제 완료 목록", "봉제현황")
+
+        # [수정] 하위 메뉴 권한이 하나라도 있을 때만 상위 메뉴 표시
+        has_shipping_access = check_access("출고현황") or check_access("재고현황")
+        if has_shipping_access:
+            with st.expander("출고/재고", expanded=(cm in ["출고작업", "출고현황", "재고현황"])):
+                if check_access("출고현황"):
+                    with st.expander("출고작업", expanded=(cm == "출고작업")):
+                        menu_item("주문별 출고", "출고작업")
+                        menu_item("제품별 일괄 출고", "출고작업")
+                    with st.expander("출고현황", expanded=(cm == "출고현황")):
+                        menu_item("출고 완료 내역 (조회/명세서)", "출고현황")
+                        menu_item("배송/운임 통계", "출고현황")
+                if check_access("재고현황"):
+                    with st.expander("재고현황", expanded=(cm == "재고현황")):
+                        menu_item("재고 현황 조회", "재고현황")
+                        menu_item("재고 임의 등록", "재고현황")
+
+        if st.session_state.get("role") == "admin":
+            with st.expander("통계분석", expanded=(cm == "통합통계")):
+                menu_item("발주 통계", "통합통계")
+                menu_item("제직 통계", "통합통계")
+                menu_item("염색 통계", "통합통계")
+                menu_item("봉제 통계", "통합통계")
+                menu_item("출고/운임 통계", "통합통계")
+
+        # [수정] 하위 메뉴 권한이 하나라도 있을 때만 상위 메뉴 표시
+        has_basic_info_access = check_access("제품 관리") or check_access("거래처관리") or check_access("제직기관리") or check_access("제품코드설정")
+        if has_basic_info_access:
+            with st.expander("기초정보관리", expanded=(cm in ["제품 관리", "거래처관리", "제직기관리", "제품코드설정"])):
+                if check_access("제품 관리"):
+                    with st.expander("제품 관리", expanded=(cm == "제품 관리")):
+                        menu_item("제품 목록", "제품 관리")
+                        menu_item("제품 등록", "제품 관리")
+                if check_access("거래처관리"):
+                    with st.expander("거래처관리", expanded=(cm == "거래처관리")):
+                        menu_item("거래처 목록", "거래처관리")
+                        menu_item("거래처 등록", "거래처관리")
+                        menu_item("거래처 구분 관리", "거래처관리")
+                if check_access("제직기관리"):
+                    with st.expander("제직기관리", expanded=(cm == "제직기관리")):
+                        menu_item("제직기 목록", "제직기관리")
+                        menu_item("제직기 등록", "제직기관리")
+                if check_access("제품코드설정"):
+                    with st.expander("제품코드설정", expanded=(cm == "제품코드설정")):
+                        menu_item("제품 종류", "제품코드설정")
+                        menu_item("사종", "제품코드설정")
+                        menu_item("중량", "제품코드설정")
+                        menu_item("사이즈", "제품코드설정")
+
+        if st.session_state.get("role") == "admin":
+            with st.expander("시스템관리", expanded=(cm in ["사용자 관리", "회사정보 관리"])):
+                with st.expander("사용자 관리", expanded=(cm == "사용자 관리")):
+                    menu_item("사용자 목록", "사용자 관리")
+                    menu_item("사용자 등록", "사용자 관리")
+                with st.expander("회사정보 관리", expanded=(cm == "회사정보 관리")):
+                    menu_item("회사정보 조회", "회사정보 관리")
+                    menu_item("정보 수정", "회사정보 관리")
     
-    # [NEW] 하단 여백 추가 (버튼들을 아래로 밀어내기 위함)
-    st.markdown("<div style='margin-top: 50px;'></div>", unsafe_allow_html=True)
+    # [수정] 하단 여백 축소 (50px -> 10px)
+    st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
 
     st.divider()
     
-    if st.button("⚙️ 로그인 정보 설정", use_container_width=True):
-        st.session_state["current_menu"] = "로그인 정보 설정"
-        st.rerun()
+    menu_item("로그인 정보 설정", "로그인 정보 설정")
     
     if st.button("로그아웃", use_container_width=True):
         # [NEW] 로그아웃 시 세션 삭제 및 URL 초기화
@@ -281,46 +339,48 @@ with st.sidebar:
         st.rerun()
  
 menu = st.session_state["current_menu"]
+sub_menu = st.session_state.get("current_sub_menu")
+
 # 4. [메인 화면] 메뉴별 기능 구현
 if menu == "공지사항":
     render_notice_board(db)
 elif menu == "업무일정":
     render_schedule(db)
 elif menu == "발주서접수":
-    render_order_entry(db)
+    render_order_entry(db, sub_menu)
 elif menu == "발주현황":
-    render_order_status(db)
+    render_order_status(db, sub_menu)
 elif menu == "발주현황(거래처)":
     render_partner_order_status(db)
 
 elif menu == "제직현황":
-    render_weaving(db)
+    render_weaving(db, sub_menu)
 elif menu == "염색현황":
-    render_dyeing(db)
+    render_dyeing(db, sub_menu)
 elif menu == "봉제현황":
-    render_sewing(db)
+    render_sewing(db, sub_menu)
 elif menu == "출고작업":
-    render_shipping_operations(db)
+    render_shipping_operations(db, sub_menu)
 elif menu == "출고현황":
-    render_shipping_status(db)
+    render_shipping_status(db, sub_menu)
 elif menu == "재고현황":
-    render_inventory(db)
+    render_inventory(db, sub_menu)
 elif menu == "통합통계":
-    render_statistics(db)
+    render_statistics(db, sub_menu)
 elif menu == "제품 관리":
-    render_product_master(db)
+    render_product_master(db, sub_menu)
 elif menu == "거래처관리":
-    render_partners(db)
+    render_partners(db, sub_menu)
 elif menu == "제직기관리":
-    render_machines(db)
+    render_machines(db, sub_menu)
 elif menu == "제품코드설정":
-    render_codes(db)
+    render_codes(db, sub_menu)
 elif menu == "사용자 관리":
-    render_users(db)
-elif menu == "회사정보 설정":
-    render_company_settings(db)
+    render_users(db, sub_menu)
+elif menu == "회사정보 관리":
+    render_company_settings(db, sub_menu)
 elif menu == "로그인 정보 설정":
     render_my_profile(db)
 else:
-    st.header(f"🏗️ {menu}")
+    st.header(f"{menu}")
     st.info(f"'{menu}' 기능은 추후 업데이트될 예정입니다.")

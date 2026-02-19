@@ -5,16 +5,13 @@ import io
 from firebase_admin import firestore
 from utils import get_partners, generate_report_html, get_common_codes, manage_code_with_code
 
-def render_weaving(db):
-    st.header("🧵 제직 현황")
+def render_weaving(db, sub_menu):
+    st.header("제직 현황")
     if "weaving_df_key" not in st.session_state:
         st.session_state["weaving_df_key"] = 0
     st.info("발주된 건을 확인하고 제직 작업을 지시하거나, 완료된 건을 염색 공정으로 넘깁니다.")
 
-    # 1. 제직기별 제직 현황 (Dashboard)
-    st.subheader("🏭 제직기별 제직 현황")
-    
-    # 제직기 설정 가져오기
+    # [공통] 제직기 설정 가져오기 (작업일지 등에서도 사용됨)
     machines_docs = list(db.collection("machines").order_by("machine_no").stream())
     if not machines_docs:
         # 설정이 없으면 기본 1~9호대 가상 데이터 사용 (호환성 유지)
@@ -22,47 +19,48 @@ def render_weaving(db):
     else:
         machines_data = [d.to_dict() for d in machines_docs]
     
-    # 현재 가동 중인 제직기 정보 가져오기
-    busy_machines = {}
-    running_docs = db.collection("orders").where("status", "==", "제직중").stream()
-    for doc in running_docs:
-        d = doc.to_dict()
-        m_no = d.get("machine_no")
-        if m_no:
-            busy_machines[str(m_no)] = d
-            
-    # 제직기 상태 표시 (한 줄에 5개씩 자동 줄바꿈)
-    cols_per_row = 5
-    for i in range(0, len(machines_data), cols_per_row):
-        cols = st.columns(cols_per_row)
-        for j in range(cols_per_row):
-            if i + j < len(machines_data):
-                m = machines_data[i+j]
-                m_no = str(m['machine_no'])
-                m_name = m['name']
-                # [수정] 모델명 제거하고 비고만 표시
-                m_desc = m.get('note', '').strip()
-                
-                with cols[j]:
-                    if m_no in busy_machines:
-                        item = busy_machines[m_no]
-                        roll_cnt = item.get('weaving_roll_count', 0)
-                        # 진행률 표시
-                        cur_roll = item.get('completed_rolls', 0) + 1
-                        # [수정] 발주처 표시 추가 (발주처 / 품명 / 롤정보 / 수량)
-                        st.error(f"**{m_name}**\n\n{item.get('customer', '')}  \n{item.get('name')} ({cur_roll}/{roll_cnt}롤) / {int(item.get('stock', 0)):,}장")
-                    else:
-                        st.success(f"**{m_name}**\n\n대기중\n\n{m_desc}")
+    # [수정] 작업일지와 생산일지에서는 상단 대시보드 숨김
+    busy_machines = {} # 대시보드 미표시 시에도 아래 로직에서 참조할 수 있으므로 초기화
     
-    st.divider()
-
-    # 5개의 탭으로 분리하여 관리
-    tab_waiting, tab_weaving, tab_done, tab_worklog, tab_prodlog = st.tabs([
-        "📋 제직대기 목록", "🏭 제직중 목록", "✅ 제직완료 목록", "✍️ 작업일지", "📄 생산일지"
-    ])
+    if sub_menu not in ["작업일지", "생산일지"]:
+        # [수정] st.expander를 사용하여 접고 펼 수 있도록 변경
+        with st.expander("제직기별 제직 현황", expanded=True):
+            # 1. 제직기별 제직 현황 (Dashboard)
+            # 현재 가동 중인 제직기 정보 가져오기
+            running_docs = db.collection("orders").where("status", "==", "제직중").stream()
+            for doc in running_docs:
+                d = doc.to_dict()
+                m_no = d.get("machine_no")
+                if m_no:
+                    busy_machines[str(m_no)] = d
+                    
+            # 제직기 상태 표시 (한 줄에 5개씩 자동 줄바꿈)
+            cols_per_row = 5
+            for i in range(0, len(machines_data), cols_per_row):
+                cols = st.columns(cols_per_row)
+                for j in range(cols_per_row):
+                    if i + j < len(machines_data):
+                        m = machines_data[i+j]
+                        m_no = str(m['machine_no'])
+                        m_name = m['name']
+                        # [수정] 모델명 제거하고 비고만 표시
+                        m_desc = m.get('note', '').strip()
+                        
+                        with cols[j]:
+                            if m_no in busy_machines:
+                                item = busy_machines[m_no]
+                                roll_cnt = item.get('weaving_roll_count', 0)
+                                # 진행률 표시
+                                cur_roll = item.get('completed_rolls', 0) + 1
+                                # [수정] 발주처 표시 추가 (발주처 / 품명 / 롤정보 / 수량)
+                                st.error(f"**{m_name}**\n\n{item.get('customer', '')}  \n{item.get('name')} ({cur_roll}/{roll_cnt}롤) / {int(item.get('stock', 0)):,}장")
+                            else:
+                                st.success(f"**{m_name}**\n\n대기중\n\n{m_desc}")
+        
+        st.divider()
 
     # --- 1. 제직대기 탭 ---
-    with tab_waiting:
+    if sub_menu == "제직대기 목록":
         st.subheader("제직 대기 목록")
         
         # [NEW] 목록 갱신을 위한 키 초기화 (제직대기)
@@ -107,7 +105,7 @@ def render_weaving(db):
                 sel_id = sel_row['id']
                 
                 st.divider()
-                st.markdown(f"### 🚀 제직기 배정: **{sel_row['name']}**")
+                st.markdown(f"### 제직기 배정: **{sel_row['name']}**")
                 
                 if len(selection.selection.rows) > 1:
                     st.warning("⚠️ 여러 항목이 선택되었습니다. 현재 제직기 배정은 목록의 **첫 번째 항목**에 대해서만 수행됩니다.")
@@ -162,7 +160,7 @@ def render_weaving(db):
             st.info("대기 중인 작업이 없습니다.")
 
     # --- 2. 제직중 탭 ---
-    with tab_weaving:
+    elif sub_menu == "제직중 목록":
         st.subheader("제직중 목록")
         
         # [추가] 작업 결과 피드백 메시지 표시 (저장 후 리런되어도 메시지 유지)
@@ -233,7 +231,7 @@ def render_weaving(db):
                     st.session_state[ss_kg_key] = float((new_stock * base_weight) / 1000)
 
                 st.divider()
-                st.markdown(f"### ✅ 제직 완료 처리: **{sel_row['name']}**")
+                st.markdown(f"### 제직 완료 처리: **{sel_row['name']}**")
                 
                 cur_completed = int(sel_row.get('completed_rolls', 0)) if not pd.isna(sel_row.get('completed_rolls')) else 0
                 total_rolls = int(sel_row.get('weaving_roll_count', 1)) if not pd.isna(sel_row.get('weaving_roll_count')) else 1
@@ -323,7 +321,7 @@ def render_weaving(db):
             st.info("현재 제직 중인 작업이 없습니다.")
 
     # --- 3. 제직완료 탭 ---
-    with tab_done:
+    elif sub_menu == "제직완료 목록":
         st.subheader("제직 완료 목록")
         
         # [NEW] 목록 갱신을 위한 키 초기화 (제직완료)
@@ -497,7 +495,7 @@ def render_weaving(db):
                     st.error(f"⛔ 현재 상태가 '**{current_status}**'이므로 이 단계에서 수정하거나 취소할 수 없습니다.")
                     st.info("다음 공정(염색 등)이 이미 진행된 경우, 해당 공정에서 작업을 취소하여 상태를 되돌린 후 시도해주세요.")
                 else:
-                    st.markdown(f"### 🛠️ 제직 결과 수정: **{sel_row['name']} ({sel_row.get('roll_no', '?')}번 롤)**")
+                    st.markdown(f"### 제직 결과 수정: **{sel_row['name']} ({sel_row.get('roll_no', '?')}번 롤)**")
                     
                     with st.form("edit_weaving_done"):
                         c1, c2 = st.columns(2)
@@ -520,7 +518,7 @@ def render_weaving(db):
                             st.session_state["key_weaving_done"] += 1
                             st.rerun()
 
-                    st.markdown("#### 🚫 제직 완료 취소 (삭제)")
+                    st.markdown("#### 제직 완료 취소 (삭제)")
                     st.warning("이 롤 데이터를 삭제하고, 제직중 상태로 되돌립니다.")
                     if st.button("🗑️ 이 롤 삭제하기 (취소)", type="primary"):
                         parent_id = sel_row.get('parent_id')
@@ -546,7 +544,7 @@ def render_weaving(db):
             st.info("제직 완료된 내역이 없습니다.")
 
     # --- 4. 작업일지 탭 ---
-    with tab_worklog:
+    elif sub_menu == "작업일지":
         st.subheader("작업일지 작성 및 조회")
         
         # [NEW] 저장 성공 메시지 (리런 후 표시)
@@ -555,7 +553,7 @@ def render_weaving(db):
             st.session_state["worklog_saved"] = False
 
         # Part 1: 일지 작성
-        with st.expander("➕ 작업일지 작성하기", expanded=True):
+        with st.expander("작업일지 작성하기", expanded=True):
             # [수정] st.form 제거하여 라디오 버튼 즉시 반응하도록 변경 (라벨 동적 변경을 위해)
             if "wl_form_key" not in st.session_state:
                 st.session_state["wl_form_key"] = 0
@@ -770,7 +768,7 @@ def render_weaving(db):
                 st.components.v1.html(final_print_html, height=0, width=0)
 
     # --- 5. 생산일지 탭 ---
-    with tab_prodlog:
+    elif sub_menu == "생산일지":
         st.subheader("일일 생산일지 조회")
         
         # [수정] 생산 실적이 있는 날짜 목록 가져오기
@@ -891,12 +889,9 @@ def render_weaving(db):
         else:
             st.info(f"{prod_date}에 완료된 생산 내역이 없습니다.")
 
-def render_dyeing(db):
-    st.header("🎨 염색 현황")
+def render_dyeing(db, sub_menu):
+    st.header("염색 현황")
     st.info("제직이 완료된 건을 염색 공장에서 작업하고 봉제 단계로 넘깁니다.")
-
-    # [수정] 색번 설정 탭 추가
-    tab_dye_wait, tab_dye_ing, tab_dye_done, tab_color_set = st.tabs(["📋 염색 대기 목록", "🏭 염색중 목록", "✅ 염색 완료 목록", "🎨 색번 설정"])
 
     # 염색 업체 목록 가져오기
     dyeing_partners = get_partners("염색업체")
@@ -907,7 +902,7 @@ def render_dyeing(db):
     color_opts = ["선택하세요"] + [f"{c['code']} ({c['name']})" for c in color_codes] if color_codes else ["선택하세요"]
 
     # --- 1. 염색 대기 탭 ---
-    with tab_dye_wait:
+    if sub_menu == "염색 대기 목록":
         st.subheader("염색 대기 목록 (제직완료)")
         
         # [NEW] 목록 갱신을 위한 키 초기화 (염색대기)
@@ -948,7 +943,7 @@ def render_dyeing(db):
                 selected_rows = df.iloc[selected_indices]
 
                 # [NEW] 다중 선택 시: 염색 작업 지시서 출력 (현장용)
-                with st.expander("🖨️ 염색 작업 지시서 출력 (현장 확인용)", expanded=False):
+                with st.expander("염색 작업 지시서 출력 (현장 확인용)", expanded=False):
                     st.info("선택한 항목에 대해 **염색업체**와 **솥번호**를 지정하여 작업 지시서를 출력합니다. (이 정보는 DB에 저장되지 않습니다)")
                     
                     # 데이터 에디터용 데이터프레임 생성
@@ -1050,7 +1045,7 @@ def render_dyeing(db):
                     sel_id = sel_row['id']
                 
                     st.divider()
-                    st.markdown(f"### 🚚 염색 출고 정보 입력: **{sel_row['name']}**")
+                    st.markdown(f"### 염색 출고 정보 입력: **{sel_row['name']}**")
                     
                     with st.form("dyeing_start_form"):
                         c1, c2 = st.columns(2)
@@ -1093,7 +1088,7 @@ def render_dyeing(db):
             st.info("염색 대기 중인 건이 없습니다.")
 
     # --- 2. 염색중 탭 ---
-    with tab_dye_ing:
+    elif sub_menu == "염색중 목록":
         st.subheader("염색중 목록")
         
         if "key_dyeing_ing" not in st.session_state:
@@ -1129,9 +1124,9 @@ def render_dyeing(db):
                 sel_id = sel_row['id']
                 
                 st.divider()
-                st.markdown(f"### ⚙️ 작업 관리: **{sel_row['name']}**")
+                st.markdown(f"### 작업 관리: **{sel_row['name']}**")
                 
-                tab_act1, tab_act2 = st.tabs(["✅ 염색 완료 처리", "🛠️ 정보 수정 / 취소"])
+                tab_act1, tab_act2 = st.tabs(["염색 완료 처리", "정보 수정 / 취소"])
                 
                 with tab_act1:
                     st.write("염색 완료(입고) 정보를 입력하세요.")
@@ -1216,7 +1211,7 @@ def render_dyeing(db):
                             st.session_state["key_dyeing_ing"] += 1
                             st.rerun()
                     
-                    st.markdown("#### 🚫 작업 취소")
+                    st.markdown("#### 작업 취소")
                     if st.button("염색 취소 (대기로 되돌리기)", type="primary"):
                         db.collection("orders").document(sel_id).update({
                             "status": "제직완료"
@@ -1228,7 +1223,7 @@ def render_dyeing(db):
             st.info("현재 염색 중인 작업이 없습니다.")
 
     # --- 3. 염색 완료 탭 ---
-    with tab_dye_done:
+    elif sub_menu == "염색 완료 목록":
         st.subheader("염색 완료 목록")
         
         if "key_dyeing_done" not in st.session_state:
@@ -1363,7 +1358,7 @@ def render_dyeing(db):
                     st.error(f"⛔ 현재 상태가 '**{current_status}**'이므로 이 단계에서 수정하거나 취소할 수 없습니다.")
                     st.info("다음 공정(봉제)이 이미 진행된 경우, 해당 공정에서 작업을 취소하여 상태를 되돌린 후 시도해주세요.")
                 else:
-                    st.markdown(f"### 🛠️ 완료 정보 수정: **{sel_row['name']}**")
+                    st.markdown(f"### 완료 정보 수정: **{sel_row['name']}**")
                     
                     c1, c2 = st.columns(2)
                     with c1:
@@ -1392,7 +1387,7 @@ def render_dyeing(db):
                                 st.session_state["key_dyeing_done"] += 1
                                 st.rerun()
                     with c2:
-                        st.write("🚫 **완료 취소**")
+                        st.write("**완료 취소**")
                         st.warning("상태를 다시 '염색중'으로 되돌립니다.")
                         if st.button("완료 취소 (염색중으로 복귀)", type="primary"):
                             db.collection("orders").document(sel_id).update({
@@ -1405,21 +1400,19 @@ def render_dyeing(db):
             st.info("염색 완료된 내역이 없습니다.")
 
     # --- 4. 색번 설정 탭 ---
-    with tab_color_set:
-        st.subheader("🎨 색번 관리")
+    elif sub_menu == "색번 설정":
+        st.subheader("색번 관리")
         st.info("염색 출고 시 사용할 색번과 색상명을 관리합니다. (예: 명칭 '신백색' / 코드 'W0041')")
         manage_code_with_code("color_codes", [], "색번")
 
-def render_sewing(db):
-    st.header("🪡 봉제 현황")
+def render_sewing(db, sub_menu):
+    st.header("봉제 현황")
     st.info("염색이 완료된 원단을 봉제하여 완제품으로 만듭니다.")
-    
-    tab_sew_wait, tab_sew_ing, tab_sew_done = st.tabs(["📋 봉제 대기 목록", "🪡 봉제중 목록", "✅ 봉제 완료 목록"])
     
     sewing_partners = get_partners("봉제업체")
     
     # --- 1. 봉제 대기 탭 ---
-    with tab_sew_wait:
+    if sub_menu == "봉제 대기 목록":
         st.subheader("봉제 대기 목록 (염색완료)")
         
         # [NEW] 목록 갱신을 위한 키 초기화 (봉제대기)
@@ -1449,7 +1442,7 @@ def render_sewing(db):
             final_cols = [c for c in display_cols if c in df.columns]
             
             # [NEW] 인쇄 옵션 설정 (봉제작업지시서)
-            with st.expander("🖨️ 봉제작업지시서 인쇄 옵션"):
+            with st.expander("봉제작업지시서 인쇄 옵션"):
                 po_c1, po_c2, po_c3, po_c4 = st.columns(4)
                 p_title = po_c1.text_input("제목", value="봉제 작업 지시서", key="si_title")
                 p_title_size = po_c2.number_input("제목 크기(px)", value=24, step=1, key="si_ts")
@@ -1524,7 +1517,7 @@ def render_sewing(db):
                     current_stock = int(sel_row.get('stock', 0))
                     
                     st.divider()
-                    st.markdown(f"### 🧵 봉제 작업 시작: **{sel_row['name']}**")
+                    st.markdown(f"### 봉제 작업 시작: **{sel_row['name']}**")
                     
                     # st.form 제거 (라디오 버튼 즉시 반응을 위해)
                     c1, c2 = st.columns(2)
@@ -1580,7 +1573,7 @@ def render_sewing(db):
             st.info("봉제 대기 중인 건이 없습니다.")
             
     # --- 2. 봉제중 탭 ---
-    with tab_sew_ing:
+    elif sub_menu == "봉제중 목록":
         st.subheader("봉제중 목록")
         
         # [NEW] 목록 갱신을 위한 키 초기화
@@ -1618,9 +1611,9 @@ def render_sewing(db):
                 sel_id = sel_row['id']
                 
                 st.divider()
-                st.markdown(f"### ✅ 봉제 완료 처리: **{sel_row['name']}**")
+                st.markdown(f"### 봉제 완료 처리: **{sel_row['name']}**")
                 
-                tab_act1, tab_act2 = st.tabs(["✅ 봉제 완료 처리", "🛠️ 정보 수정 / 취소"])
+                tab_act1, tab_act2 = st.tabs(["봉제 완료 처리", "정보 수정 / 취소"])
                 
                 with tab_act1:
                     st.write("봉제 완료 정보를 입력하세요.")
@@ -1637,7 +1630,7 @@ def render_sewing(db):
                     s_vat_inc = False
                     
                     if sel_row.get('sewing_type') == "외주봉제":
-                        st.markdown("#### 💰 외주 가공비 정산")
+                        st.markdown("#### 외주 가공비 정산")
                         c3, c4 = st.columns(2)
                         s_price = c3.number_input("봉제단가(원)", min_value=0, step=1)
                         s_vat_inc = c4.checkbox("부가세 포함", value=False, key="sew_vat_check")
@@ -1697,7 +1690,7 @@ def render_sewing(db):
                             st.session_state["sewing_ing_key"] += 1
                             st.rerun()
                     
-                    st.markdown("#### 🚫 작업 취소")
+                    st.markdown("#### 작업 취소")
                     if st.button("봉제 취소 (대기로 되돌리기)", type="primary"):
                         # [NEW] 병합 로직: 같은 발주번호의 대기중(염색완료)인 항목이 있으면 합침
                         siblings = list(db.collection("orders")\
@@ -1729,7 +1722,7 @@ def render_sewing(db):
             st.info("현재 봉제 중인 작업이 없습니다.")
 
     # --- 3. 봉제 완료 탭 ---
-    with tab_sew_done:
+    elif sub_menu == "봉제 완료 목록":
         st.subheader("봉제 완료 목록")
         
         if "key_sewing_done" not in st.session_state:
@@ -1866,7 +1859,7 @@ def render_sewing(db):
                     st.error(f"⛔ 현재 상태가 '**{current_status}**'이므로 이 단계에서 수정하거나 취소할 수 없습니다.")
                     st.info("이미 출고 처리가 된 경우, 출고 현황에서 출고를 취소해야 합니다.")
                 else:
-                    st.markdown(f"### 🛠️ 완료 정보 수정: **{sel_row['name']}**")
+                    st.markdown(f"### 완료 정보 수정: **{sel_row['name']}**")
                     
                     c1, c2 = st.columns(2)
                     with c1:
@@ -1896,7 +1889,7 @@ def render_sewing(db):
                                 st.session_state["key_sewing_done"] += 1
                                 st.rerun()
                     with c2:
-                        st.write("🚫 **완료 취소**")
+                        st.write("**완료 취소**")
                         st.warning("상태를 다시 '봉제중'으로 되돌립니다.")
                         if st.button("완료 취소 (봉제중으로 복귀)", type="primary"):
                             db.collection("orders").document(sel_id).update({"status": "봉제중"})

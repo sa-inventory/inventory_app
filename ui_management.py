@@ -5,19 +5,17 @@ import io
 from firebase_admin import firestore
 from utils import get_common_codes, get_partners, is_basic_code_used, manage_code, manage_code_with_code, get_db
 
-def render_shipping_operations(db):
-    st.header("🚚 출고 작업")
+def render_shipping_operations(db, sub_menu):
+    st.header("출고 작업")
     st.info("완성된 제품(봉제완료)을 출고 처리합니다.")
     
     if "ship_op_key" not in st.session_state:
         st.session_state["ship_op_key"] = 0
 
-    tab1, tab2 = st.tabs(["📦 주문별 출고", "📊 제품별 일괄 출고"])
-    
     shipping_partners = get_partners("배송업체")
     
     # --- Tab 1: 주문별 출고 (기존 출고 대기 목록) ---
-    with tab1:
+    if sub_menu == "주문별 출고":
         st.subheader("주문별 출고 (발주번호 기준)")
         docs = db.collection("orders").where("status", "==", "봉제완료").stream()
         rows = []
@@ -55,7 +53,7 @@ def render_shipping_operations(db):
                 selected_rows = df.iloc[selected_indices]
                 
                 st.divider()
-                st.markdown(f"### 🚚 출고 정보 입력 (선택된 {len(selected_rows)}건)")
+                st.markdown(f"### 출고 정보 입력 (선택된 {len(selected_rows)}건)")
                 
                 # 제품 마스터에서 단가 정보 가져오기
                 product_prices = {}
@@ -65,7 +63,7 @@ def render_shipping_operations(db):
                         product_prices[p.id] = p.to_dict().get("unit_price", 0)
                 except: pass
 
-                st.markdown("##### 🚚 배송 정보")
+                st.markdown("##### 배송 정보")
                 c1, c2, c3 = st.columns(3)
                 s_date = c1.date_input("출고일자", datetime.date.today())
                 s_method = c2.selectbox("배송방법", ["택배", "화물", "용차", "직배송", "퀵서비스", "기타"])
@@ -76,7 +74,7 @@ def render_shipping_operations(db):
                 else:
                     final_carrier = s_carrier
                 
-                st.markdown("##### 📍 납품처 정보")
+                st.markdown("##### 납품처 정보")
                 first_row = selected_rows.iloc[0]
                 c_d1, c_d2, c_d3 = st.columns(3)
                 d_to = c_d1.text_input("납품처명", value=first_row.get('delivery_to', ''))
@@ -84,7 +82,7 @@ def render_shipping_operations(db):
                 d_addr = c_d3.text_input("납품주소", value=first_row.get('delivery_address', ''))
                 s_note = st.text_area("비고 (송장번호/차량번호 등)", placeholder="예: 경동택배 123-456-7890")
 
-                st.markdown("##### 📦 수량 및 단가 확인")
+                st.markdown("##### 수량 및 단가 확인")
                 partial_ship = False
                 ship_qty = 0
                 current_stock = 0
@@ -124,7 +122,7 @@ def render_shipping_operations(db):
                     s_total_amount = s_supply_price + s_vat
                 st.info(f"💰 **예상 금액**: 공급가액 {s_supply_price:,}원 + 부가세 {s_vat:,}원 = 합계 {s_total_amount:,}원")
 
-                st.markdown("##### 🚛 운임비 설정 (선택)")
+                st.markdown("##### 운임비 설정 (선택)")
                 c_cost1, c_cost2 = st.columns(2)
                 s_cost = c_cost1.number_input("운임비 (원)", min_value=0, step=1000)
                 s_cost_mode = c_cost2.radio("운임비 적용 방식", ["건당 운임비", "묶음 운임비(N분할)"], horizontal=True)
@@ -173,16 +171,14 @@ def render_shipping_operations(db):
             st.info("출고 대기 중인 건이 없습니다.")
 
     # --- Tab 2: 제품별 일괄 출고 (기존 재고현황 기능 이관) ---
-    with tab2:
+    elif sub_menu == "제품별 일괄 출고":
         st.subheader("제품별 일괄 출고")
         # 재고 현황 로직 재사용 (출고 기능 포함)
         render_inventory_logic(db, allow_shipping=True)
 
-def render_shipping_status(db):
-    st.header("📋 출고 현황")
+def render_shipping_status(db, sub_menu):
+    st.header("출고 현황")
     st.info("출고된 내역을 조회하고 거래명세서를 발행합니다.")
-    
-    tab1, tab2 = st.tabs(["📋 출고 완료 내역 (조회/명세서)", "📊 배송/운임 통계"])
     
     shipping_partners = get_partners("배송업체")
     
@@ -193,14 +189,14 @@ def render_shipping_status(db):
         p_data = p.to_dict()
         partners_map[p_data.get('name')] = p_data
 
-    with tab1:
+    if sub_menu == "출고 완료 내역 (조회/명세서)":
         st.subheader("출고 목록")
         
         if "key_ship_done" not in st.session_state:
             st.session_state["key_ship_done"] = 0
 
         # [수정] 검색 필터 UI 개선 (실시간 반영을 위해 form 제거 및 expander 활용)
-        with st.expander("🔍 검색 및 필터 설정", expanded=True):
+        with st.expander("검색 및 필터 설정", expanded=True):
             c1, c2 = st.columns([2, 1])
             today = datetime.date.today()
             s_period = c1.date_input("조회 기간 (출고일)", [today - datetime.timedelta(days=30), today], key="ship_period")
@@ -286,13 +282,13 @@ def render_shipping_status(db):
             st.divider()
             
             # [NEW] 기능 탭 분리
-            act_tab1, act_tab2, act_tab3 = st.tabs(["🖨️ 목록 인쇄/엑셀", "📑 거래명세서 발행", "🚫 출고 취소"])
+            act_tab1, act_tab2, act_tab3 = st.tabs(["목록 인쇄/엑셀", "거래명세서 발행", "출고 취소"])
             
             # 1. 목록 인쇄 및 엑셀 다운로드
             with act_tab1:
-                st.markdown("##### 📋 현재 조회된 목록 내보내기")
+                st.markdown("##### 현재 조회된 목록 내보내기")
                 
-                with st.expander("🖨️ 목록 인쇄 옵션"):
+                with st.expander("목록 인쇄 옵션"):
                     lp_c1, lp_c2, lp_c3, lp_c4 = st.columns(4)
                     lp_title = lp_c1.text_input("문서 제목", value="출고 목록", key="lp_title")
                     lp_title_size = lp_c2.number_input("제목 크기", value=24, step=1, key="lp_ts")
@@ -378,7 +374,7 @@ def render_shipping_status(db):
                     comp_doc = db.collection("settings").document("company_info").get()
                     comp_info = comp_doc.to_dict() if comp_doc.exists else {}
 
-                    with st.expander("🖨️ 거래명세서 상세 설정", expanded=False):
+                    with st.expander("거래명세서 상세 설정", expanded=False):
                         # 1. 기본 설정
                         pc1, pc2 = st.columns(2)
                         print_type = pc1.radio("인쇄 종류", ["거래처용", "보관용", "거래처용 + 보관용"], index=2, horizontal=True, key="p_type")
@@ -832,7 +828,7 @@ def render_shipping_status(db):
         else:
             st.info("출고 완료된 내역이 없습니다.")
 
-    with tab2:
+    elif sub_menu == "배송/운임 통계":
         st.subheader("📊 배송/운임 통계")
         st.info("기간별, 배송업체별 운임비 지출 현황을 확인합니다.")
         
@@ -909,21 +905,21 @@ def render_shipping_status(db):
                 
                 # 1. 시계열 추이 (운임비)
                 with c_chart1:
-                    st.markdown(f"##### 📈 {group_label}별 운임비 추이")
+                    st.markdown(f"##### {group_label}별 운임비 추이")
                     time_stats = df_stats.groupby('group_key')['shipping_cost'].sum().reset_index()
                     time_stats.columns = [group_label, '운임비']
                     st.bar_chart(time_stats.set_index(group_label))
 
                 # 2. 배송업체별 점유율
                 with c_chart2:
-                    st.markdown("##### 🚛 배송업체별 운임비 비중")
+                    st.markdown("##### 배송업체별 운임비 비중")
                     if 'shipping_carrier' in df_stats.columns:
                         carrier_pie = df_stats.groupby('shipping_carrier')['shipping_cost'].sum()
                         st.bar_chart(carrier_pie) # Streamlit 기본 차트 사용
 
                 # 3. 상세 테이블 (업체별)
                 if 'shipping_carrier' in df_stats.columns and 'shipping_cost' in df_stats.columns:
-                    st.markdown("##### 📋 업체별 상세 지출 현황")
+                    st.markdown("##### 업체별 상세 지출 현황")
                     carrier_stats = df_stats.groupby(['shipping_carrier', 'customer'])['shipping_cost'].sum().reset_index()
                     # [수정] 컬럼 수 불일치 오류 해결 (3개 컬럼)
                     carrier_stats.columns = ['배송업체', '발주처', '운임비 합계']
@@ -948,7 +944,7 @@ def render_inventory_logic(db, allow_shipping=False):
         df = pd.DataFrame(rows)
         
         # 상단: 제품별 재고 요약
-        st.subheader("📊 제품별 재고 요약")
+        st.subheader("제품별 재고 요약")
         
         ensure_cols = ['product_code', 'name', 'product_type', 'yarn_type', 'weight', 'size', 'stock', 'shipping_unit_price']
         for c in ensure_cols:
@@ -996,7 +992,7 @@ def render_inventory_logic(db, allow_shipping=False):
             sel_p_code = summary.iloc[idx]['product_code']
             
             st.divider()
-            st.markdown(f"### 📋 상세 재고 내역: **{sel_p_code}**")
+            st.markdown(f"### 상세 재고 내역: **{sel_p_code}**")
             
             detail_df = df[df['product_code'] == sel_p_code].copy()
             
@@ -1026,7 +1022,7 @@ def render_inventory_logic(db, allow_shipping=False):
                 sel_indices = selection_detail.selection.rows
                 sel_rows = detail_df.iloc[sel_indices]
                 
-                st.markdown("#### 🚀 선택 항목 즉시 출고")
+                st.markdown("#### 선택 항목 즉시 출고")
                 c1, c2 = st.columns(2)
                 q_date = c1.date_input("출고일자", datetime.date.today())
                 
@@ -1040,7 +1036,7 @@ def render_inventory_logic(db, allow_shipping=False):
                 q_method = c3.selectbox("배송방법", ["택배", "화물", "용차", "직배송", "기타"])
                 q_note = c4.text_input("비고 (송장번호 등)")
                 
-                st.markdown("##### 📦 수량 및 단가 확인")
+                st.markdown("##### 수량 및 단가 확인")
                 partial_ship = False
                 
                 if len(sel_rows) == 1:
@@ -1108,14 +1104,11 @@ def render_inventory_logic(db, allow_shipping=False):
     else:
         st.info("현재 보유 중인 완제품 재고가 없습니다. (모두 출고되었거나 생산 중입니다.)")
 
-def render_inventory(db):
-    st.header("📦 재고 현황")
+def render_inventory(db, sub_menu):
+    st.header("재고 현황")
     st.info("현재 보유 중인 완제품 재고를 조회합니다.")
     
-    # [NEW] 탭 분리: 재고 현황 / 재고 임의 등록
-    tab_status, tab_reg = st.tabs(["📊 재고 현황 조회", "➕ 재고 임의 등록"])
-
-    with tab_reg:
+    if sub_menu == "재고 임의 등록":
         st.subheader("재고 임의 등록 (자체 생산/기존 재고)")
         st.info("발주서 없이 보유하고 있는 재고나 자체 생산분을 등록하여 출고 가능한 상태로 만듭니다.")
         
@@ -1132,7 +1125,7 @@ def render_inventory(db):
             size_codes = get_common_codes("size_codes", [])
 
             # 필터링 UI
-            st.markdown("##### 🔍 제품 검색 조건")
+            st.markdown("##### 제품 검색 조건")
             f1, f2, f3, f4 = st.columns(4)
             
             # 옵션 생성 (전체 포함)
@@ -1208,12 +1201,12 @@ def render_inventory(db):
                             st.success(f"재고가 등록되었습니다. (번호: {stock_no})")
                             st.rerun()
 
-    with tab_status:
+    elif sub_menu == "재고 현황 조회":
         # 재고 현황 조회 (출고 기능 없음)
         render_inventory_logic(db, allow_shipping=False)
 
-def render_product_master(db):
-    st.header("📦 제품 마스터 관리")
+def render_product_master(db, sub_menu):
+    st.header("제품 마스터 관리")
     st.info("제품의 고유한 특성(제품종류, 사종, 중량, 사이즈)을 조합하여 제품 코드를 생성하고 관리합니다.")
 
     # 제품종류, 사종 기초 코드 가져오기
@@ -1225,10 +1218,7 @@ def render_product_master(db):
     weight_codes = get_common_codes("weight_codes", [])
     size_codes = get_common_codes("size_codes", [])
 
-    # 탭 순서 변경: 목록이 먼저 나오도록 수정
-    tab1, tab2 = st.tabs(["📋 제품 목록", "➕ 제품 등록"])
-
-    with tab1:
+    if sub_menu == "제품 목록":
         st.subheader("등록된 제품 목록")
         # created_at 필드가 없는 과거 데이터(P0001 등)도 모두 조회하기 위해 정렬 조건 제거
         product_docs = list(db.collection("products").stream())
@@ -1272,7 +1262,7 @@ def render_product_master(db):
             # 삭제 기능
             if selection.selection.rows:
                 st.divider()
-                st.subheader("🗑️ 제품 삭제")
+                st.subheader("제품 삭제")
                 st.warning(f"선택한 {len(selection.selection.rows)}개의 제품을 삭제하시겠습니까?")
                 if st.button("선택한 제품 일괄 삭제", type="primary"):
                     selected_indices = selection.selection.rows
@@ -1290,7 +1280,7 @@ def render_product_master(db):
         else:
             st.info("등록된 제품이 없습니다.")
 
-    with tab2:
+    elif sub_menu == "제품 등록":
         st.subheader("신규 제품 등록")
 
         # 등록 성공 알림 표시 (리런 후에도 유지)
@@ -1409,16 +1399,13 @@ def render_product_master(db):
                 st.session_state["trigger_reset"] = True
                 st.rerun()
 
-def render_partners(db):
-    st.header("🏢 거래처 관리")
-    
-    # [수정] 탭 순서 변경: 목록 -> 등록 -> 구분 관리
-    tab_list, tab_reg, tab_type = st.tabs(["📋 거래처 목록", "➕ 거래처 등록", "⚙️ 거래처 구분 관리"])
+def render_partners(db, sub_menu):
+    st.header("거래처 관리")
     
     # 기초 코드에서 거래처 구분 가져오기
     partner_types = get_common_codes("partner_types", ["발주처", "염색업체", "봉제업체", "배송업체", "기타"])
 
-    with tab_reg:
+    if sub_menu == "거래처 등록":
         with st.form("partner_form", clear_on_submit=True):
             c1, c2 = st.columns(2)
             p_type = c1.selectbox("거래처 구분", partner_types)
@@ -1459,7 +1446,7 @@ def render_partners(db):
                 else:
                     st.error("거래처명을 입력해주세요.")
 
-    with tab_list:
+    elif sub_menu == "거래처 목록":
         # 거래처 목록 조회
         partners = list(db.collection("partners").order_by("name").stream())
         if partners:
@@ -1511,7 +1498,7 @@ def render_partners(db):
                 sel_id = sel_row['id']
                 
                 st.divider()
-                st.subheader(f"🛠️ 거래처 수정: {sel_row['name']}")
+                st.subheader(f"거래처 수정: {sel_row['name']}")
                 
                 with st.form("edit_partner_form"):
                     c1, c2 = st.columns(2)
@@ -1551,7 +1538,7 @@ def render_partners(db):
             
             # 2. 거래처 삭제 기능
             st.divider()
-            st.subheader("🗑️ 거래처 삭제")
+            st.subheader("거래처 삭제")
             
             # 이름으로 ID 매핑 (삭제용)
             id_map = {row['name']: row['id'] for row in data}
@@ -1566,18 +1553,15 @@ def render_partners(db):
         else:
             st.info("등록된 거래처가 없습니다.")
 
-    with tab_type:
+    elif sub_menu == "거래처 구분 관리":
         st.subheader("거래처 구분 관리")
         st.info("거래처 등록 시 사용할 구분을 관리합니다.")
         manage_code("partner_types", partner_types, "거래처 구분")
 
-def render_machines(db):
-    st.header("🏭 제직기 관리")
+def render_machines(db, sub_menu):
+    st.header("제직기 관리")
     
-    # [수정] 탭 순서 변경: 목록 -> 등록
-    tab_list, tab_reg = st.tabs(["📋 제직기 목록", "➕ 제직기 등록"])
-    
-    with tab_reg:
+    if sub_menu == "제직기 등록":
         st.subheader("제직기 등록 및 수정")
         st.info("호기 번호가 같으면 기존 정보가 수정(덮어쓰기)됩니다.")
         
@@ -1608,7 +1592,7 @@ def render_machines(db):
                 st.session_state["machine_reg_success"] = True
                 st.rerun()
 
-    with tab_list:
+    elif sub_menu == "제직기 목록":
         st.subheader("제직기 목록")
         machines_ref = db.collection("machines").order_by("machine_no")
         m_docs = list(machines_ref.stream())
@@ -1658,7 +1642,7 @@ def render_machines(db):
                 sel_id = sel_item['id']
                 
                 st.divider()
-                st.subheader(f"🛠️ 제직기 수정: {sel_item['name']}")
+                st.subheader(f"제직기 수정: {sel_item['name']}")
                 
                 with st.form("edit_machine_form"):
                     c1, c2 = st.columns(2)
@@ -1686,37 +1670,32 @@ def render_machines(db):
                     st.success("삭제되었습니다.")
                     st.rerun()
 
-def render_codes(db):
-    st.header("📝 제품코드 설정")
+def render_codes(db, sub_menu):
+    st.header("제품코드 설정")
     st.info("제품 코드 생성을 위한 각 부분의 코드 및 포맷을 설정합니다.")
 
-    # [수정] 색번 탭 제거 (염색현황으로 이동)
-    tab1, tab2, tab3, tab4 = st.tabs(["제품 종류", "사종", "중량", "사이즈"])
-
-    with tab1:
+    if sub_menu == "제품 종류":
         manage_code_with_code("product_types", [{'name': '세면타올', 'code': 'A'}, {'name': '바스타올', 'code': 'B'}, {'name': '핸드타올', 'code': 'H'}, {'name': '발매트', 'code': 'M'}, {'name': '스포츠타올', 'code': 'S'}], "제품 종류")
     
-    with tab2:
+    elif sub_menu == "사종":
         manage_code_with_code("yarn_types_coded", [{'name': '20수', 'code': '20S'}, {'name': '30수', 'code': '30S'}], "사종")
 
-    with tab3:
+    elif sub_menu == "중량":
         manage_code_with_code("weight_codes", [], "중량")
 
-    with tab4:
+    elif sub_menu == "사이즈":
         manage_code_with_code("size_codes", [], "사이즈")
 
-def render_users(db):
-    st.header("👤 사용자 관리")
+def render_users(db, sub_menu):
+    st.header("사용자 관리")
     if st.session_state.get("role") != "admin":
         st.error("관리자 권한이 필요합니다.")
     else:
         st.info("시스템 사용자를 등록하고 권한을 설정합니다.")
         
-        tab1, tab2 = st.tabs(["📋 사용자 목록", "➕ 사용자 등록"])
-        
         all_menus = ["발주서접수", "발주현황", "제직현황", "염색현황", "봉제현황", "출고현황", "재고현황", "제품 관리", "거래처관리", "제직기관리", "제품코드설정", "사용자 관리"]
         
-        with tab1:
+        if sub_menu == "사용자 목록":
             # 사용자 목록 조회
             users_ref = db.collection("users").stream()
             users_list = []
@@ -1748,7 +1727,7 @@ def render_users(db):
                     sel_uid = sel_user['username']
                     
                     st.divider()
-                    st.subheader(f"🛠️ 사용자 수정: {sel_user['name']} ({sel_uid})")
+                    st.subheader(f"사용자 수정: {sel_user['name']} ({sel_uid})")
                     
                     c1, c2 = st.columns(2)
                     e_name = c1.text_input("이름", value=sel_user['name'], key=f"e_name_{sel_uid}")
@@ -1792,7 +1771,7 @@ def render_users(db):
                         st.success("사용자가 삭제되었습니다.")
                         st.rerun()
         
-        with tab2:
+        elif sub_menu == "사용자 등록":
             st.subheader("신규 사용자 등록")
             
             # [NEW] 등록 성공 메시지 표시 (리런 후 확인)
@@ -1845,7 +1824,7 @@ def render_users(db):
                     st.warning("아이디, 비밀번호, 이름은 필수 입력입니다.")
 
 def render_my_profile(db):
-    st.header("⚙️ 로그인 정보 설정")
+    st.header("로그인 정보 설정")
     
     user_id = st.session_state.get("user_id")
     if not user_id:
@@ -1899,24 +1878,45 @@ def render_my_profile(db):
             else:
                 st.info("변경할 내용이 없습니다.")
 
-def render_company_settings(db):
-    st.header("🏢 회사정보 설정")
-    st.info("거래명세서 등 출력물에 표시될 우리 회사의 정보를 등록합니다.")
-    
+def render_company_settings(db, sub_menu):
     doc_ref = db.collection("settings").document("company_info")
     doc = doc_ref.get()
     data = doc.to_dict() if doc.exists else {}
     
-    # 세션 상태 초기화 (편집 모드 여부)
-    if "company_edit_mode" not in st.session_state:
-        st.session_state["company_edit_mode"] = False
-    
-    # 데이터가 없으면 강제로 편집 모드
-    if not data:
-        st.session_state["company_edit_mode"] = True
+    if sub_menu == "회사정보 조회":
+        st.header("회사정보")
+        
+        # 1. 현재 정보 표시 (View Mode)
+        if data:
+            st.markdown(f"""
+            <div style="padding: 20px; background-color: #f8f9fa; border-radius: 10px; border: 1px solid #e9ecef; margin-bottom: 20px;">
+                <h3 style="margin-top: 0; color: #333;">🏢 {data.get('name', '회사명 미등록')}</h3>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.95rem;">
+                    <div><strong>대표자:</strong> {data.get('rep_name', '')}</div>
+                    <div><strong>사업자번호:</strong> {data.get('biz_num', '')}</div>
+                    <div><strong>전화번호:</strong> {data.get('phone', '')}</div>
+                    <div><strong>팩스:</strong> {data.get('fax', '')}</div>
+                    <div><strong>이메일:</strong> {data.get('email', '')}</div>
+                    <div><strong>업태/종목:</strong> {data.get('biz_type', '')} / {data.get('biz_item', '')}</div>
+                </div>
+                <div style="margin-top: 10px; font-size: 0.95rem;">
+                    <strong>주소:</strong> {data.get('address', '')}
+                </div>
+                <hr style="margin: 15px 0; border: 0; border-top: 1px solid #ddd;">
+                <div style="font-size: 0.95rem;">
+                    <strong>거래은행:</strong> {data.get('bank_name', '')} {data.get('bank_account', '')}<br>
+                    <strong>비고:</strong> {data.get('note', '')}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.warning("등록된 회사 정보가 없습니다. '정보 수정' 메뉴에서 정보를 입력해주세요.")
 
-    if st.session_state["company_edit_mode"]:
-        # [편집 모드]
+    elif sub_menu == "정보 수정":
+        st.header("회사정보 수정")
+        st.info("거래명세서 등 출력물에 표시될 우리 회사의 정보를 등록하거나 수정합니다.")
+
+        # 2. 정보 수정 (Edit Mode)
         with st.form("company_info_form"):
             c1, c2 = st.columns(2)
             name = c1.text_input("상호(회사명)", value=data.get("name", ""))
@@ -1942,47 +1942,12 @@ def render_company_settings(db):
             
             note = st.text_area("비고 / 하단 문구", value=data.get("note", ""), help="명세서 하단에 들어갈 안내 문구 등을 입력하세요.")
             
-            c_btn1, c_btn2 = st.columns([1, 1])
-            if c_btn1.form_submit_button("저장", type="primary"):
+            if st.form_submit_button("저장", type="primary"):
                 new_data = {
                     "name": name, "rep_name": rep_name, "biz_num": biz_num, "address": address,
                     "phone": phone, "fax": fax, "biz_type": biz_type, "biz_item": biz_item,
                     "email": email, "bank_name": bank_name, "bank_account": bank_account, "note": note
                 }
                 doc_ref.set(new_data)
-                st.session_state["company_edit_mode"] = False
                 st.success("회사 정보가 저장되었습니다.")
                 st.rerun()
-            
-            if data and c_btn2.form_submit_button("취소"):
-                st.session_state["company_edit_mode"] = False
-                st.rerun()
-    else:
-        # [조회 모드]
-        c1, c2 = st.columns(2)
-        c1.text_input("상호(회사명)", value=data.get("name", ""), disabled=True)
-        c2.text_input("대표자명", value=data.get("rep_name", ""), disabled=True)
-        
-        c3, c4 = st.columns(2)
-        c3.text_input("사업자등록번호", value=data.get("biz_num", ""), disabled=True)
-        c4.text_input("사업장 주소", value=data.get("address", ""), disabled=True)
-        
-        c5, c6 = st.columns(2)
-        c5.text_input("전화번호", value=data.get("phone", ""), disabled=True)
-        c6.text_input("팩스번호", value=data.get("fax", ""), disabled=True)
-        
-        c7, c8 = st.columns(2)
-        c7.text_input("업태", value=data.get("biz_type", ""), disabled=True)
-        c8.text_input("종목", value=data.get("biz_item", ""), disabled=True)
-        
-        st.text_input("이메일", value=data.get("email", ""), disabled=True)
-        
-        c9, c10 = st.columns(2)
-        c9.text_input("거래은행", value=data.get("bank_name", ""), disabled=True)
-        c10.text_input("계좌번호", value=data.get("bank_account", ""), disabled=True)
-        
-        st.text_area("비고 / 하단 문구", value=data.get("note", ""), disabled=True)
-        
-        if st.button("수정"):
-            st.session_state["company_edit_mode"] = True
-            st.rerun()

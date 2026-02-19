@@ -128,7 +128,7 @@ def generate_report_html(title, df, summary_text, options, chart_html=""):
 def manage_code_with_code(code_key, default_list, label):
     current_list = get_common_codes(code_key, default_list)
 
-    st.markdown(f"##### 📋 현재 등록된 {label}")
+    st.markdown(f"##### 현재 등록된 {label}")
     # 이전 버전 호환을 위해 딕셔너리 형태만 필터링
     current_list_dicts = [item for item in current_list if isinstance(item, dict)]
     if current_list_dicts:
@@ -159,14 +159,14 @@ def manage_code_with_code(code_key, default_list, label):
         is_used = is_basic_code_used(code_key, sel_name, sel_code)
 
         if is_used:
-            st.subheader(f"ℹ️ '{sel_name}' 정보")
+            st.subheader(f"'{sel_name}' 정보")
             st.warning("이 항목은 제품 등록에 사용되어 수정 및 삭제가 불가능합니다.")
             st.text_input("명칭", value=sel_name, disabled=True)
             st.text_input("코드", value=sel_code, disabled=True)
         else:
             # 수정 폼
             with st.form(key=f"edit_{code_key}"):
-                st.subheader(f"🛠️ '{sel_name}' 수정")
+                st.subheader(f"'{sel_name}' 수정")
                 new_name = st.text_input("명칭", value=sel_name)
                 new_code = st.text_input("코드", value=sel_code)
 
@@ -187,7 +187,7 @@ def manage_code_with_code(code_key, default_list, label):
                             st.rerun()
 
             # 삭제 기능
-            st.subheader(f"🗑️ '{sel_name}' 삭제")
+            st.subheader(f"'{sel_name}' 삭제")
             if st.button("이 항목 삭제하기", type="primary", key=f"del_btn_{code_key}"):
                 updated_list = [item for item in current_list_dicts if item['name'] != sel_name]
                 db.collection("settings").document("codes").set({code_key: updated_list}, merge=True)
@@ -196,7 +196,7 @@ def manage_code_with_code(code_key, default_list, label):
 
     # --- 추가 (항목 미선택 시) ---
     else:
-        st.subheader(f"➕ 신규 {label} 추가")
+        st.subheader(f"신규 {label} 추가")
         if not df.empty:
             st.info("목록에서 항목을 선택하면 수정 또는 삭제할 수 있습니다.")
 
@@ -219,7 +219,7 @@ def manage_code_with_code(code_key, default_list, label):
 # 단순 리스트 관리 함수
 def manage_code(code_key, default_list, label):
     current_list = get_common_codes(code_key, default_list)
-    st.markdown(f"##### 📋 현재 등록된 {label}")
+    st.markdown(f"##### 현재 등록된 {label}")
     if current_list: st.dataframe(pd.DataFrame(current_list, columns=["명칭"]), width="stretch", hide_index=True)
     else: st.info("등록된 항목이 없습니다.")
     st.divider()

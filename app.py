@@ -237,9 +237,9 @@ with st.sidebar:
                     menu_item("발주내역삭제(엑셀업로드)", "발주현황")
 
         # [수정] 하위 메뉴 권한이 하나라도 있을 때만 상위 메뉴 표시
-        has_production_access = check_access("제직현황") or check_access("염색현황") or check_access("봉제현황")
+        has_production_access = check_access("제직현황") or check_access("제직조회") or check_access("염색현황") or check_access("봉제현황")
         if has_production_access:
-            with st.expander("생산관리", expanded=(cm in ["제직현황", "염색현황", "봉제현황"])):
+            with st.expander("생산관리", expanded=(cm in ["제직현황", "제직조회", "염색현황", "봉제현황"])):
                 if check_access("제직현황"):
                     with st.expander("제직현황", expanded=(cm == "제직현황")):
                         menu_item("제직대기 목록", "제직현황")
@@ -247,6 +247,11 @@ with st.sidebar:
                         menu_item("제직완료 목록", "제직현황")
                         menu_item("작업일지", "제직현황")
                         menu_item("생산일지", "제직현황")
+                if check_access("제직조회"):
+                    with st.expander("제직조회", expanded=(cm == "제직조회")):
+                        menu_item("제직대기 목록", "제직조회")
+                        menu_item("제직중 목록", "제직조회")
+                        menu_item("제직완료 목록", "제직조회")
                 if check_access("염색현황"):
                     with st.expander("염색현황", expanded=(cm == "염색현황")):
                         menu_item("염색 대기 목록", "염색현황")
@@ -365,6 +370,8 @@ elif menu == "발주현황(거래처)":
 
 elif menu == "제직현황":
     render_weaving(db, sub_menu)
+elif menu == "제직조회":
+    render_weaving(db, sub_menu, readonly=True)
 elif menu == "염색현황":
     render_dyeing(db, sub_menu)
 elif menu == "봉제현황":
@@ -386,7 +393,7 @@ elif menu == "제직기관리":
 elif menu == "사용자 관리":
     render_users(db, sub_menu)
 elif menu == "회사정보 관리":
-    render_company_settings(db)
+    render_company_settings(db, sub_menu)
 elif menu == "로그인 정보 설정":
     render_my_profile(db)
 else:

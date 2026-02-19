@@ -235,12 +235,20 @@ def render_notice_board(db):
         # 목록에서 선택 시 ID 업데이트
         if selection and selection.selection.rows:
             idx = selection.selection.rows[0]
-            new_selected_id = page_posts[idx]['id']
-            if new_selected_id != selected_id:
-                st.session_state["selected_post_id"] = new_selected_id
-                st.query_params["notice_id"] = new_selected_id
+            # [FIX] 페이지 변경 등으로 인해 인덱스가 범위를 벗어나는 경우 방지
+            if idx < len(page_posts):
+                new_selected_id = page_posts[idx]['id']
+                if new_selected_id != selected_id:
+                    st.session_state["selected_post_id"] = new_selected_id
+                    st.query_params["notice_id"] = new_selected_id
+                    st.rerun()
+        # [NEW] 사용자가 목록에서 선택을 해제했을 때 (체크 해제)
+        elif selection and not selection.selection.rows:
+            if selected_id is not None: # 상세 보기가 활성화된 상태에서만 실행
+                st.session_state["selected_post_id"] = None
+                st.query_params.clear()
                 st.rerun()
-        
+
         st.divider()
 
         # --- [변경] 하단 영역: 상세 내용 또는 글쓰기 폼 ---

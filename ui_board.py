@@ -556,38 +556,69 @@ def render_schedule(db):
             
             c1, c2 = st.columns([1, 2])
             with c1:
-                with st.form("add_holiday_form", clear_on_submit=True):
-                    st.markdown("##### 특정일 등록")
-                    # [수정] 기간 선택으로 변경
-                    h_dates = st.date_input("기간 선택", [datetime.date.today(), datetime.date.today()])
-                    h_name = st.text_input("특정일명", "휴일")
+                st.markdown("##### 특정일 등록")
+                h_dates = st.date_input("기간 선택", [datetime.date.today(), datetime.date.today()], key="h_dates_input")
+                h_name = st.text_input("특정일명", "휴일", key="h_name_input")
+                
+                h_display_mode = st.radio(
+                    "표시 방식",
+                    ("모든 날짜에 표시", "특정일자만 표시"),
+                    horizontal=True,
+                    help="기간 내에서 특정일명을 어떻게 표시할지 선택합니다.",
+                    key="h_display_mode_input"
+                )
+
+                specific_date_to_add = None
+                if h_display_mode == "특정일자만 표시":
+                    date_options = []
+                    if len(h_dates) == 2:
+                        start_d, end_d = h_dates
+                        if start_d <= end_d:
+                            date_options = [start_d + datetime.timedelta(days=i) for i in range((end_d - start_d).days + 1)]
+                    elif len(h_dates) == 1:
+                        date_options = [h_dates[0]]
                     
-                    # [NEW] 색상 선택 기능 추가
-                    color_map = {"빨간색": "#d93025", "파란색": "#1a73e8", "초록색": "#1e8e3e", "주황색": "#f97d00", "보라색": "#9334e6"}
-                    h_color_name = st.selectbox("표시 색상", list(color_map.keys()))
-                    
-                    if st.form_submit_button("등록"):
-                        if len(h_dates) == 2:
-                            start_date, end_date = h_dates
-                            delta = end_date - start_date
-                            group_id = str(uuid.uuid4()) # [NEW] 그룹 ID 생성
-                            batch = db.batch()
+                    if date_options:
+                        specific_date_to_add = st.selectbox("표시할 특정일자 선택", date_options, format_func=lambda d: d.strftime("%Y-%m-%d"), key="h_specific_date_input")
+                    else:
+                        st.warning("기간을 먼저 올바르게 선택해주세요.")
+
+                color_map = {"빨간색": "#d93025", "파란색": "#1a73e8", "초록색": "#1e8e3e", "주황색": "#f97d00", "보라색": "#9334e6"}
+                h_color_name = st.selectbox("표시 색상", list(color_map.keys()), key="h_color_name_input")
+                
+                if st.button("등록"):
+                    # [수정] 기간 내 모든 날짜를 대상으로 하되, 이름 표시 여부만 분기
+                    dates_in_range = []
+                    if len(h_dates) >= 1:
+                        start_date = h_dates[0]
+                        end_date = h_dates[1] if len(h_dates) == 2 else start_date
+                        if start_date <= end_date:
+                            for i in range((end_date - start_date).days + 1):
+                                dates_in_range.append(start_date + datetime.timedelta(days=i))
+
+                    if not dates_in_range:
+                        st.error("기간을 올바르게 선택해주세요.")
+                    elif h_display_mode == "특정일자만 표시" and not specific_date_to_add:
+                        st.error("표시할 특정일자를 선택해주세요.")
+                    else:
+                        group_id = str(uuid.uuid4())
+                        batch = db.batch()
+                        for day in dates_in_range:
+                            day_str = day.strftime("%Y-%m-%d")
+                            doc_ref = db.collection("holidays").document(day_str)
                             
-                            for i in range(delta.days + 1):
-                                day = start_date + datetime.timedelta(days=i)
-                                day_str = day.strftime("%Y-%m-%d")
-                                doc_ref = db.collection("holidays").document(day_str)
-                                batch.set(doc_ref, {
-                                    "name": h_name,
-                                    "date": day_str,
-                                    "color": color_map[h_color_name],
-                                    "group_id": group_id # [NEW] 그룹 ID 저장
-                                })
-                            batch.commit()
-                            st.success(f"{start_date} ~ {end_date} 기간에 '{h_name}' 일정이 등록되었습니다.")
-                            st.rerun()
-                        else:
-                            st.error("기간을 올바르게 선택해주세요.")
+                            # 이름 결정: 모든 날짜 표시 모드이거나, 특정일자 모드에서 해당 날짜인 경우
+                            name_to_save = h_name if (h_display_mode == "모든 날짜에 표시" or day == specific_date_to_add) else ""
+                            
+                            batch.set(doc_ref, {"name": name_to_save, "date": day_str, "color": color_map[h_color_name], "group_id": group_id})
+                        batch.commit()
+                        st.success(f"'{h_name}' 일정이 등록되었습니다.")
+                        
+                        # 입력 필드 초기화를 위해 세션 상태 삭제
+                        keys_to_clear = ["h_dates_input", "h_name_input", "h_display_mode_input", "h_specific_date_input", "h_color_name_input"]
+                        for k in keys_to_clear:
+                            if k in st.session_state: del st.session_state[k]
+                        st.rerun()
             with c2:
                 st.markdown(f"##### {sel_year_for_list}년 등록된 특정일 목록")
                 
@@ -597,12 +628,11 @@ def render_schedule(db):
                     for h_date_str, h_data in sorted(current_holidays.items()):
                         gid = h_data.get('group_id', f"single_{h_date_str}")
                         if gid not in holiday_groups:
-                            holiday_groups[gid] = {
-                                'name': h_data.get('name'),
-                                'color': h_data.get('color', '#000'),
-                                'dates': []
-                            }
+                            holiday_groups[gid] = {'name': '', 'color': h_data.get('color', '#000'), 'dates': []}
                         holiday_groups[gid]['dates'].append(h_date_str)
+                        # 그룹 내 이름이 있는 항목을 찾아 대표 이름으로 설정
+                        if h_data.get('name'):
+                            holiday_groups[gid]['name'] = h_data.get('name')
                     
                     # 그룹별 표시
                     # 날짜순 정렬을 위해 각 그룹의 첫 번째 날짜 기준 정렬
@@ -923,8 +953,10 @@ def render_schedule(db):
             if h_year == sel_year and h_month == sel_month:
                 gid = h_data.get('group_id', f"single_h_{h_date_str}")
                 if gid not in holiday_groups_map:
-                    holiday_groups_map[gid] = {'dates': [], 'data': h_data}
+                    holiday_groups_map[gid] = {'dates': [], 'name': '', 'color': h_data.get('color', '#d93025')}
                 holiday_groups_map[gid]['dates'].append(h_date_str)
+                if h_data.get('name'):
+                    holiday_groups_map[gid]['name'] = h_data.get('name')
         
         for gid, info in holiday_groups_map.items():
             dates = sorted(info['dates'])
@@ -934,11 +966,11 @@ def render_schedule(db):
                 'id': f"holiday_grp_{gid}",
                 'date': dates[0],
                 'end_date': dates[-1],
-                'content': info['data'].get('name'),
+                'content': info.get('name'),
                 'author': '관리자',
                 'is_all_day': True,
                 'type': '긴급',
-                'color': info['data'].get('color', '#d93025'),
+                'color': info.get('color', '#d93025'),
                 'is_holiday': True,
                 'merged_ids': [] 
             }

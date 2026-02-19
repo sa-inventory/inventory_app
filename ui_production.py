@@ -5,7 +5,7 @@ import io
 from firebase_admin import firestore
 from utils import get_partners, generate_report_html, get_common_codes, manage_code_with_code
 
-def render_weaving(db, sub_menu):
+def render_weaving(db, sub_menu=None):
     st.header("제직 현황")
     if "weaving_df_key" not in st.session_state:
         st.session_state["weaving_df_key"] = 0
@@ -13,6 +13,9 @@ def render_weaving(db, sub_menu):
 
     # [공통] 제직기 설정 가져오기 (작업일지 등에서도 사용됨)
     machines_docs = list(db.collection("machines").order_by("machine_no").stream())
+    
+    # [수정] 데이터가 없거나 오류 발생 시 기본값 처리
+    machines_data = []
     if not machines_docs:
         # 설정이 없으면 기본 1~9호대 가상 데이터 사용 (호환성 유지)
         machines_data = [{"machine_no": i, "name": f"{i}호대", "model": "", "note": ""} for i in range(1, 10)]

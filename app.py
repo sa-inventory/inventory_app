@@ -87,7 +87,7 @@ if not st.session_state["logged_in"]:
                                 st.session_state["department"] = user_data.get("department", "")
                                 st.session_state["linked_partner"] = user_data.get("linked_partner", "")
                                 # [NEW] 권한 목록 세션 저장
-                                st.session_state["permissions"] = user_data.get("permissions", [])
+                                st.session_state["permissions"] = user_data.get("permissions") or []
                                 if "current_menu" in st.session_state:
                                     del st.session_state["current_menu"]
                                 

@@ -1206,6 +1206,11 @@ def render_inventory(db, sub_menu):
         render_inventory_logic(db, allow_shipping=False)
 
 def render_product_master(db, sub_menu):
+    # [NEW] 제품코드설정 메뉴 통합 처리
+    if sub_menu in ["제품 종류", "사종", "중량", "사이즈"]:
+        render_codes(db, sub_menu)
+        return
+
     st.header("제품 마스터 관리")
     st.info("제품의 고유한 특성(제품종류, 사종, 중량, 사이즈)을 조합하여 제품 코드를 생성하고 관리합니다.")
 
@@ -1477,7 +1482,13 @@ def render_partners(db, sub_menu):
             df_display = df[all_cols].rename(columns=col_map)
             
             st.write("🔽 수정할 거래처를 선택하세요.")
-            selection = st.dataframe(df_display, width="stretch", on_select="rerun", selection_mode="single-row", key="partner_list")
+            selection = st.dataframe(
+                df_display, 
+                hide_index=True,
+                on_select="rerun", 
+                selection_mode="single-row", 
+                key="partner_list"
+            )
             
             # 엑셀 다운로드
             buffer = io.BytesIO()

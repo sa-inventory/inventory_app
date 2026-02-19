@@ -287,10 +287,21 @@ with st.sidebar:
         has_basic_info_access = check_access("제품 관리") or check_access("거래처관리") or check_access("제직기관리") or check_access("제품코드설정")
         if has_basic_info_access:
             with st.expander("기초정보관리", expanded=(cm in ["제품 관리", "거래처관리", "제직기관리", "제품코드설정"])):
-                if check_access("제품 관리"):
+                # [수정] 제품 관리 및 제품코드설정 통합
+                if check_access("제품 관리") or check_access("제품코드설정"):
                     with st.expander("제품 관리", expanded=(cm == "제품 관리")):
-                        menu_item("제품 목록", "제품 관리")
-                        menu_item("제품 등록", "제품 관리")
+                        if check_access("제품 관리"):
+                            menu_item("제품 목록", "제품 관리")
+                            menu_item("제품 등록", "제품 관리")
+                        
+                        if check_access("제품코드설정"):
+                            csm = st.session_state.get("current_sub_menu")
+                            with st.expander("제품코드설정", expanded=(csm in ["제품 종류", "사종", "중량", "사이즈"])):
+                                menu_item("제품 종류", "제품 관리")
+                                menu_item("사종", "제품 관리")
+                                menu_item("중량", "제품 관리")
+                                menu_item("사이즈", "제품 관리")
+
                 if check_access("거래처관리"):
                     with st.expander("거래처관리", expanded=(cm == "거래처관리")):
                         menu_item("거래처 목록", "거래처관리")
@@ -300,12 +311,6 @@ with st.sidebar:
                     with st.expander("제직기관리", expanded=(cm == "제직기관리")):
                         menu_item("제직기 목록", "제직기관리")
                         menu_item("제직기 등록", "제직기관리")
-                if check_access("제품코드설정"):
-                    with st.expander("제품코드설정", expanded=(cm == "제품코드설정")):
-                        menu_item("제품 종류", "제품코드설정")
-                        menu_item("사종", "제품코드설정")
-                        menu_item("중량", "제품코드설정")
-                        menu_item("사이즈", "제품코드설정")
 
         if st.session_state.get("role") == "admin":
             with st.expander("시스템관리", expanded=(cm in ["사용자 관리", "회사정보 관리"])):
@@ -373,8 +378,6 @@ elif menu == "거래처관리":
     render_partners(db, sub_menu)
 elif menu == "제직기관리":
     render_machines(db, sub_menu)
-elif menu == "제품코드설정":
-    render_codes(db, sub_menu)
 elif menu == "사용자 관리":
     render_users(db, sub_menu)
 elif menu == "회사정보 관리":

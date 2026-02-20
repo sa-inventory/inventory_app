@@ -933,6 +933,81 @@ def render_shipping_status(db, sub_menu):
 
 # [NEW] 재고 현황 로직을 별도 함수로 분리 (출고 작업과 재고 현황에서 공유)
 def render_inventory_logic(db, allow_shipping=False):
+    # [NEW] 스마트 데이터 에디터 - 1. 변경사항 검토 및 확정 UI
+    changes_key = f'inventory_changes_{allow_shipping}'
+    if st.session_state.get(changes_key):
+        changes = st.session_state[changes_key]
+        st.divider()
+        st.subheader("📝 변경사항 검토")
+        st.warning("아래 변경사항을 확인하고 확정 버튼을 눌러주세요.")
+        st.warning("변경된 셀은 노란색으로 표시됩니다. 내용을 확인하고 확정 버튼을 눌러주세요.")
+        
+        for change in changes:
+            st.markdown(f"**- 제품명: {change['name']}** (ID: `{change['id']}`)")
+            change_details = change['changes']
+            if 'stock' in change_details:
+                before, after = change_details['stock']
+                st.markdown(f"  - **재고수량**: `{before:,}` → `{after:,}`")
+            if 'shipping_unit_price' in change_details:
+                before, after = change_details['shipping_unit_price']
+                st.markdown(f"  - **단가**: `{before:,}` → `{after:,}`")
+        # [NEW] 변경 내역 DataFrame 생성 및 스타일링
+        display_rows = []
+        for c in changes:
+            # row_data가 없으면(구버전 세션 등) 기본값 처리
+            row = c.get('row_data', {'제품명': c['name'], '구분/발주처': '-', '재고수량': 0, '단가': 0}).copy()
+            row['_id'] = c['id']
+            display_rows.append(row)
+            
+        if display_rows:
+            df_review = pd.DataFrame(display_rows)
+            
+            def highlight_changes(row):
+                styles = [''] * len(row)
+                c_info = next((x for x in changes if x['id'] == row['_id']), None)
+                if c_info:
+                    changed_fields = c_info['changes']
+                    # 필드명과 컬럼명 매핑
+                    field_map = {'stock': '재고수량', 'shipping_unit_price': '단가'}
+                    
+                    for field, col_name in field_map.items():
+                        if field in changed_fields:
+                            try:
+                                idx = row.index.get_loc(col_name)
+                                styles[idx] = 'background-color: #fff3cd; color: #856404; font-weight: bold;'
+                            except: pass
+                return styles
+
+            st.dataframe(
+                df_review.drop(columns=['_id']).style.apply(highlight_changes, axis=1),
+                hide_index=True,
+                use_container_width=True
+            )
+        
+        c1, c2, c3 = st.columns([1.2, 1, 5])
+        if c1.button("✅ 변경 확정", type="primary", key=f"confirm_inv_changes_{allow_shipping}"):
+            # Firestore에 변경사항 업데이트
+            for change in changes:
+                doc_id = change['id']
+                update_data = {}
+                if 'stock' in change['changes']:
+                    update_data['stock'] = change['changes']['stock'][1]
+                if 'shipping_unit_price' in change['changes']:
+                    update_data['shipping_unit_price'] = change['changes']['shipping_unit_price'][1]
+                
+                if update_data:
+                    db.collection("orders").document(doc_id).update(update_data)
+            
+            st.success(f"{len(changes)}건의 재고 정보가 수정되었습니다.")
+            del st.session_state[changes_key]
+            st.rerun()
+            
+        if c2.button("❌ 취소", key=f"cancel_inv_changes_{allow_shipping}"):
+            del st.session_state[changes_key]
+            st.rerun()
+        
+        st.stop() # 검토 중에는 아래 UI를 그리지 않음
+
     # 재고 기준: status == "봉제완료" (출고 전 단계)
     docs = db.collection("orders").where("status", "==", "봉제완료").stream()
     rows = []
@@ -959,22 +1034,29 @@ def render_inventory_logic(db, allow_shipping=False):
         df['weight'] = pd.to_numeric(df['weight'], errors='coerce').fillna(0).astype(int)
         df['shipping_unit_price'] = pd.to_numeric(df['shipping_unit_price'], errors='coerce').fillna(0).astype(int)
 
+        # [NEW] 총 재고 금액 계산
+        df['total_value'] = df['stock'] * df['shipping_unit_price']
+
         # [NEW] 다중 조건 검색 기능
         with st.expander("🔍 상세 검색 (다중 조건)", expanded=True):
             # 검색 옵션 데이터 준비
             all_codes = ["전체"] + sorted([str(x) for x in df['product_code'].unique() if x])
+            all_customers = ["전체"] + sorted([str(x) for x in df['customer'].unique() if x])
             all_types = ["전체"] + sorted([str(x) for x in df['product_type'].unique() if x])
             all_names = ["전체"] + sorted([str(x) for x in df['name'].unique() if x])
             
-            f1, f2, f3, f4 = st.columns([1, 1, 1, 2])
+            f1, f2, f3, f4, f5 = st.columns([1, 1, 1, 1, 2])
             s_code = f1.selectbox("제품코드", all_codes, key=f"inv_s_code_{allow_shipping}")
-            s_type = f2.selectbox("제품종류", all_types, key=f"inv_s_type_{allow_shipping}")
-            s_name = f3.selectbox("제품명", all_names, key=f"inv_s_name_{allow_shipping}")
-            s_text = f4.text_input("통합 검색 (비고, 발주처, 발주번호 등)", key=f"inv_s_text_{allow_shipping}")
+            s_customer = f2.selectbox("발주처", all_customers, key=f"inv_s_cust_{allow_shipping}")
+            s_type = f3.selectbox("제품종류", all_types, key=f"inv_s_type_{allow_shipping}")
+            s_name = f4.selectbox("제품명", all_names, key=f"inv_s_name_{allow_shipping}")
+            s_text = f5.text_input("통합 검색 (비고, 발주처, 발주번호 등)", key=f"inv_s_text_{allow_shipping}")
             
             # 필터링 적용
             if s_code != "전체":
                 df = df[df['product_code'] == s_code]
+            if s_customer != "전체":
+                df = df[df['customer'] == s_customer]
             if s_type != "전체":
                 df = df[df['product_type'] == s_type]
             if s_name != "전체":
@@ -999,7 +1081,8 @@ def render_inventory_logic(db, allow_shipping=False):
             'weight': 'first',
             'size': 'first',
             'stock': 'sum',
-            'shipping_unit_price': 'mean'
+            'shipping_unit_price': 'mean',
+            'total_value': 'sum'
         }).reset_index()
         
         summary['shipping_unit_price'] = summary['shipping_unit_price'].astype(int)
@@ -1007,10 +1090,11 @@ def render_inventory_logic(db, allow_shipping=False):
         summary_cols = {
             'product_code': '제품코드', 'product_type': '제품종류',
             'yarn_type': '사종', 'weight': '중량', 'size': '사이즈',
-            'stock': '재고수량', 'shipping_unit_price': '평균단가'
+            'stock': '재고수량', 'shipping_unit_price': '평균단가',
+            'total_value': '총재고금액'
         }
         
-        disp_cols = ['product_code', 'product_type', 'yarn_type', 'weight', 'size', 'shipping_unit_price', 'stock']
+        disp_cols = ['product_code', 'product_type', 'yarn_type', 'weight', 'size', 'shipping_unit_price', 'stock', 'total_value']
         
         # [NEW] 조회 방식 선택 (요약 vs 전체 리스트)
         view_mode = st.radio("조회 방식", ["제품별 요약 (제품코드)", "전체 상세 내역 (리스트)"], horizontal=True, key=f"inv_view_mode_{allow_shipping}")
@@ -1032,6 +1116,313 @@ def render_inventory_logic(db, allow_shipping=False):
         detail_cols = [c for c in detail_col_map.keys() if c in df_detail_print.columns]
         df_detail_final = df_detail_print[detail_cols].rename(columns=detail_col_map)
 
+        # [수정] 구분선 간격 조정 (좁게)
+        st.markdown("<hr style='margin: 10px 0; border: none; border-top: 1px solid #e6e6e6;'>", unsafe_allow_html=True)
+
+        # [NEW] 선택된 행을 저장할 변수 (출고용)
+        selected_rows_for_shipping = None
+
+        # [NEW] 스마트 데이터 에디터 - 2. 수정 모드 토글
+        is_admin = st.session_state.get("role") == "admin"
+        can_edit = is_admin and not allow_shipping
+        edit_mode = False
+        if can_edit:
+            edit_mode = st.toggle("재고 수정 모드 (수량/단가)", key=f"edit_mode_{allow_shipping}")
+
+        # 관리자 권한 확인 (삭제 기능용)
+        is_admin = st.session_state.get("role") == "admin"
+
+        if view_mode == "제품별 요약 (제품코드)":
+            st.write("🔽 상세 내역을 확인할 제품을 선택하세요.")
+            
+            # [수정] 동적 높이 계산 (행당 약 35px, 최대 20행 700px)
+            summary_height = min((len(summary) + 1) * 35 + 3, 700)
+            
+            selection_summary = st.dataframe(
+                summary[disp_cols].rename(columns=summary_cols),
+                width="stretch",
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                height=summary_height,
+                key=f"inv_summary_list_{allow_shipping}"
+            )
+            
+            # [NEW] 제품별 요약 목록 합계 표시
+            st.markdown(f"<div style='text-align:right; font-weight:bold; padding:5px; color:#333;'>총 재고수량 합계: {summary['stock'].sum():,}</div>", unsafe_allow_html=True)
+
+            if selection_summary.selection.rows:
+                idx = selection_summary.selection.rows[0]
+                sel_p_code = summary.iloc[idx]['product_code']
+                
+                st.divider()
+                st.markdown(f"### 상세 재고 내역: **{sel_p_code}**")
+                
+                detail_df = df[df['product_code'] == sel_p_code].copy()
+                
+                if 'date' in detail_df.columns:
+                    detail_df['date'] = detail_df['date'].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isnull(x) and hasattr(x, 'strftime') else str(x)[:10])
+                
+                # [NEW] 스마트 데이터 에디터 - 3. 수정 모드 분기
+                if edit_mode:
+                    st.info("수정할 셀을 더블클릭하여 값을 변경한 후, 하단의 '변경사항 저장' 버튼을 누르세요.")
+                    
+                    detail_cols_for_editor = ["id", "customer", "name", "product_type", "yarn_type", "weight", "size", "color", "shipping_unit_price", "stock", "order_no", "date", "note"]
+                    for c in detail_cols_for_editor:
+                        if c not in detail_df.columns: detail_df[c] = ""
+
+                    edited_df = st.data_editor(
+                        detail_df,
+                        column_config={
+                            "id": None, "customer": st.column_config.TextColumn("구분/발주처", disabled=True),
+                            "name": st.column_config.TextColumn("제품명", disabled=True),
+                            "product_type": st.column_config.TextColumn("제품종류", disabled=True),
+                            "yarn_type": st.column_config.TextColumn("사종", disabled=True),
+                            "weight": st.column_config.TextColumn("중량", disabled=True),
+                            "size": st.column_config.TextColumn("사이즈", disabled=True),
+                            "color": st.column_config.TextColumn("색상", disabled=True),
+                            "shipping_unit_price": st.column_config.NumberColumn("단가", format="%d"),
+                            "stock": st.column_config.NumberColumn("재고수량", format="%d"),
+                            "order_no": st.column_config.TextColumn("발주번호", disabled=True),
+                            "date": st.column_config.TextColumn("등록/접수일", disabled=True),
+                            "note": st.column_config.TextColumn("비고", disabled=True),
+                        },
+                        column_order=detail_cols_for_editor,
+                        hide_index=True, height=min((len(detail_df) + 1) * 35 + 3, 600),
+                        key=f"inv_editor_detail_{sel_p_code}"
+                    )
+
+                    original_df_subset = detail_df.reset_index(drop=True)
+                    edited_df_reset = edited_df.reset_index(drop=True)
+                    changed_mask = (original_df_subset.ne(edited_df_reset)).any(axis=1)
+
+                    if changed_mask.any():
+                        if st.button("변경사항 저장", key=f"save_changes_detail_{sel_p_code}", type="primary"):
+                            changed_rows = edited_df_reset[changed_mask]
+                            original_changed_rows = original_df_subset[changed_mask]
+                            
+                            change_list = []
+                            for i in changed_rows.index:
+                                original_row = original_changed_rows.loc[i]
+                                edited_row = changed_rows.loc[i]
+                                
+                                change_item = {'id': original_row['id'], 'name': original_row['name']}
+                                changed_fields = {}
+                                if original_row['stock'] != edited_row['stock']:
+                                    changed_fields['stock'] = (original_row['stock'], edited_row['stock'])
+                                if original_row['shipping_unit_price'] != edited_row['shipping_unit_price']:
+                                    changed_fields['shipping_unit_price'] = (original_row['shipping_unit_price'], edited_row['shipping_unit_price'])
+                                
+                                if changed_fields:
+                                    change_item['changes'] = changed_fields
+                                    # [NEW] 화면 표시용 데이터 추가
+                                    change_item['row_data'] = {
+                                        '제품명': edited_row['name'],
+                                        '구분/발주처': edited_row['customer'],
+                                        '재고수량': edited_row['stock'],
+                                        '단가': edited_row['shipping_unit_price']
+                                    }
+                                    change_list.append(change_item)
+                            
+                            st.session_state[changes_key] = change_list
+                            st.rerun()
+                else:
+                    # 기존 조회/선택 모드
+                    detail_map_view = {
+                        "customer": "구분/발주처", "name": "제품명", 
+                        "product_type": "제품종류", "yarn_type": "사종", "weight": "중량", 
+                        "size": "사이즈", "color": "색상", "shipping_unit_price": "단가", 
+                        "stock": "재고수량", "order_no": "발주번호", "date": "등록/접수일", "note": "비고"
+                    }
+                    detail_cols_view = ["customer", "name", "product_type", "yarn_type", "weight", "size", "color", "shipping_unit_price", "stock", "order_no", "date", "note"]
+                    
+                    for c in detail_cols_view:
+                        if c not in detail_df.columns: detail_df[c] = ""
+                    
+                    if allow_shipping:
+                        st.info("🔽 출고할 항목을 선택(체크)하면 하단에 출고 입력 폼이 나타납니다.")
+                        sel_mode = "multi-row"
+                    elif is_admin:
+                        st.write("🔽 삭제할 항목을 선택(체크)하세요. (관리자 기능)")
+                        sel_mode = "multi-row"
+                    else:
+                        sel_mode = "single-row"
+                    
+                    detail_height = min((len(detail_df) + 1) * 35 + 3, 600)
+                    
+                    selection_detail = st.dataframe(
+                        detail_df[detail_cols_view].rename(columns=detail_map_view),
+                        width="stretch", hide_index=True, on_select="rerun",
+                        selection_mode=sel_mode, height=detail_height,
+                        key=f"inv_detail_list_{sel_p_code}_{allow_shipping}"
+                    )
+                    
+                    st.markdown(f"<div style='text-align:right; font-weight:bold; padding:5px; color:#333;'>합계 수량: {detail_df['stock'].sum():,}</div>", unsafe_allow_html=True)
+
+                    if allow_shipping and selection_detail.selection.rows:
+                        selected_rows_for_shipping = detail_df.iloc[selection_detail.selection.rows]
+                    
+                    if is_admin and not allow_shipping and selection_detail.selection.rows:
+                        del_rows = detail_df.iloc[selection_detail.selection.rows]
+                        st.markdown(f"#### 🗑️ 선택 항목 삭제 ({len(del_rows)}건)")
+                        
+                        if st.button("선택 항목 삭제", type="primary", key=f"btn_del_inv_sub_{sel_p_code}"):
+                            st.session_state[f"confirm_del_{sel_p_code}"] = True
+                        
+                        if st.session_state.get(f"confirm_del_{sel_p_code}"):
+                            st.warning("⚠️ 정말로 삭제하시겠습니까? (복구할 수 없습니다)")
+                            if st.button("✅ 예, 삭제합니다", key=f"btn_yes_del_{sel_p_code}"):
+                                for idx, row in del_rows.iterrows():
+                                    db.collection("orders").document(row['id']).delete()
+                                st.success("삭제되었습니다.")
+                                st.session_state[f"confirm_del_{sel_p_code}"] = False
+                                st.rerun()
+                            if st.button("❌ 취소", key=f"btn_no_del_{sel_p_code}"):
+                                st.session_state[f"confirm_del_{sel_p_code}"] = False
+                                st.rerun()
+                    
+                    if is_admin and not allow_shipping:
+                        st.divider()
+                        if st.button(f"🗑️ '{sel_p_code}' 제품 재고 전체 삭제", type="secondary", key=f"btn_del_all_{sel_p_code}"):
+                            st.session_state[f"confirm_del_all_{sel_p_code}"] = True
+                        
+                        if st.session_state.get(f"confirm_del_all_{sel_p_code}"):
+                            st.warning(f"⚠️ 경고: '{sel_p_code}' 제품의 모든 재고({len(detail_df)}건)가 삭제됩니다. 이 작업은 되돌릴 수 없습니다.")
+                            if st.button("✅ 예, 모두 삭제합니다", key=f"btn_yes_del_all_{sel_p_code}"):
+                                for idx, row in detail_df.iterrows():
+                                    db.collection("orders").document(row['id']).delete()
+                                st.success("모든 재고가 삭제되었습니다.")
+                                st.session_state[f"confirm_del_all_{sel_p_code}"] = False
+                                st.rerun()
+
+        
+        else: # 전체 상세 내역 (리스트)
+            st.write("🔽 전체 재고 내역입니다.")
+            
+            full_df = df.copy()
+            if 'date' in full_df.columns:
+                full_df['date'] = full_df['date'].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isnull(x) and hasattr(x, 'strftime') else str(x)[:10])
+            
+            if edit_mode:
+                st.info("수정할 셀을 더블클릭하여 값을 변경한 후, 하단의 '변경사항 저장' 버튼을 누르세요.")
+                
+                full_cols_for_editor = ["id", "product_code", "customer", "name", "product_type", "yarn_type", "weight", "size", "color", "shipping_unit_price", "stock", "order_no", "date", "note"]
+                for c in full_cols_for_editor:
+                    if c not in full_df.columns: full_df[c] = ""
+
+                edited_df = st.data_editor(
+                    full_df,
+                    column_config={
+                        "id": None, "product_code": st.column_config.TextColumn("제품코드", disabled=True),
+                        "customer": st.column_config.TextColumn("구분/발주처", disabled=True),
+                        "name": st.column_config.TextColumn("제품명", disabled=True),
+                        "product_type": st.column_config.TextColumn("제품종류", disabled=True),
+                        "yarn_type": st.column_config.TextColumn("사종", disabled=True),
+                        "weight": st.column_config.TextColumn("중량", disabled=True),
+                        "size": st.column_config.TextColumn("사이즈", disabled=True),
+                        "color": st.column_config.TextColumn("색상", disabled=True),
+                        "shipping_unit_price": st.column_config.NumberColumn("단가", format="%d"),
+                        "stock": st.column_config.NumberColumn("재고수량", format="%d"),
+                        "order_no": st.column_config.TextColumn("발주번호", disabled=True),
+                        "date": st.column_config.TextColumn("등록/접수일", disabled=True),
+                        "note": st.column_config.TextColumn("비고", disabled=True),
+                    },
+                    column_order=full_cols_for_editor,
+                    hide_index=True, height=min((len(full_df) + 1) * 35 + 3, 700),
+                    key=f"inv_editor_full_{allow_shipping}"
+                )
+
+                original_df_subset = full_df.reset_index(drop=True)
+                edited_df_reset = edited_df.reset_index(drop=True)
+                changed_mask = (original_df_subset.ne(edited_df_reset)).any(axis=1)
+
+                if changed_mask.any():
+                    if st.button("변경사항 저장", key=f"save_changes_full_{allow_shipping}", type="primary"):
+                        changed_rows = edited_df_reset[changed_mask]
+                        original_changed_rows = original_df_subset[changed_mask]
+                        
+                        change_list = []
+                        for i in changed_rows.index:
+                            original_row = original_changed_rows.loc[i]
+                            edited_row = changed_rows.loc[i]
+                            
+                            change_item = {'id': original_row['id'], 'name': original_row['name']}
+                            changed_fields = {}
+                            if original_row['stock'] != edited_row['stock']:
+                                changed_fields['stock'] = (original_row['stock'], edited_row['stock'])
+                            if original_row['shipping_unit_price'] != edited_row['shipping_unit_price']:
+                                changed_fields['shipping_unit_price'] = (original_row['shipping_unit_price'], edited_row['shipping_unit_price'])
+                            
+                            if changed_fields:
+                                change_item['changes'] = changed_fields
+                                # [NEW] 화면 표시용 데이터 추가
+                                change_item['row_data'] = {
+                                    '제품명': edited_row['name'],
+                                    '구분/발주처': edited_row['customer'],
+                                    '재고수량': edited_row['stock'],
+                                    '단가': edited_row['shipping_unit_price']
+                                }
+                                change_list.append(change_item)
+                        
+                        st.session_state[changes_key] = change_list
+                        st.rerun()
+            else:
+                # 기존 조회/선택 모드
+                full_map = {
+                    "product_code": "제품코드", "customer": "구분/발주처", "name": "제품명", 
+                    "product_type": "제품종류", "yarn_type": "사종", "weight": "중량", 
+                    "size": "사이즈", "color": "색상", "shipping_unit_price": "단가", 
+                    "stock": "재고수량", "order_no": "발주번호", "date": "등록/접수일", "note": "비고"
+                }
+                full_cols = ["product_code", "customer", "name", "product_type", "yarn_type", "weight", "size", "color", "shipping_unit_price", "stock", "order_no", "date", "note"]
+                
+                for c in full_cols:
+                    if c not in full_df.columns: full_df[c] = ""
+
+                if allow_shipping:
+                    st.info("🔽 출고할 항목을 선택(체크)하면 하단에 출고 입력 폼이 나타납니다.")
+                    sel_mode = "multi-row"
+                elif is_admin:
+                    st.write("🔽 삭제할 항목을 선택(체크)하세요. (관리자 기능)")
+                    sel_mode = "multi-row"
+                else:
+                    sel_mode = "single-row"
+
+                full_height = min((len(full_df) + 1) * 35 + 3, 700)
+
+                selection_full = st.dataframe(
+                    full_df[full_cols].rename(columns=full_map),
+                    width="stretch", hide_index=True, on_select="rerun",
+                    selection_mode=sel_mode, height=full_height,
+                    key=f"inv_full_list_{allow_shipping}"
+                )
+                
+                st.markdown(f"<div style='text-align:right; font-weight:bold; padding:5px; color:#333;'>합계 수량: {full_df['stock'].sum():,}</div>", unsafe_allow_html=True)
+
+                if allow_shipping and selection_full.selection.rows:
+                    selected_rows_for_shipping = full_df.iloc[selection_full.selection.rows]
+
+                if is_admin and not allow_shipping and selection_full.selection.rows:
+                    del_rows = full_df.iloc[selection_full.selection.rows]
+                    st.markdown(f"#### 🗑️ 재고 삭제 (선택: {len(del_rows)}건)")
+                    
+                    if st.button("선택 항목 삭제", type="primary", key="btn_del_inv_full"):
+                        st.session_state["confirm_del_full"] = True
+                    
+                    if st.session_state.get("confirm_del_full"):
+                        st.warning("⚠️ 정말로 삭제하시겠습니까? (복구할 수 없습니다)")
+                        c_conf1, c_conf2 = st.columns(2)
+                        if c_conf1.button("✅ 예, 삭제합니다", key="btn_yes_del_full"):
+                            for idx, row in del_rows.iterrows():
+                                db.collection("orders").document(row['id']).delete()
+                            st.success("삭제되었습니다.")
+                            st.session_state["confirm_del_full"] = False
+                            st.rerun()
+                        if c_conf2.button("❌ 취소", key="btn_no_del_full"):
+                            st.session_state["confirm_del_full"] = False
+                            st.rerun()
+
+        # [MOVED] 인쇄 및 엑셀 내보내기 설정 (테이블 하단으로 이동)
         st.divider()
         
         # 1. 인쇄 옵션 설정 (Expander)
@@ -1162,195 +1553,6 @@ def render_inventory_logic(db, allow_shipping=False):
 
                 html_content += "</body></html>"
                 st.components.v1.html(html_content, height=0, width=0)
-        
-        st.divider()
-
-        # [NEW] 선택된 행을 저장할 변수 (출고용)
-        selected_rows_for_shipping = None
-
-        # 관리자 권한 확인 (삭제 기능용)
-        is_admin = st.session_state.get("role") == "admin"
-
-        if view_mode == "제품별 요약 (제품코드)":
-            st.write("🔽 상세 내역을 확인할 제품을 선택하세요.")
-            
-            # [수정] 동적 높이 계산 (행당 약 35px, 최대 20행 700px)
-            summary_height = min((len(summary) + 1) * 35 + 3, 700)
-            
-            selection_summary = st.dataframe(
-                summary[disp_cols].rename(columns=summary_cols),
-                width="stretch",
-                hide_index=True,
-                on_select="rerun",
-                selection_mode="single-row",
-                height=summary_height,
-                key=f"inv_summary_list_{allow_shipping}"
-            )
-            
-            # [NEW] 제품별 요약 목록 합계 표시
-            st.markdown(f"<div style='text-align:right; font-weight:bold; padding:5px; color:#333;'>총 재고수량 합계: {summary['stock'].sum():,}</div>", unsafe_allow_html=True)
-
-            if selection_summary.selection.rows:
-                idx = selection_summary.selection.rows[0]
-                sel_p_code = summary.iloc[idx]['product_code']
-                
-                st.divider()
-                st.markdown(f"### 상세 재고 내역: **{sel_p_code}**")
-                
-                detail_df = df[df['product_code'] == sel_p_code].copy()
-                
-                if 'date' in detail_df.columns:
-                    detail_df['date'] = detail_df['date'].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isnull(x) and hasattr(x, 'strftime') else str(x)[:10])
-                
-                # [수정] 상세 내역 컬럼 확장 (모든 정보 표시)
-                detail_map_view = {
-                    "customer": "구분/발주처", "name": "제품명", 
-                    "product_type": "제품종류", "yarn_type": "사종", "weight": "중량", 
-                    "size": "사이즈", "color": "색상", "shipping_unit_price": "단가", 
-                    "stock": "재고수량", "order_no": "발주번호", "date": "등록/접수일", "note": "비고"
-                }
-                detail_cols_view = ["customer", "name", "product_type", "yarn_type", "weight", "size", "color", "shipping_unit_price", "stock", "order_no", "date", "note"]
-                
-                # 없는 컬럼 채우기
-                for c in detail_cols_view:
-                    if c not in detail_df.columns: detail_df[c] = ""
-                
-                # [수정] 안내 문구 및 선택 모드 설정
-                if allow_shipping:
-                    st.info("🔽 출고할 항목을 선택(체크)하면 하단에 출고 입력 폼이 나타납니다.")
-                    sel_mode = "multi-row"
-                elif is_admin:
-                    st.write("🔽 삭제할 항목을 선택(체크)하세요. (관리자 기능)")
-                    sel_mode = "multi-row"
-                else:
-                    sel_mode = "single-row"
-                
-                # [수정] 동적 높이 계산
-                detail_height = min((len(detail_df) + 1) * 35 + 3, 600)
-                
-                selection_detail = st.dataframe(
-                    detail_df[detail_cols_view].rename(columns=detail_map_view),
-                    width="stretch",
-                    hide_index=True,
-                    on_select="rerun",
-                    selection_mode=sel_mode,
-                    height=detail_height,
-                    key=f"inv_detail_list_{sel_p_code}_{allow_shipping}"
-                )
-                
-                # [NEW] 화면 하단 합계 표시
-                st.markdown(f"<div style='text-align:right; font-weight:bold; padding:5px; color:#333;'>합계 수량: {detail_df['stock'].sum():,}</div>", unsafe_allow_html=True)
-
-                if allow_shipping and selection_detail.selection.rows:
-                    selected_rows_for_shipping = detail_df.iloc[selection_detail.selection.rows]
-                
-                # [NEW] 관리자 삭제 기능 (제품별 상세 내역)
-                if is_admin and not allow_shipping and selection_detail.selection.rows:
-                    del_rows = detail_df.iloc[selection_detail.selection.rows]
-                    st.markdown(f"#### 🗑️ 선택 항목 삭제 ({len(del_rows)}건)")
-                    
-                    if st.button("선택 항목 삭제", type="primary", key=f"btn_del_inv_sub_{sel_p_code}"):
-                        st.session_state[f"confirm_del_{sel_p_code}"] = True
-                    
-                    if st.session_state.get(f"confirm_del_{sel_p_code}"):
-                        st.warning("⚠️ 정말로 삭제하시겠습니까? (복구할 수 없습니다)")
-                        if st.button("✅ 예, 삭제합니다", key=f"btn_yes_del_{sel_p_code}"):
-                            for idx, row in del_rows.iterrows():
-                                db.collection("orders").document(row['id']).delete()
-                            st.success("삭제되었습니다.")
-                            st.session_state[f"confirm_del_{sel_p_code}"] = False
-                            st.rerun()
-                        if st.button("❌ 취소", key=f"btn_no_del_{sel_p_code}"):
-                            st.session_state[f"confirm_del_{sel_p_code}"] = False
-                            st.rerun()
-                
-                # [NEW] 제품 전체 삭제 기능 (관리자 전용)
-                if is_admin and not allow_shipping:
-                    st.divider()
-                    if st.button(f"🗑️ '{sel_p_code}' 제품 재고 전체 삭제", type="secondary", key=f"btn_del_all_{sel_p_code}"):
-                        st.session_state[f"confirm_del_all_{sel_p_code}"] = True
-                    
-                    if st.session_state.get(f"confirm_del_all_{sel_p_code}"):
-                        st.warning(f"⚠️ 경고: '{sel_p_code}' 제품의 모든 재고({len(detail_df)}건)가 삭제됩니다. 이 작업은 되돌릴 수 없습니다.")
-                        if st.button("✅ 예, 모두 삭제합니다", key=f"btn_yes_del_all_{sel_p_code}"):
-                            for idx, row in detail_df.iterrows():
-                                db.collection("orders").document(row['id']).delete()
-                            st.success("모든 재고가 삭제되었습니다.")
-                            st.session_state[f"confirm_del_all_{sel_p_code}"] = False
-                            st.rerun()
-
-        
-        else: # 전체 상세 내역 (리스트)
-            st.write("🔽 전체 재고 내역입니다.")
-            
-            # 전체 리스트용 데이터프레임 준비 (이미 위에서 만든 df_detail_final 활용 가능하지만, 원본 df 사용)
-            full_df = df.copy()
-            if 'date' in full_df.columns:
-                full_df['date'] = full_df['date'].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isnull(x) and hasattr(x, 'strftime') else str(x)[:10])
-            
-            # 전체 리스트 컬럼
-            # [수정] 색상 추가 및 컬럼 순서 변경
-            full_map = {
-                "product_code": "제품코드", "customer": "구분/발주처", "name": "제품명", 
-                "product_type": "제품종류", "yarn_type": "사종", "weight": "중량", 
-                "size": "사이즈", "color": "색상", "shipping_unit_price": "단가", 
-                "stock": "재고수량", "order_no": "발주번호", "date": "등록/접수일", "note": "비고"
-            }
-            full_cols = ["product_code", "customer", "name", "product_type", "yarn_type", "weight", "size", "color", "shipping_unit_price", "stock", "order_no", "date", "note"]
-            
-            # 없는 컬럼 채우기
-            for c in full_cols:
-                if c not in full_df.columns: full_df[c] = ""
-
-            # [수정] 선택 모드 설정 (관리자 삭제 또는 출고 작업 시 다중 선택)
-            if allow_shipping:
-                st.info("🔽 출고할 항목을 선택(체크)하면 하단에 출고 입력 폼이 나타납니다.")
-                sel_mode = "multi-row"
-            elif is_admin:
-                st.write("🔽 삭제할 항목을 선택(체크)하세요. (관리자 기능)")
-                sel_mode = "multi-row"
-            else:
-                sel_mode = "single-row" # 일반 조회 시 선택 불필요하지만 UI 통일성 유지
-
-            # [수정] 동적 높이 계산
-            full_height = min((len(full_df) + 1) * 35 + 3, 700)
-
-            selection_full = st.dataframe(
-                full_df[full_cols].rename(columns=full_map),
-                width="stretch",
-                hide_index=True,
-                on_select="rerun",
-                selection_mode=sel_mode,
-                height=full_height,
-                key=f"inv_full_list_{allow_shipping}"
-            )
-            
-            # [NEW] 화면 하단 합계 표시
-            st.markdown(f"<div style='text-align:right; font-weight:bold; padding:5px; color:#333;'>합계 수량: {full_df['stock'].sum():,}</div>", unsafe_allow_html=True)
-
-            if allow_shipping and selection_full.selection.rows:
-                selected_rows_for_shipping = full_df.iloc[selection_full.selection.rows]
-
-            # [NEW] 관리자 삭제 기능 (전체 리스트)
-            if is_admin and not allow_shipping and selection_full.selection.rows:
-                del_rows = full_df.iloc[selection_full.selection.rows]
-                st.markdown(f"#### 🗑️ 재고 삭제 (선택: {len(del_rows)}건)")
-                
-                if st.button("선택 항목 삭제", type="primary", key="btn_del_inv_full"):
-                    st.session_state["confirm_del_full"] = True
-                
-                if st.session_state.get("confirm_del_full"):
-                    st.warning("⚠️ 정말로 삭제하시겠습니까? (복구할 수 없습니다)")
-                    c_conf1, c_conf2 = st.columns(2)
-                    if c_conf1.button("✅ 예, 삭제합니다", key="btn_yes_del_full"):
-                        for idx, row in del_rows.iterrows():
-                            db.collection("orders").document(row['id']).delete()
-                        st.success("삭제되었습니다.")
-                        st.session_state["confirm_del_full"] = False
-                        st.rerun()
-                    if c_conf2.button("❌ 취소", key="btn_no_del_full"):
-                        st.session_state["confirm_del_full"] = False
-                        st.rerun()
 
         # [MOVED] 출고 처리 로직 (공통)
         if allow_shipping and selected_rows_for_shipping is not None and not selected_rows_for_shipping.empty:
@@ -1914,6 +2116,7 @@ def render_partners(db, sub_menu):
     partner_types = get_common_codes("partner_types", ["발주처", "염색업체", "봉제업체", "배송업체", "기타"])
 
     if sub_menu == "거래처 등록":
+        st.subheader("거래처 등록")
         # [NEW] 폼 초기화를 위한 키 관리
         if "partner_reg_key" not in st.session_state:
             st.session_state["partner_reg_key"] = 0
@@ -1933,14 +2136,16 @@ def render_partners(db, sub_menu):
             p_biz_num = c2.text_input("사업자번호")
             p_item = c3.text_input("업태/종목")
             
-            c1, c2, c3 = st.columns(3)
-            p_phone = c1.text_input("전화번호")
-            p_fax = c2.text_input("팩스번호")
-            p_email = c3.text_input("이메일")
+            c1, c2, c3, c4 = st.columns(4)
+            p_manager = c1.text_input("담당자")
+            p_phone = c2.text_input("전화번호")
+            p_fax = c3.text_input("팩스번호")
+            p_email = c4.text_input("이메일")
             
             p_address = st.text_input("주소")
             p_account = st.text_input("계좌번호")
             p_note = st.text_area("기타사항")
+            p_reg_date = st.date_input("등록일", datetime.date.today())
             
             if st.form_submit_button("거래처 저장"):
                 if p_name:
@@ -1950,13 +2155,14 @@ def render_partners(db, sub_menu):
                         "rep_name": p_rep,
                         "biz_num": p_biz_num,
                         "item": p_item,
+                        "manager": p_manager,
                         "phone": p_phone,
                         "fax": p_fax,
                         "email": p_email,
                         "address": p_address,
                         "account": p_account,
                         "note": p_note,
-                        "reg_date": datetime.datetime.now()
+                        "reg_date": datetime.datetime.combine(p_reg_date, datetime.datetime.now().time())
                     })
                     st.session_state["partner_success_msg"] = f"✅ {p_name} 저장 완료!"
                     st.session_state["partner_reg_key"] += 1
@@ -1965,6 +2171,7 @@ def render_partners(db, sub_menu):
                     st.error("거래처명을 입력해주세요.")
 
     elif sub_menu == "거래처 목록":
+        st.subheader("거래처 목록")
         # 거래처 목록 조회
         partners = list(db.collection("partners").order_by("name").stream())
         if partners:
@@ -1976,20 +2183,45 @@ def render_partners(db, sub_menu):
             df = pd.DataFrame(data)
             
             # 1. 모든 컬럼 보여주기 (빈 값이라도 표시)
-            all_cols = ["type", "name", "rep_name", "biz_num", "item", "phone", "fax", "email", "address", "account", "note"]
+            all_cols = ["name", "type", "rep_name", "biz_num", "item", "manager", "phone", "fax", "email", "address", "account", "note", "reg_date"]
             
             # 데이터프레임에 없는 컬럼은 빈 문자열로 채움
             for col in all_cols:
                 if col not in df.columns:
                     df[col] = ""
             
+            # [NEW] 다중 조건 검색 기능
+            with st.expander("🔍 상세 검색 (다중 조건)", expanded=True):
+                sp_c1, sp_c2, sp_c3 = st.columns([1, 1, 2])
+                
+                # 검색 옵션 준비
+                all_p_names = ["전체"] + sorted(df['name'].unique().tolist())
+                all_p_types = ["전체"] + sorted(df['type'].unique().tolist())
+                
+                s_name = sp_c1.selectbox("거래처명", all_p_names, key="s_partner_name")
+                s_type = sp_c2.selectbox("구분", all_p_types, key="s_partner_type")
+                s_text = sp_c3.text_input("통합 검색 (대표자, 담당자, 연락처, 비고 등)", key="s_partner_text")
+                
+                # 필터링 적용
+                if s_name != "전체":
+                    df = df[df['name'] == s_name]
+                if s_type != "전체":
+                    df = df[df['type'] == s_type]
+                if s_text:
+                    mask = df.apply(lambda x: s_text.lower() in str(x.get('rep_name', '')).lower() or s_text.lower() in str(x.get('manager', '')).lower() or s_text.lower() in str(x.get('phone', '')).lower() or s_text.lower() in str(x.get('note', '')).lower(), axis=1)
+                    df = df[mask]
+
             # 컬럼명 한글로 변경
             col_map = {
-                "type": "구분", "name": "거래처명", "rep_name": "대표자", 
-                "biz_num": "사업자번호", "item": "업태/종목", "phone": "전화번호", 
+                "name": "거래처명", "type": "구분", "rep_name": "대표자", 
+                "biz_num": "사업자번호", "item": "업태/종목", "manager": "담당자", "phone": "전화번호", 
                 "fax": "팩스", "email": "이메일", "address": "주소", 
-                "account": "계좌번호", "note": "비고"
+                "account": "계좌번호", "note": "비고", "reg_date": "등록일"
             }
+            
+            # 날짜 포맷팅
+            if 'reg_date' in df.columns:
+                df['reg_date'] = df['reg_date'].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isnull(x) and hasattr(x, 'strftime') else str(x)[:10])
             
             # 화면 표시용 (id 제외)
             df_display = df[all_cols].rename(columns=col_map)
@@ -2026,22 +2258,29 @@ def render_partners(db, sub_menu):
                 
                 with st.form("edit_partner_form"):
                     c1, c2 = st.columns(2)
-                    e_type = c1.selectbox("거래처 구분", partner_types, index=partner_types.index(sel_row['type']) if sel_row['type'] in partner_types else 0)
-                    e_name = c2.text_input("거래처명", value=sel_row['name'])
+                    e_name = c1.text_input("거래처명", value=sel_row['name'])
+                    e_type = c2.selectbox("거래처 구분", partner_types, index=partner_types.index(sel_row['type']) if sel_row['type'] in partner_types else 0)
                     
                     c1, c2, c3 = st.columns(3)
                     e_rep = c1.text_input("대표자명", value=sel_row['rep_name'])
                     e_biz = c2.text_input("사업자번호", value=sel_row['biz_num'])
                     e_item = c3.text_input("업태/종목", value=sel_row['item'])
                     
-                    c1, c2, c3 = st.columns(3)
-                    e_phone = c1.text_input("전화번호", value=sel_row['phone'])
-                    e_fax = c2.text_input("팩스번호", value=sel_row['fax'])
-                    e_email = c3.text_input("이메일", value=sel_row['email'])
+                    c1, c2, c3, c4 = st.columns(4)
+                    e_manager = c1.text_input("담당자", value=sel_row.get('manager', ''))
+                    e_phone = c2.text_input("전화번호", value=sel_row['phone'])
+                    e_fax = c3.text_input("팩스번호", value=sel_row['fax'])
+                    e_email = c4.text_input("이메일", value=sel_row['email'])
                     
                     e_addr = st.text_input("주소", value=sel_row['address'])
                     e_acc = st.text_input("계좌번호", value=sel_row['account'])
                     e_note = st.text_area("기타사항", value=sel_row['note'])
+                    
+                    try:
+                        default_date = pd.to_datetime(sel_row.get('reg_date')).date()
+                    except:
+                        default_date = datetime.date.today()
+                    e_reg_date = st.date_input("등록일", value=default_date)
                     
                     if st.form_submit_button("수정 저장"):
                         db.collection("partners").document(sel_id).update({
@@ -2050,12 +2289,14 @@ def render_partners(db, sub_menu):
                             "rep_name": e_rep,
                             "biz_num": e_biz,
                             "item": e_item,
+                            "manager": e_manager,
                             "phone": e_phone,
                             "fax": e_fax,
                             "email": e_email,
                             "address": e_addr,
                             "account": e_acc,
-                            "note": e_note
+                            "note": e_note,
+                            "reg_date": datetime.datetime.combine(e_reg_date, datetime.datetime.now().time())
                         })
                         st.success("수정되었습니다.")
                         st.rerun()
@@ -2354,6 +2595,135 @@ def render_users(db, sub_menu):
                         st.rerun()
                 else:
                     st.warning("아이디, 비밀번호, 이름은 필수 입력입니다.")
+
+def render_my_profile(db):
+    st.header("로그인 정보 설정")
+    
+    user_id = st.session_state.get("user_id")
+    if not user_id:
+        st.error("로그인 정보가 없습니다.")
+        return
+
+    user_doc = db.collection("users").document(user_id).get()
+    if not user_doc.exists:
+        st.error("사용자 정보를 찾을 수 없습니다.")
+        return
+    
+    user_data = user_doc.to_dict()
+    
+    st.subheader(f"내 정보 수정 ({user_data.get('name')}님)")
+    
+    with st.form("my_profile_form"):
+        st.write("📝 기본 정보")
+        c1, c2 = st.columns(2)
+        new_phone = c1.text_input("연락처", value=user_data.get("phone", ""))
+        new_dept = c2.text_input("부서/직책", value=user_data.get("department", ""))
+        
+        st.divider()
+        st.write("🔒 비밀번호 변경 (변경 시에만 입력하세요)")
+        cur_pw = st.text_input("현재 비밀번호", type="password")
+        new_pw = st.text_input("새 비밀번호", type="password")
+        new_pw_chk = st.text_input("새 비밀번호 확인", type="password")
+        
+        if st.form_submit_button("정보 수정 저장"):
+            updates = {}
+            
+            if new_phone != user_data.get("phone", ""):
+                updates["phone"] = new_phone
+            if new_dept != user_data.get("department", ""):
+                updates["department"] = new_dept
+                st.session_state["department"] = new_dept
+            
+            if new_pw:
+                if cur_pw != user_data.get("password"):
+                    st.error("현재 비밀번호가 일치하지 않습니다.")
+                    return
+                if new_pw != new_pw_chk:
+                    st.error("새 비밀번호가 서로 일치하지 않습니다.")
+                    return
+                updates["password"] = new_pw
+            
+            if updates:
+                db.collection("users").document(user_id).update(updates)
+                st.success("정보가 성공적으로 수정되었습니다.")
+                if "password" in updates:
+                    st.info("비밀번호가 변경되었습니다.")
+            else:
+                st.info("변경할 내용이 없습니다.")
+
+def render_company_settings(db, sub_menu):
+    doc_ref = db.collection("settings").document("company_info")
+    doc = doc_ref.get()
+    data = doc.to_dict() if doc.exists else {}
+    
+    if sub_menu == "회사정보 조회":
+        st.header("회사정보")
+        
+        # 1. 현재 정보 표시 (View Mode)
+        if data:
+            st.markdown(f"""
+            <div style="padding: 20px; background-color: #f8f9fa; border-radius: 10px; border: 1px solid #e9ecef; margin-bottom: 20px;">
+                <h3 style="margin-top: 0; color: #333;">🏢 {data.get('name', '회사명 미등록')}</h3>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.95rem;">
+                    <div><strong>대표자:</strong> {data.get('rep_name', '')}</div>
+                    <div><strong>사업자번호:</strong> {data.get('biz_num', '')}</div>
+                    <div><strong>전화번호:</strong> {data.get('phone', '')}</div>
+                    <div><strong>팩스:</strong> {data.get('fax', '')}</div>
+                    <div><strong>이메일:</strong> {data.get('email', '')}</div>
+                    <div><strong>업태/종목:</strong> {data.get('biz_type', '')} / {data.get('biz_item', '')}</div>
+                </div>
+                <div style="margin-top: 10px; font-size: 0.95rem;">
+                    <strong>주소:</strong> {data.get('address', '')}
+                </div>
+                <hr style="margin: 15px 0; border: 0; border-top: 1px solid #ddd;">
+                <div style="font-size: 0.95rem;">
+                    <strong>거래은행:</strong> {data.get('bank_name', '')} {data.get('bank_account', '')}<br>
+                    <strong>비고:</strong> {data.get('note', '')}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.warning("등록된 회사 정보가 없습니다. '정보 수정' 메뉴에서 정보를 입력해주세요.")
+
+    elif sub_menu == "정보 수정":
+        st.header("회사정보 수정")
+        st.info("거래명세서 등 출력물에 표시될 우리 회사의 정보를 등록하거나 수정합니다.")
+
+        # 2. 정보 수정 (Edit Mode)
+        with st.form("company_info_form"):
+            c1, c2 = st.columns(2)
+            name = c1.text_input("상호(회사명)", value=data.get("name", ""))
+            rep_name = c2.text_input("대표자명", value=data.get("rep_name", ""))
+            
+            c3, c4 = st.columns(2)
+            biz_num = c3.text_input("사업자등록번호", value=data.get("biz_num", ""))
+            address = c4.text_input("사업장 주소", value=data.get("address", ""))
+            
+            c5, c6 = st.columns(2)
+            phone = c5.text_input("전화번호", value=data.get("phone", ""))
+            fax = c6.text_input("팩스번호", value=data.get("fax", ""))
+            
+            c7, c8 = st.columns(2)
+            biz_type = c7.text_input("업태", value=data.get("biz_type", ""))
+            biz_item = c8.text_input("종목", value=data.get("biz_item", ""))
+            
+            email = st.text_input("이메일", value=data.get("email", ""))
+            
+            c9, c10 = st.columns(2)
+            bank_name = c9.text_input("거래은행", value=data.get("bank_name", ""))
+            bank_account = c10.text_input("계좌번호", value=data.get("bank_account", ""))
+            
+            note = st.text_area("비고 / 하단 문구", value=data.get("note", ""), help="명세서 하단에 들어갈 안내 문구 등을 입력하세요.")
+            
+            if st.form_submit_button("저장", type="primary"):
+                new_data = {
+                    "name": name, "rep_name": rep_name, "biz_num": biz_num, "address": address,
+                    "phone": phone, "fax": fax, "biz_type": biz_type, "biz_item": biz_item,
+                    "email": email, "bank_name": bank_name, "bank_account": bank_account, "note": note
+                }
+                doc_ref.set(new_data)
+                st.success("회사 정보가 저장되었습니다.")
+                st.rerun()
 
 def render_my_profile(db):
     st.header("로그인 정보 설정")

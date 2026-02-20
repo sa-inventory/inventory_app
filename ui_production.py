@@ -5,8 +5,8 @@ import io
 from firebase_admin import firestore
 from utils import get_partners, generate_report_html, get_common_codes, manage_code_with_code
 
-def render_weaving(db, sub_menu=None):
-    st.header("제직 현황")
+def render_weaving(db, sub_menu=None, readonly=False):
+    st.header("제직 현황" if not readonly else "제직 조회 (Read-Only)")
     if "weaving_df_key" not in st.session_state:
         st.session_state["weaving_df_key"] = 0
     st.info("발주된 건을 확인하고 제직 작업을 지시하거나, 완료된 건을 염색 공정으로 넘깁니다.")
@@ -100,57 +100,57 @@ def render_weaving(db, sub_menu=None):
             selection = st.dataframe(df[final_cols].rename(columns=col_map), width="stretch", on_select="rerun", selection_mode="multi-row", key=f"df_waiting_{st.session_state['key_weaving_wait']}")
             
             if selection.selection.rows:
-                # [수정] 다중 선택 시 첫 번째 항목 기준으로 처리 (제직기 배정은 개별 처리가 일반적이나, 필요시 일괄 처리 로직 추가 가능)
-                # 여기서는 기존 로직 유지를 위해 첫 번째 항목만 처리하도록 안내하거나 반복문 처리 필요
-                # 현재 요청은 염색 현황에 대한 것이므로 제직은 기존 로직(단일 처리 권장) 유지하되 인덱스 접근 방식만 수정
-                idx = selection.selection.rows[0]
-                sel_row = df.iloc[idx]
-                sel_id = sel_row['id']
-                
-                st.divider()
-                st.markdown(f"### 제직기 배정: **{sel_row['name']}**")
-                
-                if len(selection.selection.rows) > 1:
-                    st.warning("⚠️ 여러 항목이 선택되었습니다. 현재 제직기 배정은 목록의 **첫 번째 항목**에 대해서만 수행됩니다.")
+                if readonly:
+                    st.info("🔒 조회 전용 모드입니다. (수정 불가)")
+                else:
+                    idx = selection.selection.rows[0]
+                    sel_row = df.iloc[idx]
+                    sel_id = sel_row['id']
+                    
+                    st.divider()
+                    st.markdown(f"### 제직기 배정: **{sel_row['name']}**")
+                    
+                    if len(selection.selection.rows) > 1:
+                        st.warning("⚠️ 여러 항목이 선택되었습니다. 현재 제직기 배정은 목록의 **첫 번째 항목**에 대해서만 수행됩니다.")
 
-                with st.form("weaving_start_form"):
-                    c1, c2, c3, c4 = st.columns(4)
-                    
-                    # 제직기 선택 (사용 중인 것은 표시)
-                    # [수정] 제직기 명칭만 표시하도록 변경
-                    m_display_map = {} # "표시명": "호기번호" 매핑
-                    m_options = []
-                    for m in machines_data:
-                        m_no = str(m['machine_no'])
-                        m_name = m['name']
-                        if m_no in busy_machines:
-                            display_str = f"{m_name} (사용중)"
-                        else:
-                            display_str = m_name
-                        m_options.append(display_str)
-                        m_display_map[display_str] = m_no
-                    
-                    s_machine = c1.selectbox("제직기 선택", m_options)
-                    s_date = c2.date_input("시작일자", datetime.date.today(), format="YYYY-MM-DD")
-                    s_time = c3.time_input("시작시간", datetime.datetime.now().time())
-                    s_roll = c4.number_input("제직롤수량", min_value=1, step=1)
-                    
-                    if st.form_submit_button("제직 시작"):
-                        sel_m_no = m_display_map.get(s_machine)
-                        if sel_m_no in busy_machines:
-                            st.error(f"⛔ 해당 제직기는 이미 작업 중입니다!")
-                        else:
-                            start_dt = datetime.datetime.combine(s_date, s_time)
-                            db.collection("orders").document(sel_id).update({
-                                "status": "제직중",
-                                "machine_no": int(sel_m_no),
-                                "weaving_start_time": start_dt,
-                                "weaving_roll_count": s_roll,
-                                "completed_rolls": 0
-                            })
-                            st.success(f"제직을 시작합니다.")
-                            st.session_state["key_weaving_wait"] += 1 # 목록 선택 초기화
-                            st.rerun()
+                    with st.form("weaving_start_form"):
+                        c1, c2, c3, c4 = st.columns(4)
+                        
+                        # 제직기 선택 (사용 중인 것은 표시)
+                        # [수정] 제직기 명칭만 표시하도록 변경
+                        m_display_map = {} # "표시명": "호기번호" 매핑
+                        m_options = []
+                        for m in machines_data:
+                            m_no = str(m['machine_no'])
+                            m_name = m['name']
+                            if m_no in busy_machines:
+                                display_str = f"{m_name} (사용중)"
+                            else:
+                                display_str = m_name
+                            m_options.append(display_str)
+                            m_display_map[display_str] = m_no
+                        
+                        s_machine = c1.selectbox("제직기 선택", m_options)
+                        s_date = c2.date_input("시작일자", datetime.date.today(), format="YYYY-MM-DD")
+                        s_time = c3.time_input("시작시간", datetime.datetime.now().time())
+                        s_roll = c4.number_input("제직롤수량", min_value=1, step=1)
+                        
+                        if st.form_submit_button("제직 시작"):
+                            sel_m_no = m_display_map.get(s_machine)
+                            if sel_m_no in busy_machines:
+                                st.error(f"⛔ 해당 제직기는 이미 작업 중입니다!")
+                            else:
+                                start_dt = datetime.datetime.combine(s_date, s_time)
+                                db.collection("orders").document(sel_id).update({
+                                    "status": "제직중",
+                                    "machine_no": int(sel_m_no),
+                                    "weaving_start_time": start_dt,
+                                    "weaving_roll_count": s_roll,
+                                    "completed_rolls": 0
+                                })
+                                st.success(f"제직을 시작합니다.")
+                                st.session_state["key_weaving_wait"] += 1 # 목록 선택 초기화
+                                st.rerun()
                 
                 # 발주접수로 되돌리기 기능 추가
                 st.divider()
@@ -201,116 +201,119 @@ def render_weaving(db, sub_menu=None):
             selection = st.dataframe(df[final_cols].rename(columns=col_map), width="stretch", on_select="rerun", selection_mode="single-row", key=f"df_weaving_{st.session_state['weaving_df_key']}")
             
             if selection.selection.rows:
-                idx = selection.selection.rows[0]
-                sel_row = df.iloc[idx]
-                sel_id = sel_row['id']
-                
-                # [NEW] 잔여 수량 계산 및 실시간 중량 계산 로직
-                
-                # 1. 현재까지 생산된 롤들의 수량 합계 계산 (형제 문서 조회)
-                child_rolls = db.collection("orders").where("parent_id", "==", sel_id).stream()
-                accumulated_stock = 0
-                for r in child_rolls:
-                    accumulated_stock += int(r.to_dict().get('real_stock', 0))
-                
-                total_order_stock = int(sel_row.get('stock', 0))
-                remaining_stock = max(0, total_order_stock - accumulated_stock)
-                
-                # 기본 중량 (g)
-                base_weight = int(sel_row.get('weight', 0)) if not pd.isna(sel_row.get('weight')) else 0
-                
-                # 세션 스테이트 키 (아이템별 고유)
-                ss_stock_key = f"ws_stock_{sel_id}"
-                ss_kg_key = f"ws_kg_{sel_id}"
-                
-                # 세션 초기화 (처음 선택 시 잔여 수량으로 설정)
-                if ss_stock_key not in st.session_state:
-                    st.session_state[ss_stock_key] = remaining_stock
-                    st.session_state[ss_kg_key] = float((remaining_stock * base_weight) / 1000)
-                
-                # 콜백 함수: 수량 변경 시 중량 자동 계산
-                def on_stock_change():
-                    new_stock = st.session_state[ss_stock_key]
-                    st.session_state[ss_kg_key] = float((new_stock * base_weight) / 1000)
-
-                st.divider()
-                st.markdown(f"### 제직 완료 처리: **{sel_row['name']}**")
-                
-                cur_completed = int(sel_row.get('completed_rolls', 0)) if not pd.isna(sel_row.get('completed_rolls')) else 0
-                total_rolls = int(sel_row.get('weaving_roll_count', 1)) if not pd.isna(sel_row.get('weaving_roll_count')) else 1
-                next_roll_no = cur_completed + 1
-                
-                if total_rolls > 1:
-                    st.info(f"📢 현재 **{total_rolls}롤 중 {next_roll_no}번째 롤** 작업 중입니다. (누적 생산: {accumulated_stock}장 / 잔여: {remaining_stock}장)")
+                if readonly:
+                    st.info("🔒 조회 전용 모드입니다. (수정 불가)")
                 else:
-                    st.info(f"📢 **단일 롤(1/1)** 작업 중입니다. (잔여: {remaining_stock}장)")
-                
-                # [변경] st.form 제거 -> 실시간 인터랙션 지원
-                st.write("생산 실적을 입력하세요.")
-                c1, c2 = st.columns(2)
-                end_date = c1.date_input("제직완료일", datetime.date.today(), key=f"wd_{sel_id}")
-                end_time = c2.time_input("완료시간", datetime.datetime.now().time(), key=f"wt_{sel_id}")
-                
-                c3, c4 = st.columns(2)
-                # 중량(g)
-                real_weight_g = c3.number_input("중량(g)", value=base_weight, step=1, format="%d", key=f"ww_{sel_id}")
-                # 생산매수(장) - 변경 시 on_stock_change 호출
-                real_stock_val = c4.number_input("생산매수(장)", min_value=0, step=1, format="%d", key=ss_stock_key, on_change=on_stock_change)
-                
-                c5, c6 = st.columns(2)
-                # 생산중량(kg) - 자동 계산되지만 수정 가능
-                prod_weight_val = c5.number_input("생산중량(kg)", min_value=0.0, step=0.1, format="%.1f", key=ss_kg_key)
-                # 평균중량(g)
-                avg_weight_val = c6.number_input("평균중량(g)", value=base_weight, step=1, format="%d", key=f"wa_{sel_id}")
-                
-                if st.button("제직 완료 저장", type="primary"):
-                    end_dt = datetime.datetime.combine(end_date, end_time)
+                    idx = selection.selection.rows[0]
+                    sel_row = df.iloc[idx]
+                    sel_id = sel_row['id']
                     
-                    # 1. 롤 데이터 생성 (새 문서)
-                    parent_doc = db.collection("orders").document(sel_id).get().to_dict()
-                    new_roll_doc = parent_doc.copy()
+                    # [NEW] 잔여 수량 계산 및 실시간 중량 계산 로직
                     
-                    new_roll_doc['status'] = "제직완료"
-                    new_roll_doc['order_no'] = f"{parent_doc.get('order_no')}-{next_roll_no}" # 예: 2405001-1
-                    new_roll_doc['parent_id'] = sel_id
-                    new_roll_doc['roll_no'] = next_roll_no
-                    new_roll_doc['weaving_end_time'] = end_dt
-                    new_roll_doc['real_weight'] = real_weight_g
-                    new_roll_doc['real_stock'] = real_stock_val
-                    new_roll_doc['stock'] = real_stock_val # 중요: 이후 공정은 이 롤의 수량을 기준으로 함
-                    new_roll_doc['prod_weight_kg'] = prod_weight_val
-                    new_roll_doc['avg_weight'] = avg_weight_val
+                    # 1. 현재까지 생산된 롤들의 수량 합계 계산 (형제 문서 조회)
+                    child_rolls = db.collection("orders").where("parent_id", "==", sel_id).stream()
+                    accumulated_stock = 0
+                    for r in child_rolls:
+                        accumulated_stock += int(r.to_dict().get('real_stock', 0))
                     
-                    # 불필요한 필드 제거
-                    if 'completed_rolls' in new_roll_doc: del new_roll_doc['completed_rolls']
-                    # [수정] 총 롤 수 정보를 유지하기 위해 삭제 구문 주석 처리
-                    # if 'weaving_roll_count' in new_roll_doc: del new_roll_doc['weaving_roll_count']
+                    total_order_stock = int(sel_row.get('stock', 0))
+                    remaining_stock = max(0, total_order_stock - accumulated_stock)
                     
-                    db.collection("orders").add(new_roll_doc)
+                    # 기본 중량 (g)
+                    base_weight = int(sel_row.get('weight', 0)) if not pd.isna(sel_row.get('weight')) else 0
                     
-                    # 2. 부모 문서 업데이트 (진행률 표시)
-                    updates = {"completed_rolls": next_roll_no}
+                    # 세션 스테이트 키 (아이템별 고유)
+                    ss_stock_key = f"ws_stock_{sel_id}"
+                    ss_kg_key = f"ws_kg_{sel_id}"
                     
-                    # 마지막 롤이면 부모 문서는 '제직완료(Master)' 상태로 변경하여 목록에서 숨김
-                    if next_roll_no >= total_rolls:
-                        updates["status"] = "제직완료(Master)"
-                        msg = f"🎉 마지막 롤({next_roll_no}/{total_rolls})까지 처리가 완료되었습니다!"
+                    # 세션 초기화 (처음 선택 시 잔여 수량으로 설정)
+                    if ss_stock_key not in st.session_state:
+                        st.session_state[ss_stock_key] = remaining_stock
+                        st.session_state[ss_kg_key] = float((remaining_stock * base_weight) / 1000)
+                    
+                    # 콜백 함수: 수량 변경 시 중량 자동 계산
+                    def on_stock_change():
+                        new_stock = st.session_state[ss_stock_key]
+                        st.session_state[ss_kg_key] = float((new_stock * base_weight) / 1000)
+
+                    st.divider()
+                    st.markdown(f"### 제직 완료 처리: **{sel_row['name']}**")
+                    
+                    cur_completed = int(sel_row.get('completed_rolls', 0)) if not pd.isna(sel_row.get('completed_rolls')) else 0
+                    total_rolls = int(sel_row.get('weaving_roll_count', 1)) if not pd.isna(sel_row.get('weaving_roll_count')) else 1
+                    next_roll_no = cur_completed + 1
+                    
+                    if total_rolls > 1:
+                        st.info(f"📢 현재 **{total_rolls}롤 중 {next_roll_no}번째 롤** 작업 중입니다. (누적 생산: {accumulated_stock}장 / 잔여: {remaining_stock}장)")
                     else:
-                        msg = f"✅ {next_roll_no}번 롤 처리가 완료되었습니다. 이어서 {next_roll_no + 1}번 롤을 입력해주세요."
+                        st.info(f"📢 **단일 롤(1/1)** 작업 중입니다. (잔여: {remaining_stock}장)")
                     
-                    db.collection("orders").document(sel_id).update(updates)
+                    # [변경] st.form 제거 -> 실시간 인터랙션 지원
+                    st.write("생산 실적을 입력하세요.")
+                    c1, c2 = st.columns(2)
+                    end_date = c1.date_input("제직완료일", datetime.date.today(), key=f"wd_{sel_id}")
+                    end_time = c2.time_input("완료시간", datetime.datetime.now().time(), key=f"wt_{sel_id}")
                     
-                    # 메시지를 세션에 저장하여 리런 후에도 보이게 함
-                    st.session_state["weaving_msg"] = msg
+                    c3, c4 = st.columns(2)
+                    # 중량(g)
+                    real_weight_g = c3.number_input("중량(g)", value=base_weight, step=1, format="%d", key=f"ww_{sel_id}")
+                    # 생산매수(장) - 변경 시 on_stock_change 호출
+                    real_stock_val = c4.number_input("생산매수(장)", min_value=0, step=1, format="%d", key=ss_stock_key, on_change=on_stock_change)
                     
-                    # [중요] 저장 후 선택 초기화를 위해 키 증가
-                    st.session_state["weaving_df_key"] += 1
+                    c5, c6 = st.columns(2)
+                    # 생산중량(kg) - 자동 계산되지만 수정 가능
+                    prod_weight_val = c5.number_input("생산중량(kg)", min_value=0.0, step=0.1, format="%.1f", key=ss_kg_key)
+                    # 평균중량(g)
+                    avg_weight_val = c6.number_input("평균중량(g)", value=base_weight, step=1, format="%d", key=f"wa_{sel_id}")
                     
-                    # 세션 정리
-                    if ss_stock_key in st.session_state: del st.session_state[ss_stock_key]
-                    if ss_kg_key in st.session_state: del st.session_state[ss_kg_key]
-                    
-                    st.rerun()
+                    if st.button("제직 완료 저장", type="primary"):
+                        end_dt = datetime.datetime.combine(end_date, end_time)
+                        
+                        # 1. 롤 데이터 생성 (새 문서)
+                        parent_doc = db.collection("orders").document(sel_id).get().to_dict()
+                        new_roll_doc = parent_doc.copy()
+                        
+                        new_roll_doc['status'] = "제직완료"
+                        new_roll_doc['order_no'] = f"{parent_doc.get('order_no')}-{next_roll_no}" # 예: 2405001-1
+                        new_roll_doc['parent_id'] = sel_id
+                        new_roll_doc['roll_no'] = next_roll_no
+                        new_roll_doc['weaving_end_time'] = end_dt
+                        new_roll_doc['real_weight'] = real_weight_g
+                        new_roll_doc['real_stock'] = real_stock_val
+                        new_roll_doc['stock'] = real_stock_val # 중요: 이후 공정은 이 롤의 수량을 기준으로 함
+                        new_roll_doc['prod_weight_kg'] = prod_weight_val
+                        new_roll_doc['avg_weight'] = avg_weight_val
+                        
+                        # 불필요한 필드 제거
+                        if 'completed_rolls' in new_roll_doc: del new_roll_doc['completed_rolls']
+                        # [수정] 총 롤 수 정보를 유지하기 위해 삭제 구문 주석 처리
+                        # if 'weaving_roll_count' in new_roll_doc: del new_roll_doc['weaving_roll_count']
+                        
+                        db.collection("orders").add(new_roll_doc)
+                        
+                        # 2. 부모 문서 업데이트 (진행률 표시)
+                        updates = {"completed_rolls": next_roll_no}
+                        
+                        # 마지막 롤이면 부모 문서는 '제직완료(Master)' 상태로 변경하여 목록에서 숨김
+                        if next_roll_no >= total_rolls:
+                            updates["status"] = "제직완료(Master)"
+                            msg = f"🎉 마지막 롤({next_roll_no}/{total_rolls})까지 처리가 완료되었습니다!"
+                        else:
+                            msg = f"✅ {next_roll_no}번 롤 처리가 완료되었습니다. 이어서 {next_roll_no + 1}번 롤을 입력해주세요."
+                        
+                        db.collection("orders").document(sel_id).update(updates)
+                        
+                        # 메시지를 세션에 저장하여 리런 후에도 보이게 함
+                        st.session_state["weaving_msg"] = msg
+                        
+                        # [중요] 저장 후 선택 초기화를 위해 키 증가
+                        st.session_state["weaving_df_key"] += 1
+                        
+                        # 세션 정리
+                        if ss_stock_key in st.session_state: del st.session_state[ss_stock_key]
+                        if ss_kg_key in st.session_state: del st.session_state[ss_kg_key]
+                        
+                        st.rerun()
                 
                 if st.button("🚫 제직 취소 (대기로 되돌리기)", key="cancel_weaving"):
                     db.collection("orders").document(sel_id).update({
@@ -488,61 +491,64 @@ def render_weaving(db, sub_menu=None):
             )
 
             if selection.selection.rows:
-                idx = selection.selection.rows[0]
-                sel_row = df.iloc[idx]
-                sel_id = sel_row['id']
-                
-                st.divider()
-                current_status = sel_row.get('status', '')
-                if current_status not in ["제직완료", "제직완료(Master)"]:
-                    st.error(f"⛔ 현재 상태가 '**{current_status}**'이므로 이 단계에서 수정하거나 취소할 수 없습니다.")
-                    st.info("다음 공정(염색 등)이 이미 진행된 경우, 해당 공정에서 작업을 취소하여 상태를 되돌린 후 시도해주세요.")
+                if readonly:
+                    st.info("🔒 조회 전용 모드입니다. (수정 불가)")
                 else:
-                    st.markdown(f"### 제직 결과 수정: **{sel_row['name']} ({sel_row.get('roll_no', '?')}번 롤)**")
+                    idx = selection.selection.rows[0]
+                    sel_row = df.iloc[idx]
+                    sel_id = sel_row['id']
                     
-                    with st.form("edit_weaving_done"):
-                        c1, c2 = st.columns(2)
-                        new_real_weight = c1.number_input("중량(g)", value=int(sel_row.get('real_weight', 0)), step=1, format="%d")
-                        new_real_stock = c2.number_input("생산매수(장)", value=int(sel_row.get('real_stock', 0)), step=1, format="%d")
+                    st.divider()
+                    current_status = sel_row.get('status', '')
+                    if current_status not in ["제직완료", "제직완료(Master)"]:
+                        st.error(f"⛔ 현재 상태가 '**{current_status}**'이므로 이 단계에서 수정하거나 취소할 수 없습니다.")
+                        st.info("다음 공정(염색 등)이 이미 진행된 경우, 해당 공정에서 작업을 취소하여 상태를 되돌린 후 시도해주세요.")
+                    else:
+                        st.markdown(f"### 제직 결과 수정: **{sel_row['name']} ({sel_row.get('roll_no', '?')}번 롤)**")
                         
-                        c3, c4 = st.columns(2)
-                        new_prod_kg = c3.number_input("생산중량(kg)", value=float(sel_row.get('prod_weight_kg', 0)), step=0.1, format="%.1f")
-                        new_avg_weight = c4.number_input("평균중량(g)", value=float(sel_row.get('avg_weight', 0)), step=0.1, format="%.1f")
-                        
-                        if st.form_submit_button("수정 저장"):
-                            db.collection("orders").document(sel_id).update({
-                                "real_weight": new_real_weight,
-                                "real_stock": new_real_stock,
-                                "stock": new_real_stock, # 이후 공정을 위해 재고 수량도 함께 업데이트
-                                "prod_weight_kg": new_prod_kg,
-                                "avg_weight": new_avg_weight
-                            })
-                            st.success("수정되었습니다.")
+                        with st.form("edit_weaving_done"):
+                            c1, c2 = st.columns(2)
+                            new_real_weight = c1.number_input("중량(g)", value=int(sel_row.get('real_weight', 0)), step=1, format="%d")
+                            new_real_stock = c2.number_input("생산매수(장)", value=int(sel_row.get('real_stock', 0)), step=1, format="%d")
+                            
+                            c3, c4 = st.columns(2)
+                            new_prod_kg = c3.number_input("생산중량(kg)", value=float(sel_row.get('prod_weight_kg', 0)), step=0.1, format="%.1f")
+                            new_avg_weight = c4.number_input("평균중량(g)", value=float(sel_row.get('avg_weight', 0)), step=0.1, format="%.1f")
+                            
+                            if st.form_submit_button("수정 저장"):
+                                db.collection("orders").document(sel_id).update({
+                                    "real_weight": new_real_weight,
+                                    "real_stock": new_real_stock,
+                                    "stock": new_real_stock, # 이후 공정을 위해 재고 수량도 함께 업데이트
+                                    "prod_weight_kg": new_prod_kg,
+                                    "avg_weight": new_avg_weight
+                                })
+                                st.success("수정되었습니다.")
+                                st.session_state["key_weaving_done"] += 1
+                                st.rerun()
+
+                        st.markdown("#### 제직 완료 취소 (삭제)")
+                        st.warning("이 롤 데이터를 삭제하고, 제직중 상태로 되돌립니다.")
+                        if st.button("🗑️ 이 롤 삭제하기 (취소)", type="primary"):
+                            parent_id = sel_row.get('parent_id')
+                            
+                            # 1. 현재 롤 문서 삭제
+                            db.collection("orders").document(sel_id).delete()
+                            
+                            # 2. 부모 문서(제직중인 건) 상태 업데이트
+                            if parent_id:
+                                # 남은 형제 롤 개수 확인
+                                siblings = db.collection("orders").where("parent_id", "==", parent_id).where("status", "==", "제직완료").stream()
+                                cnt = sum(1 for _ in siblings)
+                                
+                                db.collection("orders").document(parent_id).update({
+                                    "completed_rolls": cnt,
+                                    "status": "제직중" # 마스터 완료 상태였더라도 다시 제직중으로 복귀
+                                })
+                            
+                            st.success("삭제되었습니다. 제직중 목록에서 다시 작업할 수 있습니다.")
                             st.session_state["key_weaving_done"] += 1
                             st.rerun()
-
-                    st.markdown("#### 제직 완료 취소 (삭제)")
-                    st.warning("이 롤 데이터를 삭제하고, 제직중 상태로 되돌립니다.")
-                    if st.button("🗑️ 이 롤 삭제하기 (취소)", type="primary"):
-                        parent_id = sel_row.get('parent_id')
-                        
-                        # 1. 현재 롤 문서 삭제
-                        db.collection("orders").document(sel_id).delete()
-                        
-                        # 2. 부모 문서(제직중인 건) 상태 업데이트
-                        if parent_id:
-                            # 남은 형제 롤 개수 확인
-                            siblings = db.collection("orders").where("parent_id", "==", parent_id).where("status", "==", "제직완료").stream()
-                            cnt = sum(1 for _ in siblings)
-                            
-                            db.collection("orders").document(parent_id).update({
-                                "completed_rolls": cnt,
-                                "status": "제직중" # 마스터 완료 상태였더라도 다시 제직중으로 복귀
-                            })
-                        
-                        st.success("삭제되었습니다. 제직중 목록에서 다시 작업할 수 있습니다.")
-                        st.session_state["key_weaving_done"] += 1
-                        st.rerun()
         else:
             st.info("제직 완료된 내역이 없습니다.")
 
@@ -708,6 +714,8 @@ def render_weaving(db, sub_menu=None):
         # 주간 섹션
         st.markdown("#### ☀️ 주간 작업")
         html_content += "<div class='section-title'>☀️ 주간 작업</div>"
+        st.markdown("#### 주간 작업")
+        html_content += "<div class='section-title'>주간 작업</div>"
         if day_logs:
             df_day = pd.DataFrame(day_logs)
             df_day['log_time'] = df_day['log_time'].apply(lambda x: x.strftime('%H:%M') if hasattr(x, 'strftime') else str(x)[11:16])
@@ -734,6 +742,7 @@ def render_weaving(db, sub_menu=None):
 
         # 야간 섹션
         st.markdown("#### 🌙 야간 작업")
+        st.markdown("#### 야간 작업")
         html_content += "<div class='section-title'>🌙 야간 작업</div>"
         if night_logs:
             df_night = pd.DataFrame(night_logs)
@@ -816,6 +825,7 @@ def render_weaving(db, sub_menu=None):
             final_cols = [c for c in display_cols if c in df.columns]
             df_display = df[final_cols].rename(columns=col_map)
             st.markdown(f"### 📄 {prod_date} 생산일지")
+            st.markdown(f"### {prod_date} 생산일지")
             st.dataframe(df_display, hide_index=True, width="stretch")
             
             # 엑셀 다운로드 준비

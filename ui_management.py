@@ -2,8 +2,9 @@ import streamlit as st
 import pandas as pd
 import datetime
 import io
+import uuid
 from firebase_admin import firestore
-from utils import get_common_codes, get_partners, is_basic_code_used, manage_code, manage_code_with_code, get_db
+from utils import get_common_codes, get_partners, is_basic_code_used, manage_code, manage_code_with_code, get_db, generate_report_html
 
 def render_shipping_operations(db, sub_menu):
     st.header("출고 작업")
@@ -944,7 +945,7 @@ def render_inventory_logic(db, allow_shipping=False):
         df = pd.DataFrame(rows)
         
         # 상단: 제품별 재고 요약
-        st.subheader("제품별 재고 요약")
+        st.subheader("제품별 재고")
         
         ensure_cols = ['product_code', 'name', 'product_type', 'yarn_type', 'weight', 'size', 'stock', 'shipping_unit_price']
         for c in ensure_cols:
@@ -977,129 +978,310 @@ def render_inventory_logic(db, allow_shipping=False):
         
         disp_cols = ['product_code', 'product_type', 'yarn_type', 'weight', 'size', 'shipping_unit_price', 'stock']
         
-        st.write("🔽 상세 내역을 확인할 제품을 선택하세요.")
-        selection_summary = st.dataframe(
-            summary[disp_cols].rename(columns=summary_cols),
-            width="stretch",
-            hide_index=True,
-            on_select="rerun",
-            selection_mode="single-row",
-            key=f"inv_summary_list_{allow_shipping}"
-        )
+        # [NEW] 조회 방식 선택 (요약 vs 전체 리스트)
+        view_mode = st.radio("조회 방식", ["제품별 요약 (제품코드)", "전체 상세 내역 (리스트)"], horizontal=True, key=f"inv_view_mode_{allow_shipping}")
+
+        # [MOVED] 인쇄 및 엑셀 내보내기 설정 (공통 영역으로 이동)
+        # 데이터 준비 (공통)
+        df_detail_print = df.copy()
+        if 'date' in df_detail_print.columns:
+            df_detail_print['date'] = df_detail_print['date'].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isnull(x) and hasattr(x, 'strftime') else str(x)[:10])
         
-        if selection_summary.selection.rows:
-            idx = selection_summary.selection.rows[0]
-            sel_p_code = summary.iloc[idx]['product_code']
+        # 상세 내역에 표시할 컬럼 정의 (모든 컬럼 포함)
+        detail_col_map = {
+            "product_code": "제품코드", "customer": "구분/발주처", "name": "제품명", 
+            "product_type": "제품종류", "yarn_type": "사종", "weight": "중량", 
+            "size": "사이즈", "color": "색상", "shipping_unit_price": "단가", 
+            "stock": "재고수량", "order_no": "발주번호", "date": "등록/접수일", "note": "비고",
+            "delivery_req_date": "납품요청일", "delivery_to": "납품처"
+        }
+        detail_cols = [c for c in detail_col_map.keys() if c in df_detail_print.columns]
+        df_detail_final = df_detail_print[detail_cols].rename(columns=detail_col_map)
+
+        st.divider()
+        
+        # 1. 인쇄 옵션 설정 (Expander)
+        with st.expander("🖨️ 인쇄 및 엑셀 내보내기 설정"):
+            pe_c1, pe_c2, pe_c3 = st.columns(3)
+            # [수정] 옵션명에 공백 추가하여 일관성 유지
+            print_mode = pe_c1.radio("출력 모드", ["요약 목록", "제품별 상세내역(그룹)", "전체 상세내역 (리스트)"], key=f"inv_p_mode_{allow_shipping}")
+            p_title = pe_c2.text_input("문서 제목", value="재고 현황", key=f"inv_p_title_{allow_shipping}")
             
-            st.divider()
-            st.markdown(f"### 상세 재고 내역: **{sel_p_code}**")
+            pe_c4, pe_c5, pe_c6 = st.columns(3)
+            p_title_size = pe_c4.number_input("제목 크기(px)", value=24, step=1, key=f"inv_p_ts_{allow_shipping}")
+            p_font_size = pe_c5.number_input("본문 글자 크기(px)", value=12, step=1, key=f"inv_p_fs_{allow_shipping}")
+            p_padding = pe_c6.number_input("셀 여백(px)", value=5, step=1, key=f"inv_p_pad_{allow_shipping}")
             
-            detail_df = df[df['product_code'] == sel_p_code].copy()
+            pe_c7, pe_c8 = st.columns(2)
+            p_show_date = pe_c7.checkbox("출력일시 표시", value=True, key=f"inv_p_date_{allow_shipping}")
             
-            if 'date' in detail_df.columns:
-                detail_df['date'] = detail_df['date'].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isnull(x) and hasattr(x, 'strftime') else str(x)[:10])
-            
-            detail_map = {
-                "name": "제품명", "order_no": "발주번호(Lot)", "date": "등록/접수일", "customer": "구분/발주처",
-                "stock": "재고수량", "shipping_unit_price": "단가", "note": "비고"
+            st.caption("페이지 여백 (mm)")
+            pe_m1, pe_m2, pe_m3, pe_m4 = st.columns(4)
+            p_m_top = pe_m1.number_input("상단", value=15, step=1, key=f"inv_p_mt_{allow_shipping}")
+            p_m_bottom = pe_m2.number_input("하단", value=15, step=1, key=f"inv_p_mb_{allow_shipping}")
+            p_m_left = pe_m3.number_input("좌측", value=15, step=1, key=f"inv_p_ml_{allow_shipping}")
+            p_m_right = pe_m4.number_input("우측", value=15, step=1, key=f"inv_p_mr_{allow_shipping}")
+
+        # 엑셀 다운로드 및 인쇄 버튼 (Expander 밖으로 이동)
+        c_exp1, c_exp2 = st.columns([1, 1])
+        
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            if print_mode == "요약 목록":
+                summary[disp_cols].rename(columns=summary_cols).to_excel(writer, index=False, sheet_name="재고요약")
+            else:
+                # 상세 내역은 리스트 형태로 저장
+                df_detail_final.to_excel(writer, index=False, sheet_name="상세재고")
+        
+        c_exp1.download_button(
+            label="💾 엑셀 다운로드",
+            data=buffer.getvalue(),
+            file_name=f"재고현황_{datetime.date.today()}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+        # 인쇄 버튼
+        if c_exp2.button("🖨️ 인쇄하기", key=f"inv_print_btn_{allow_shipping}"):
+            options = {
+                'ts': p_title_size, 'bs': p_font_size, 'pad': p_padding,
+                'dd': "block" if p_show_date else "none",
+                'mt': p_m_top, 'mb': p_m_bottom, 'ml': p_m_left, 'mr': p_m_right
             }
-            detail_cols = ["name", "order_no", "date", "customer", "stock", "shipping_unit_price", "note"]
             
-            if allow_shipping:
-                st.write("🔽 출고할 항목을 선택(체크)하세요. (다중 선택 가능)")
-            
-            selection_detail = st.dataframe(
-                detail_df[detail_cols].rename(columns=detail_map),
+            if print_mode == "요약 목록":
+                df_print = summary[disp_cols].rename(columns=summary_cols)
+                html = generate_report_html(p_title, df_print, f"총 {len(df_print)}개 품목", options)
+                st.components.v1.html(html, height=0, width=0)
+                
+            elif print_mode == "전체 상세내역 (리스트)":
+                # 제품코드, 제품명 순으로 정렬
+                if "제품코드" in df_detail_final.columns:
+                    df_detail_final = df_detail_final.sort_values(by=["제품코드", "제품명"])
+                html = generate_report_html(p_title, df_detail_final, f"총 {len(df_detail_final)}건", options)
+                st.components.v1.html(html, height=0, width=0)
+                
+            elif print_mode == "제품별 상세내역(그룹)":
+                # 커스텀 HTML 생성 (제품별 그룹핑)
+                print_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                date_display = "block" if p_show_date else "none"
+                
+                html_content = f"""
+                <html>
+                <head>
+                    <title>{p_title}</title>
+                    <style>
+                        @page {{ margin: {p_m_top}mm {p_m_right}mm {p_m_bottom}mm {p_m_left}mm; }}
+                        body {{ font-family: 'Malgun Gothic', sans-serif; padding: 0; margin: 0; }}
+                        h2 {{ text-align: center; margin-bottom: 5px; font-size: {p_title_size}px; }}
+                        .info {{ text-align: right; font-size: 12px; margin-bottom: 10px; color: #555; display: {date_display}; }}
+                        table {{ width: 100%; border-collapse: collapse; font-size: {p_font_size}px; margin-bottom: 20px; }}
+                        th, td {{ border: 1px solid #444; padding: {p_padding}px; text-align: center; }}
+                        th {{ background-color: #f0f0f0; }}
+                        .group-header {{ background-color: #e6f3ff; font-weight: bold; text-align: left; padding: 8px; border: 1px solid #444; margin-top: 10px; }}
+                        .no-data {{ text-align: center; padding: 10px; color: #888; }}
+                        @media screen {{ body {{ display: none; }} }}
+                    </style>
+                </head>
+                <body onload="window.print()">
+                    <h2>{p_title}</h2>
+                    <div class="info">출력일시: {print_now}</div>
+                """
+                
+                # 요약 목록 순서대로 반복
+                for _, row in summary.iterrows():
+                    p_code = row['product_code']
+                    p_name = row.get('name', '')
+                    p_type = row.get('product_type', '')
+                    p_stock = int(row.get('stock', 0))
+                    
+                    # 해당 제품의 상세 내역 필터링
+                    sub_df = df_detail_final[df_detail_final['제품코드'] == p_code]
+                    
+                    # 그룹 헤더
+                    html_content += f"""
+                    <div class="group-header">
+                        📦 [{p_code}] {p_type} / {p_name} (총 재고: {p_stock:,})
+                    </div>
+                    """
+                    
+                    if not sub_df.empty:
+                        # 상세 테이블 (제품코드, 제품명 컬럼은 중복되므로 제외하고 출력 가능하지만, 요청대로 모든 컬럼 포함)
+                        # 가독성을 위해 주요 컬럼 위주로 재정렬하거나 그대로 출력
+                        html_content += sub_df.to_html(index=False, border=1)
+                    else:
+                        html_content += "<div class='no-data'>상세 내역 없음</div>"
+                        
+                html_content += "</body></html>"
+                st.components.v1.html(html_content, height=0, width=0)
+        
+        st.divider()
+
+        # [NEW] 선택된 행을 저장할 변수 (출고용)
+        selected_rows_for_shipping = None
+
+        if view_mode == "제품별 요약 (제품코드)":
+            st.write("🔽 상세 내역을 확인할 제품을 선택하세요.")
+            selection_summary = st.dataframe(
+                summary[disp_cols].rename(columns=summary_cols),
                 width="stretch",
                 hide_index=True,
                 on_select="rerun",
-                selection_mode="multi-row" if allow_shipping else "single-row",
-                key=f"inv_detail_list_{sel_p_code}_{allow_shipping}"
+                selection_mode="single-row",
+                key=f"inv_summary_list_{allow_shipping}"
             )
-            
-            # 출고 처리 로직 (allow_shipping=True 일 때만 표시)
-            if allow_shipping and selection_detail.selection.rows:
-                sel_indices = selection_detail.selection.rows
-                sel_rows = detail_df.iloc[sel_indices]
-                
-                st.markdown("#### 선택 항목 즉시 출고")
-                c1, c2 = st.columns(2)
-                q_date = c1.date_input("출고일자", datetime.date.today())
-                
-                partners = get_partners("발주처")
-                if not partners:
-                    c2.error("등록된 발주처가 없습니다. [거래처 관리]에서 먼저 등록해주세요.")
-                    st.stop()
-                final_customer = c2.selectbox("납품처(거래처) 선택", partners, help="목록에 없는 거래처는 [거래처 관리]에서 먼저 등록해야 합니다.")
-                    
-                c3, c4 = st.columns(2)
-                q_method = c3.selectbox("배송방법", ["택배", "화물", "용차", "직배송", "기타"])
-                q_note = c4.text_input("비고 (송장번호 등)")
-                
-                st.markdown("##### 수량 및 단가 확인")
-                partial_ship = False
-                
-                if len(sel_rows) == 1:
-                    first_row = sel_rows.iloc[0]
-                    current_stock = int(first_row.get('stock', 0))
-                    default_price = int(first_row.get('shipping_unit_price', 0))
-                    
-                    q_c1, q_c2 = st.columns(2)
-                    q_ship_qty = q_c1.number_input("출고 수량", min_value=1, max_value=current_stock, value=current_stock, step=10)
-                    if q_ship_qty < current_stock:
-                        partial_ship = True
-                        st.info(f"ℹ️ 부분 출고: {q_ship_qty}장 출고 후 {current_stock - q_ship_qty}장은 재고에 남습니다.")
-                    
-                    q_price = q_c2.number_input("적용 단가 (원)", value=default_price, step=100)
-                    calc_qty = q_ship_qty
-                else:
-                    total_ship_qty = sel_rows['stock'].sum()
-                    default_price = int(sel_rows['shipping_unit_price'].mean()) if not sel_rows.empty else 0
-                    
-                    q_c1, q_c2 = st.columns(2)
-                    q_c1.text_input("총 출고 수량", value=f"{total_ship_qty:,}장 (일괄 전량 출고)", disabled=True)
-                    q_price = q_c2.number_input("적용 단가 (원)", value=default_price, step=100, help="선택된 항목들에 일괄 적용됩니다.")
-                    calc_qty = total_ship_qty
 
-                q_vat_inc = st.checkbox("단가에 부가세 포함", value=False, key="inv_quick_ship_vat")
-                if q_vat_inc:
-                    q_supply_price = int((calc_qty * q_price) / 1.1)
-                    q_vat = (calc_qty * q_price) - q_supply_price
-                    q_total_amount = calc_qty * q_price
-                else:
-                    q_supply_price = calc_qty * q_price
-                    q_vat = int(q_supply_price * 0.1)
-                    q_total_amount = q_supply_price + q_vat
-                st.info(f"💰 **예상 금액**: 공급가액 {q_supply_price:,}원 + 부가세 {q_vat:,}원 = 합계 {q_total_amount:,}원")
+            if selection_summary.selection.rows:
+                idx = selection_summary.selection.rows[0]
+                sel_p_code = summary.iloc[idx]['product_code']
                 
-                if st.button("출고 처리", type="primary"):
-                    update_data = {
-                        "status": "출고완료",
-                        "shipping_date": datetime.datetime.combine(q_date, datetime.datetime.now().time()),
-                        "delivery_to": final_customer,
-                        "shipping_method": q_method,
-                        "shipping_unit_price": q_price,
-                        "note": q_note,
-                        "vat_included": q_vat_inc
-                    }
-                    if partial_ship and len(sel_rows) == 1:
-                        doc_id = sel_rows.iloc[0]['id']
-                        doc_ref = db.collection("orders").document(doc_id)
-                        org_data = doc_ref.get().to_dict()
-                        new_ship_doc = org_data.copy()
-                        new_ship_doc.update(update_data)
-                        new_ship_doc['stock'] = q_ship_qty
-                        new_ship_doc['parent_id'] = doc_id
-                        db.collection("orders").add(new_ship_doc)
-                        doc_ref.update({"stock": current_stock - q_ship_qty})
-                        st.success("부분 출고 처리 완료!")
-                    else:
-                        for _, row in sel_rows.iterrows():
-                            db.collection("orders").document(row['id']).update(update_data)
-                        st.success(f"{len(sel_rows)}건 출고 처리 완료!")
-                    st.rerun()
-        else:
-            st.info("👆 상단 목록에서 제품을 선택하면 상세 내역이 표시됩니다.")
+                st.divider()
+                st.markdown(f"### 상세 재고 내역: **{sel_p_code}**")
+                
+                detail_df = df[df['product_code'] == sel_p_code].copy()
+                
+                if 'date' in detail_df.columns:
+                    detail_df['date'] = detail_df['date'].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isnull(x) and hasattr(x, 'strftime') else str(x)[:10])
+                
+                # [수정] 상세 내역 컬럼 확장 (모든 정보 표시)
+                detail_map_view = {
+                    "customer": "구분/발주처", "name": "제품명", 
+                    "product_type": "제품종류", "yarn_type": "사종", "weight": "중량", 
+                    "size": "사이즈", "color": "색상", "shipping_unit_price": "단가", 
+                    "stock": "재고수량", "order_no": "발주번호", "date": "등록/접수일", "note": "비고"
+                }
+                detail_cols_view = ["customer", "name", "product_type", "yarn_type", "weight", "size", "color", "shipping_unit_price", "stock", "order_no", "date", "note"]
+                
+                # 없는 컬럼 채우기
+                for c in detail_cols_view:
+                    if c not in detail_df.columns: detail_df[c] = ""
+                
+                if allow_shipping:
+                    st.write("🔽 출고할 항목을 선택(체크)하세요. (다중 선택 가능)")
+                
+                selection_detail = st.dataframe(
+                    detail_df[detail_cols_view].rename(columns=detail_map_view),
+                    width="stretch",
+                    hide_index=True,
+                    on_select="rerun",
+                    selection_mode="multi-row" if allow_shipping else "single-row",
+                    key=f"inv_detail_list_{sel_p_code}_{allow_shipping}"
+                )
+                
+                if allow_shipping and selection_detail.selection.rows:
+                    selected_rows_for_shipping = detail_df.iloc[selection_detail.selection.rows]
+        
+        else: # 전체 상세 내역 (리스트)
+            st.write("🔽 전체 재고 내역입니다.")
+            
+            # 전체 리스트용 데이터프레임 준비 (이미 위에서 만든 df_detail_final 활용 가능하지만, 원본 df 사용)
+            full_df = df.copy()
+            if 'date' in full_df.columns:
+                full_df['date'] = full_df['date'].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isnull(x) and hasattr(x, 'strftime') else str(x)[:10])
+            
+            # 전체 리스트 컬럼
+            # [수정] 색상 추가 및 컬럼 순서 변경
+            full_map = {
+                "product_code": "제품코드", "customer": "구분/발주처", "name": "제품명", 
+                "product_type": "제품종류", "yarn_type": "사종", "weight": "중량", 
+                "size": "사이즈", "color": "색상", "shipping_unit_price": "단가", 
+                "stock": "재고수량", "order_no": "발주번호", "date": "등록/접수일", "note": "비고"
+            }
+            full_cols = ["product_code", "customer", "name", "product_type", "yarn_type", "weight", "size", "color", "shipping_unit_price", "stock", "order_no", "date", "note"]
+            
+            # 없는 컬럼 채우기
+            for c in full_cols:
+                if c not in full_df.columns: full_df[c] = ""
+
+            # [수정] 체크박스(선택 기능) 제거
+            st.dataframe(
+                full_df[full_cols].rename(columns=full_map),
+                width="stretch",
+                hide_index=True,
+                key=f"inv_full_list_{allow_shipping}"
+            )
+
+        # [MOVED] 출고 처리 로직 (공통)
+        if allow_shipping and selected_rows_for_shipping is not None and not selected_rows_for_shipping.empty:
+            sel_rows = selected_rows_for_shipping
+            
+            st.divider()
+            st.markdown(f"#### 선택 항목 즉시 출고 ({len(sel_rows)}건)")
+            
+            c1, c2 = st.columns(2)
+            q_date = c1.date_input("출고일자", datetime.date.today())
+            
+            partners = get_partners("발주처")
+            if not partners:
+                c2.error("등록된 발주처가 없습니다. [거래처 관리]에서 먼저 등록해주세요.")
+                st.stop()
+            final_customer = c2.selectbox("납품처(거래처) 선택", partners, help="목록에 없는 거래처는 [거래처 관리]에서 먼저 등록해야 합니다.")
+                
+            c3, c4 = st.columns(2)
+            q_method = c3.selectbox("배송방법", ["택배", "화물", "용차", "직배송", "기타"])
+            q_note = c4.text_input("비고 (송장번호 등)")
+            
+            st.markdown("##### 수량 및 단가 확인")
+            partial_ship = False
+            
+            if len(sel_rows) == 1:
+                first_row = sel_rows.iloc[0]
+                current_stock = int(first_row.get('stock', 0))
+                default_price = int(first_row.get('shipping_unit_price', 0))
+                
+                q_c1, q_c2 = st.columns(2)
+                q_ship_qty = q_c1.number_input("출고 수량", min_value=1, max_value=current_stock, value=current_stock, step=10)
+                if q_ship_qty < current_stock:
+                    partial_ship = True
+                    st.info(f"ℹ️ 부분 출고: {q_ship_qty}장 출고 후 {current_stock - q_ship_qty}장은 재고에 남습니다.")
+                
+                q_price = q_c2.number_input("적용 단가 (원)", value=default_price, step=100)
+                calc_qty = q_ship_qty
+            else:
+                total_ship_qty = sel_rows['stock'].sum()
+                default_price = int(sel_rows['shipping_unit_price'].mean()) if not sel_rows.empty else 0
+                
+                q_c1, q_c2 = st.columns(2)
+                q_c1.text_input("총 출고 수량", value=f"{total_ship_qty:,}장 (일괄 전량 출고)", disabled=True)
+                q_price = q_c2.number_input("적용 단가 (원)", value=default_price, step=100, help="선택된 항목들에 일괄 적용됩니다.")
+                calc_qty = total_ship_qty
+
+            q_vat_inc = st.checkbox("단가에 부가세 포함", value=False, key="inv_quick_ship_vat")
+            if q_vat_inc:
+                q_supply_price = int((calc_qty * q_price) / 1.1)
+                q_vat = (calc_qty * q_price) - q_supply_price
+                q_total_amount = calc_qty * q_price
+            else:
+                q_supply_price = calc_qty * q_price
+                q_vat = int(q_supply_price * 0.1)
+                q_total_amount = q_supply_price + q_vat
+            st.info(f"💰 **예상 금액**: 공급가액 {q_supply_price:,}원 + 부가세 {q_vat:,}원 = 합계 {q_total_amount:,}원")
+            
+            if st.button("출고 처리", type="primary"):
+                update_data = {
+                    "status": "출고완료",
+                    "shipping_date": datetime.datetime.combine(q_date, datetime.datetime.now().time()),
+                    "delivery_to": final_customer,
+                    "shipping_method": q_method,
+                    "shipping_unit_price": q_price,
+                    "note": q_note,
+                    "vat_included": q_vat_inc
+                }
+                if partial_ship and len(sel_rows) == 1:
+                    doc_id = sel_rows.iloc[0]['id']
+                    doc_ref = db.collection("orders").document(doc_id)
+                    org_data = doc_ref.get().to_dict()
+                    new_ship_doc = org_data.copy()
+                    new_ship_doc.update(update_data)
+                    new_ship_doc['stock'] = q_ship_qty
+                    new_ship_doc['parent_id'] = doc_id
+                    db.collection("orders").add(new_ship_doc)
+                    doc_ref.update({"stock": current_stock - q_ship_qty})
+                    st.success("부분 출고 처리 완료!")
+                else:
+                    for _, row in sel_rows.iterrows():
+                        db.collection("orders").document(row['id']).update(update_data)
+                    st.success(f"{len(sel_rows)}건 출고 처리 완료!")
+                st.rerun()
         
     else:
         st.info("현재 보유 중인 완제품 재고가 없습니다. (모두 출고되었거나 생산 중입니다.)")
@@ -1112,6 +1294,124 @@ def render_inventory(db, sub_menu):
         st.subheader("재고 임의 등록 (자체 생산/기존 재고)")
         st.info("발주서 없이 보유하고 있는 재고나 자체 생산분을 등록하여 출고 가능한 상태로 만듭니다.")
         
+        # [NEW] 관리자 전용 엑셀 업로드 기능
+        if st.session_state.get("role") == "admin":
+            with st.expander("엑셀 파일로 일괄 등록 (관리자 전용)", expanded=False):
+                st.markdown("""
+                **업로드 규칙**
+                1. 아래 **양식 다운로드** 버튼을 눌러 엑셀 파일을 받으세요.
+                2. `제품코드`는 시스템에 등록된 코드와 정확히 일치해야 합니다.
+                3. `수량`과 `단가`는 숫자만 입력하세요.
+                """)
+                
+                # 양식 다운로드
+                template_data = {
+                    "제품코드": ["A20S0904080"],
+                    "제품명": ["자체재고"],
+                    "수량": [100],
+                    "단가": [5000],
+                    "비고": ["기초재고"],
+                    "등록일자": [datetime.date.today().strftime("%Y-%m-%d")]
+                }
+                df_template = pd.DataFrame(template_data)
+                
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    df_template.to_excel(writer, index=False)
+                    
+                st.download_button(
+                    label="📥 업로드용 양식 다운로드",
+                    data=buffer.getvalue(),
+                    file_name="재고등록양식.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+                
+                uploaded_file = st.file_uploader("엑셀 파일 업로드", type=["xlsx", "xls"], key="inv_upload")
+                
+                if uploaded_file:
+                    try:
+                        df_upload = pd.read_excel(uploaded_file)
+                        st.write("데이터 미리보기:")
+                        st.dataframe(df_upload.head())
+                        
+                        if st.button("일괄 등록 시작", type="primary", key="btn_inv_upload"):
+                            # 제품 목록 미리 가져오기 (매핑용)
+                            products_ref = db.collection("products").stream()
+                            product_map = {p.id: p.to_dict() for p in products_ref}
+                            
+                            success_count = 0
+                            error_logs = []
+                            
+                            progress_bar = st.progress(0)
+                            
+                            for idx, row in df_upload.iterrows():
+                                p_code = str(row.get("제품코드", "")).strip()
+                                if p_code not in product_map:
+                                    error_logs.append(f"{idx+2}행: 제품코드 '{p_code}'가 존재하지 않습니다.")
+                                    continue
+                                    
+                                product_info = product_map[p_code]
+                                
+                                # 임의의 발주번호 생성 (STOCK-YYMMDD-UUID)
+                                stock_no = f"STOCK-{datetime.datetime.now().strftime('%y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+                                
+                                # 날짜 처리
+                                try:
+                                    reg_date_val = row.get("등록일자")
+                                    if pd.isna(reg_date_val):
+                                        reg_date = datetime.datetime.now()
+                                    else:
+                                        reg_date = pd.to_datetime(reg_date_val).to_pydatetime()
+                                except:
+                                    reg_date = datetime.datetime.now()
+                                
+                                reg_name = str(row.get("제품명", "")).strip()
+                                final_name = reg_name if reg_name and reg_name != "nan" else product_info.get('product_type', '자체제품')
+                                
+                                try:
+                                    stock_val = int(row.get("수량", 0))
+                                    price_val = int(row.get("단가", 0))
+                                except:
+                                    stock_val = 0
+                                    price_val = 0
+
+                                doc_data = {
+                                    "product_code": p_code,
+                                    "product_type": product_info.get('product_type'),
+                                    "yarn_type": product_info.get('yarn_type'),
+                                    "weight": product_info.get('weight'),
+                                    "size": product_info.get('size'),
+                                    "name": final_name,
+                                    "color": "기본",
+                                    "order_no": stock_no,
+                                    "customer": "자체보유",
+                                    "date": reg_date,
+                                    "stock": stock_val,
+                                    "shipping_unit_price": price_val,
+                                    "status": "봉제완료", # 즉시 출고 가능 상태
+                                    "note": str(row.get("비고", "")) if pd.notna(row.get("비고")) else ""
+                                }
+                                
+                                db.collection("orders").add(doc_data)
+                                success_count += 1
+                                progress_bar.progress((idx + 1) / len(df_upload))
+                                
+                            if success_count > 0:
+                                st.success(f"✅ {success_count}건의 재고가 등록되었습니다.")
+                            
+                            if error_logs:
+                                st.error(f"⚠️ {len(error_logs)}건의 오류가 발생했습니다.")
+                                for log in error_logs:
+                                    st.write(log)
+                            
+                            if success_count > 0:
+                                st.rerun()
+                                
+                    except Exception as e:
+                        st.error(f"파일 처리 중 오류가 발생했습니다: {e}")
+            
+            st.divider()
+
         # 제품 목록 가져오기
         products_ref = db.collection("products").stream()
         products_list = [p.to_dict() for p in products_ref]
@@ -1156,41 +1456,65 @@ def render_inventory(db, sub_menu):
                 # 필터링된 제품 선택
                 p_options = [f"{p['product_code']} : {p.get('name', p.get('product_type'))}" for p in filtered_products]
                 
-                with st.form("stock_reg_form", clear_on_submit=True):
+                # [수정] 제품 선택을 폼 밖으로 이동하여 상세 정보 기본값 로드
+                sel_p_str = st.selectbox("제품 선택", p_options)
+                sel_code = sel_p_str.split(" : ")[0]
+                sel_product = next((p for p in filtered_products if p['product_code'] == sel_code), None)
+                
+                # 기본값 설정
+                def_name = sel_product.get('product_type', '자체제품') if sel_product else ""
+                def_weight = int(sel_product.get('weight', 0)) if sel_product else 0
+                def_size = sel_product.get('size', '') if sel_product else ""
+                
+                partners = get_partners("발주처")
+                
+                # 폼 리셋을 위한 키
+                if "stock_reg_key" not in st.session_state:
+                    st.session_state["stock_reg_key"] = 0
+                rk = st.session_state["stock_reg_key"]
+
+                with st.form("stock_reg_form"):
+                    st.write("상세 정보 입력")
+                    
+                    # Row 1: 등록일자, 발주처
                     c1, c2 = st.columns(2)
-                    sel_p_str = c1.selectbox("제품 선택", p_options)
-                    reg_date = c2.date_input("등록일자", datetime.date.today())
+                    reg_date = c1.date_input("등록일자", datetime.date.today(), key=f"reg_date_{sel_code}_{rk}")
+                    if partners:
+                        reg_customer = c2.selectbox("발주처 (구분)", partners, help="거래처관리에서 등록한 '자체발주' 등을 선택하세요.", key=f"reg_cust_{sel_code}_{rk}")
+                    else:
+                        reg_customer = c2.text_input("발주처 (구분)", key=f"reg_cust_txt_{sel_code}_{rk}")
                     
-                    # [NEW] 제품명 입력 필드 추가
-                    reg_name = st.text_input("제품명", placeholder="제품명을 입력하세요 (미입력 시 제품종류로 자동 저장)")
+                    # Row 2: 제품명, 색상, 수량
+                    c3, c4, c5 = st.columns(3)
+                    reg_name = c3.text_input("제품명", value=def_name, key=f"reg_name_{sel_code}_{rk}")
+                    reg_color = c4.text_input("색상", value="기본", key=f"reg_color_{sel_code}_{rk}")
+                    reg_qty = c5.number_input("재고 수량(장)", min_value=1, step=10, key=f"reg_qty_{sel_code}_{rk}")
                     
-                    c3, c4 = st.columns(2)
-                    reg_qty = c3.number_input("재고 수량(장)", min_value=1, step=10)
-                    reg_price = c4.number_input("단가 (원)", min_value=0, step=100, help="재고 평가 단가")
-                    
-                    reg_note = st.text_input("비고 (예: 기초재고, 자체생산)", value="자체재고")
-                    
+                    # Row 3: 중량, 사이즈 (추가 요청)
+                    c6, c7 = st.columns(2)
+                    reg_weight = c6.number_input("중량(g)", value=def_weight, step=10, key=f"reg_weight_{sel_code}_{rk}")
+                    reg_size = c7.text_input("사이즈", value=def_size, key=f"reg_size_{sel_code}_{rk}")
+
+                    # Row 4: 단가, 비고
+                    c8, c9 = st.columns(2)
+                    reg_price = c8.number_input("단가 (원)", min_value=0, step=100, help="재고 평가 단가", key=f"reg_price_{sel_code}_{rk}")
+                    reg_note = c9.text_input("비고", value="자체재고", key=f"reg_note_{sel_code}_{rk}")
+
                     if st.form_submit_button("재고 등록"):
-                        sel_code = sel_p_str.split(" : ")[0]
-                        sel_product = next((p for p in filtered_products if p['product_code'] == sel_code), None)
-                        
                         if sel_product:
                             # 임의의 발주번호 생성 (STOCK-YYMMDD-HHMMSS)
                             stock_no = f"STOCK-{datetime.datetime.now().strftime('%y%m%d-%H%M%S')}"
                             
-                            # [NEW] 제품명 결정 로직
-                            final_name = reg_name.strip() if reg_name else sel_product.get('product_type', '자체제품')
-
                             doc_data = {
                                 "product_code": sel_code,
                                 "product_type": sel_product.get('product_type'),
                                 "yarn_type": sel_product.get('yarn_type'),
-                                "weight": sel_product.get('weight'),
-                                "size": sel_product.get('size'),
-                                "name": final_name, # 사용자 입력값 반영
-                                "color": "기본", # 색상은 필요시 입력받도록 수정 가능
+                                "weight": reg_weight, # 입력값 사용
+                                "size": reg_size,     # 입력값 사용
+                                "name": reg_name,
+                                "color": reg_color,
                                 "order_no": stock_no,
-                                "customer": "자체보유", # 거래처 없음
+                                "customer": reg_customer,
                                 "date": datetime.datetime.combine(reg_date, datetime.datetime.now().time()),
                                 "stock": reg_qty,
                                 "shipping_unit_price": reg_price, # 단가 저장 (출고 단가 필드 재활용)
@@ -1199,6 +1523,7 @@ def render_inventory(db, sub_menu):
                             }
                             db.collection("orders").add(doc_data)
                             st.success(f"재고가 등록되었습니다. (번호: {stock_no})")
+                            st.session_state["stock_reg_key"] += 1
                             st.rerun()
 
     elif sub_menu == "재고 현황 조회":
@@ -1708,7 +2033,7 @@ def render_users(db, sub_menu):
     else:
         st.info("시스템 사용자를 등록하고 권한을 설정합니다.")
         
-        all_menus = ["발주서접수", "발주현황", "제직현황", "염색현황", "봉제현황", "출고현황", "재고현황", "제품 관리", "거래처관리", "제직기관리", "제품코드설정", "사용자 관리"]
+        all_menus = ["발주서접수", "발주현황", "제직현황", "제직조회", "염색현황", "봉제현황", "출고현황", "재고현황", "제품 관리", "거래처관리", "제직기관리", "제품코드설정", "사용자 관리"]
         
         if sub_menu == "사용자 목록":
             # 사용자 목록 조회

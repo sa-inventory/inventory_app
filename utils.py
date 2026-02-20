@@ -5,6 +5,8 @@ from firebase_admin import firestore
 import json
 import datetime
 import pandas as pd
+import urllib.request
+import urllib.parse
 
 # 2. 데이터베이스 연결
 @st.cache_resource
@@ -238,3 +240,37 @@ def manage_code(code_key, default_list, label):
                 current_list.remove(del_val)
                 db.collection("settings").document("codes").set({code_key: current_list}, merge=True)
                 st.success("삭제되었습니다."); st.rerun()
+
+# --- 공통 함수: 주소 검색 API 호출 ---
+def search_address_api(keyword, page=1):
+    """
+    행정안전부 도로명주소 검색 API를 호출하여 결과를 반환합니다.
+    """
+    # DB에서 API 키 가져오기
+    doc = db.collection("settings").document("company_info").get()
+    api_key = doc.to_dict().get("juso_api_key", "") if doc.exists else ""
+    
+    if not api_key:
+        return None, None, "API 키가 등록되지 않았습니다. [시스템관리 > 회사정보 관리]에서 키를 입력해주세요."
+    
+    try:
+        # API 호출
+        encoded_keyword = urllib.parse.quote(keyword)
+        api_url = f"https://business.juso.go.kr/addrlink/addrLinkApi.do?confmKey={api_key}&currentPage={page}&countPerPage=10&keyword={encoded_keyword}&resultType=json"
+        
+        req = urllib.request.Request(api_url)
+        with urllib.request.urlopen(req) as response:
+            res_body = response.read()
+            json_data = json.loads(res_body.decode('utf-8'))
+            
+            results = json_data.get('results', {})
+            common = results.get('common', {})
+            
+            if common.get('errorCode') != '0':
+                return None, None, f"API 오류: {common.get('errorMessage')}"
+            
+            juso_list = results.get('juso', [])
+            return juso_list, common, None
+            
+    except Exception as e:
+        return None, None, f"검색 중 오류 발생: {str(e)}"

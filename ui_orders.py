@@ -3,7 +3,7 @@ import pandas as pd
 import datetime
 import io
 from firebase_admin import firestore
-from utils import get_partners, generate_report_html, get_common_codes
+from utils import get_partners, generate_report_html, get_common_codes, search_address_api
 
 def render_order_entry(db, sub_menu):
     st.header("발주서 접수")
@@ -97,97 +97,194 @@ def render_order_entry(db, sub_menu):
 
         if not selection.selection.rows:
             st.info("👆 위 목록에서 제품을 선택하면 발주 입력 폼이 나타납니다.")
+            st.session_state["last_sel_product_idx"] = None
         else:
             idx = selection.selection.rows[0]
+            
+            # [FIX] 제품 선택 변경 시 주소 검색 팝업 상태 초기화 (자동 팝업 방지)
+            if st.session_state.get("last_sel_product_idx") != idx:
+                st.session_state["show_order_addr_dialog"] = False
+                st.session_state["last_sel_product_idx"] = idx
+            
             selected_product = df_filtered.iloc[idx].to_dict()
             
             st.divider()
             st.success(f"선택된 제품: **{selected_product['product_code']}** ({selected_product.get('product_type', '')} / {selected_product.get('yarn_type', '')})")
 
-            # --- 2. 발주 정보 입력 ---
-            with st.form("order_form", clear_on_submit=True):
-                st.subheader("2. 발주 상세 정보 입력")
-                
-                customer_list = get_partners("발주처")
+            # [NEW] 주소 검색 모달 (Dialog)
+            if "show_order_addr_dialog" not in st.session_state:
+                st.session_state.show_order_addr_dialog = False
 
-                c1, c2, c3 = st.columns(3)
-                order_date = c1.date_input("발주접수일", datetime.date.today(), format="YYYY-MM-DD")
-                if customer_list:
-                    customer = c2.selectbox("발주처 선택", customer_list)
-                else:
-                    customer = c2.text_input("발주처 (기초정보관리에서 거래처를 등록하세요)")
-                delivery_req_date = c3.date_input("납품요청일", datetime.date.today() + datetime.timedelta(days=7), format="YYYY-MM-DD")
+            @st.dialog("주소 검색")
+            def show_address_search_modal_order():
+                # 페이지네이션 및 검색어 상태 관리
+                if "o_addr_keyword" not in st.session_state:
+                    st.session_state.o_addr_keyword = ""
+                if "o_addr_page" not in st.session_state:
+                    st.session_state.o_addr_page = 1
 
-                c1, c2, c3 = st.columns(3)
-                name = c1.text_input("제품명 (고객사 요청 제품명)", help="고객사가 부르는 제품명을 입력하세요. 예: 프리미엄 호텔타올")
-                color = c2.text_input("색상")
-                stock = c3.number_input("수량(장)", min_value=0, step=10)
-
-                st.subheader("납품 및 기타 정보")
-                c1, c2, c3 = st.columns(3)
-                delivery_to = c1.text_input("납품처")
-                delivery_contact = c2.text_input("납품 연락처")
-                delivery_address = c3.text_input("납품 주소")
-                
-                note = st.text_area("특이사항")
-                
-                submitted = st.form_submit_button("발주 등록")
-                if submitted:
-                    if name and customer:
-                        # 발주번호 생성 로직 (YYMM + 3자리 일련번호, 예: 2505001)
-                        now = datetime.datetime.now()
-                        prefix = now.strftime("%y%m") # 예: 2405
-                        
-                        # 해당 월의 가장 마지막 발주번호 조회 (orders 컬렉션에서)
-                        last_docs = db.collection("orders")\
-                            .where("order_no", ">=", f"{prefix}000")\
-                            .where("order_no", "<=", f"{prefix}999")\
-                            .order_by("order_no", direction=firestore.Query.DESCENDING)\
-                            .limit(1)\
-                            .stream()
-                        
-                        last_seq = 0
-                        for doc in last_docs:
-                            last_val = doc.to_dict().get("order_no")
-                            if last_val and len(last_val) == 7:
-                                try:
-                                    last_seq = int(last_val[-3:])
-                                except:
-                                    pass
-                        
-                        new_seq = last_seq + 1
-                        order_no = f"{prefix}{new_seq:03d}"
-
-                        # Firestore에 저장할 데이터 딕셔너리 생성
-                        doc_data = {
-                            # 제품 마스터 정보 (Denormalized)
-                            "product_code": selected_product['product_code'],
-                            "product_type": selected_product.get('product_type', selected_product.get('weaving_type')), # 필드명 변경
-                            "yarn_type": selected_product.get('yarn_type'),
-                            "weight": selected_product['weight'],
-                            "size": selected_product['size'],
-                            
-                            # 주문 고유 정보
-                            "order_no": order_no,
-                            "date": datetime.datetime.combine(order_date, datetime.time.min),
-                            "customer": customer,
-                            "delivery_req_date": str(delivery_req_date),
-                            "name": name, # 고객사 제품명
-                            "color": color,
-                            "stock": stock,
-                            "delivery_to": delivery_to,
-                            "delivery_contact": delivery_contact,
-                            "delivery_address": delivery_address,
-                            "note": note,
-                            "status": "발주접수" # 초기 상태
-                        }
-                        db.collection("orders").add(doc_data) # 'orders' 컬렉션에 저장
-                        st.success(f"발주번호 [{order_no}] 접수 완료!")
-                        st.session_state["order_success_msg"] = f"✅ 발주번호 [{order_no}]가 성공적으로 등록되었습니다."
-                        st.session_state["trigger_order_reset"] = True
+                # 검색 폼 (Enter로 검색 가능)
+                with st.form("addr_search_form_order"):
+                    keyword_input = st.text_input("도로명 또는 지번 주소 입력", value=st.session_state.o_addr_keyword, placeholder="예: 세종대로 209")
+                    if st.form_submit_button("검색"):
+                        st.session_state.o_addr_keyword = keyword_input
+                        st.session_state.o_addr_page = 1 # 새 검색 시 1페이지로
                         st.rerun()
+
+                # 검색 실행 및 결과 표시
+                if st.session_state.o_addr_keyword:
+                    results, common, error = search_address_api(st.session_state.o_addr_keyword, st.session_state.o_addr_page)
+                    if error:
+                        st.error(error)
+                    elif results:
+                        st.session_state['o_addr_results'] = results
+                        st.session_state['o_addr_common'] = common
                     else:
-                        st.error("제품명과 발주처는 필수 입력 항목입니다.")
+                        st.warning("검색 결과가 없습니다.")
+                
+                if 'o_addr_results' in st.session_state:
+                    for idx, item in enumerate(st.session_state['o_addr_results']):
+                        road = item['roadAddr']
+                        zip_no = item['zipNo']
+                        full_addr = f"({zip_no}) {road}"
+                        if st.button(f"{full_addr}", key=f"sel_o_{zip_no}_{road}_{idx}"):
+                            st.session_state["order_del_addr"] = full_addr
+                            # 검색 관련 세션 상태 정리
+                            st.session_state.show_order_addr_dialog = False # 팝업 닫기
+                            for k in ['o_addr_keyword', 'o_addr_page', 'o_addr_results', 'o_addr_common']:
+                                if k in st.session_state:
+                                    del st.session_state[k]
+                            st.rerun()
+
+                    # 페이지네이션 UI
+                    common_info = st.session_state.get('o_addr_common', {})
+                    if common_info:
+                        total_count = int(common_info.get('totalCount', 0))
+                        current_page = int(common_info.get('currentPage', 1))
+                        count_per_page = int(common_info.get('countPerPage', 10))
+                        total_pages = (total_count + count_per_page - 1) // count_per_page if total_count > 0 else 1
+                        
+                        if total_pages > 1:
+                            st.divider()
+                            p_cols = st.columns([1, 2, 1])
+                            if p_cols[0].button("◀ 이전", disabled=(current_page <= 1)):
+                                st.session_state.o_addr_page -= 1
+                                st.rerun()
+                            p_cols[1].write(f"페이지 {current_page} / {total_pages}")
+                            if p_cols[2].button("다음 ▶", disabled=(current_page >= total_pages)):
+                                st.session_state.o_addr_page += 1
+                                st.rerun()
+                
+                st.divider()
+                if st.button("닫기", key="close_addr_order", use_container_width=True):
+                    st.session_state.show_order_addr_dialog = False
+                    st.rerun()
+
+            # --- 2. 발주 정보 입력 ---
+            # [수정] st.form 제거 (주소 검색 팝업 유지 및 레이아웃 개선을 위해)
+            st.subheader("2. 발주 상세 정보 입력")
+            
+            customer_list = get_partners("발주처")
+
+            c1, c2, c3 = st.columns(3)
+            order_date = c1.date_input("발주접수일", datetime.date.today(), format="YYYY-MM-DD")
+            if customer_list:
+                customer = c2.selectbox("발주처 선택", customer_list)
+            else:
+                customer = c2.text_input("발주처 (기초정보관리에서 거래처를 등록하세요)")
+            delivery_req_date = c3.date_input("납품요청일", datetime.date.today() + datetime.timedelta(days=7), format="YYYY-MM-DD")
+
+            c1, c2, c3 = st.columns(3)
+            name = c1.text_input("제품명 (고객사 요청 제품명)", help="고객사가 부르는 제품명을 입력하세요. 예: 프리미엄 호텔타올")
+            color = c2.text_input("색상")
+            stock = c3.number_input("수량(장)", min_value=0, step=10)
+
+            st.subheader("납품 및 기타 정보")
+            
+            c1, c2 = st.columns(2)
+            delivery_to = c1.text_input("납품처")
+            delivery_contact = c2.text_input("납품 연락처")
+            
+            # [수정] 주소 입력 필드 레이아웃 변경 (주소 - 상세주소 - 버튼)
+            c_addr1, c_addr2, c_addr3 = st.columns([3.5, 2, 0.5], vertical_alignment="bottom")
+            delivery_address = c_addr1.text_input("납품 주소", key="order_del_addr")
+            delivery_addr_detail = c_addr2.text_input("상세주소", key="order_del_addr_detail")
+            if c_addr3.button("🔍 주소", key="btn_search_addr_order", use_container_width=True):
+                # [NEW] 팝업 열 때 검색 상태 초기화
+                for k in ['o_addr_keyword', 'o_addr_page', 'o_addr_results', 'o_addr_common']:
+                    if k in st.session_state: del st.session_state[k]
+                st.session_state.show_order_addr_dialog = True
+                st.rerun()
+            
+            if st.session_state.show_order_addr_dialog:
+                show_address_search_modal_order()
+            
+            note = st.text_area("특이사항")
+            
+            if st.button("발주 등록", type="primary"):
+                if name and customer:
+                    # 발주번호 생성 로직 (YYMM + 3자리 일련번호, 예: 2505001)
+                    now = datetime.datetime.now()
+                    prefix = now.strftime("%y%m") # 예: 2405
+                    
+                    # 해당 월의 가장 마지막 발주번호 조회 (orders 컬렉션에서)
+                    last_docs = db.collection("orders")\
+                        .where("order_no", ">=", f"{prefix}000")\
+                        .where("order_no", "<=", f"{prefix}999")\
+                        .order_by("order_no", direction=firestore.Query.DESCENDING)\
+                        .limit(1)\
+                        .stream()
+                    
+                    last_seq = 0
+                    for doc in last_docs:
+                        last_val = doc.to_dict().get("order_no")
+                        if last_val and len(last_val) == 7:
+                            try:
+                                last_seq = int(last_val[-3:])
+                            except:
+                                pass
+                    
+                    new_seq = last_seq + 1
+                    order_no = f"{prefix}{new_seq:03d}"
+
+                    # 주소 합치기
+                    full_delivery_addr = f"{delivery_address} {delivery_addr_detail}".strip()
+
+                    # Firestore에 저장할 데이터 딕셔너리 생성
+                    doc_data = {
+                        # 제품 마스터 정보 (Denormalized)
+                        "product_code": selected_product['product_code'],
+                        "product_type": selected_product.get('product_type', selected_product.get('weaving_type')), # 필드명 변경
+                        "yarn_type": selected_product.get('yarn_type'),
+                        "weight": selected_product['weight'],
+                        "size": selected_product['size'],
+                        
+                        # 주문 고유 정보
+                        "order_no": order_no,
+                        "date": datetime.datetime.combine(order_date, datetime.time.min),
+                        "customer": customer,
+                        "delivery_req_date": str(delivery_req_date),
+                        "name": name, # 고객사 제품명
+                        "color": color,
+                        "stock": stock,
+                        "delivery_to": delivery_to,
+                        "delivery_contact": delivery_contact,
+                        "delivery_address": full_delivery_addr,
+                        "note": note,
+                        "status": "발주접수" # 초기 상태
+                    }
+                    db.collection("orders").add(doc_data) # 'orders' 컬렉션에 저장
+                    st.success(f"발주번호 [{order_no}] 접수 완료!")
+                    st.session_state["order_success_msg"] = f"✅ 발주번호 [{order_no}]가 성공적으로 등록되었습니다."
+                    
+                    # [NEW] 입력 필드 수동 초기화 (clear_on_submit 제거로 인해 필요)
+                    keys_to_clear = ["order_del_addr", "order_del_addr_detail"]
+                    for k in keys_to_clear: st.session_state[k] = ""
+                    
+                    st.session_state["trigger_order_reset"] = True
+                    st.rerun()
+                else:
+                    st.error("제품명과 발주처는 필수 입력 항목입니다.")
 
 def render_partner_order_status(db):
     st.header("발주 현황 조회 (거래처용)")
@@ -201,7 +298,7 @@ def render_partner_order_status(db):
 
     # 검색 조건
     with st.form("partner_search_form"):
-        c1, c2, c3 = st.columns(3)
+        c1, c2, c3, c4 = st.columns([2, 1.5, 1.5, 2])
         today = datetime.date.today()
         date_range = c1.date_input("조회 기간 (접수일)", [today - datetime.timedelta(days=90), today])
         
@@ -209,8 +306,10 @@ def render_partner_order_status(db):
         status_options = ["전체", "발주접수", "제직대기", "제직중", "제직완료", "염색중", "염색완료", "봉제중", "봉제완료", "출고완료"]
         filter_status = c2.selectbox("진행 상태", status_options)
         
-        # [NEW] 제품명 검색
-        search_product = c3.text_input("제품명 검색", placeholder="제품명 입력")
+        # [NEW] 검색 기준 및 키워드 (거래처용)
+        criteria_options = ["전체", "제품명", "제품코드", "제품종류", "사종", "색상"]
+        search_criteria = c3.selectbox("검색 기준", criteria_options)
+        search_keyword = c4.text_input("검색어 입력")
         
         st.form_submit_button("🔍 조회하기")
 
@@ -238,10 +337,19 @@ def render_partner_order_status(db):
         if filter_status != "전체" and d.get('status') != filter_status:
             continue
             
-        # [NEW] 3. 제품명 검색 필터 (메모리)
-        if search_product:
-            if search_product not in d.get('name', ''):
-                continue
+        # [NEW] 3. 검색어 필터 (메모리)
+        if search_keyword:
+            search_keyword = search_keyword.lower()
+            if search_criteria == "전체":
+                # 주요 필드 통합 검색
+                target_str = f"{d.get('name','')} {d.get('product_code','')} {d.get('product_type','')} {d.get('yarn_type','')} {d.get('color','')} {d.get('note','')}"
+                if search_keyword not in target_str.lower(): continue
+            else:
+                # 특정 필드 검색
+                field_map = {"제품명": "name", "제품코드": "product_code", "제품종류": "product_type", "사종": "yarn_type", "색상": "color"}
+                target_field = field_map.get(search_criteria)
+                if target_field and search_keyword not in str(d.get(target_field, '')).lower():
+                    continue
             
         # 정렬을 위해 원본 날짜 임시 저장
         d['_sort_date'] = d.get('date')
@@ -277,6 +385,9 @@ def render_partner_order_status(db):
         
         df_display = df[final_cols].rename(columns=col_map)
         
+        # [NEW] 동적 높이 계산 (행당 약 35px, 최대 20행 700px)
+        table_height = min((len(df_display) + 1) * 35 + 3, 700)
+
         st.write("🔽 상세 이력을 확인할 항목을 선택하세요.")
         selection = st.dataframe(
             df_display, 
@@ -284,9 +395,12 @@ def render_partner_order_status(db):
             hide_index=True,
             on_select="rerun",
             selection_mode="single-row",
-            height=700,
+            height=table_height,
             key="partner_order_list"
         )
+
+        if df_display.empty:
+            st.markdown("<br>", unsafe_allow_html=True)
         
         # [NEW] 선택 시 상세 이력 표시
         if selection.selection.rows:
@@ -619,23 +733,29 @@ def render_order_status(db, sub_menu):
         st.session_state["search_performed"] = True
         today = datetime.date.today()
         st.session_state["search_date_range"] = [today - datetime.timedelta(days=30), today]
-        st.session_state["search_filter_status_new"] = []
-        st.session_state["search_filter_customer"] = ""
+        st.session_state["search_filter_status_single"] = "전체"
+        st.session_state["search_criteria"] = "전체"
+        st.session_state["search_keyword"] = ""
 
     with st.form("search_form"):
-        c1, c2, c3 = st.columns(3)
+        c1, c2, c3, c4 = st.columns([2, 1.5, 1.5, 2])
         # 날짜 범위 선택 (기본값: 세션에 저장된 값 사용)
         date_range = c1.date_input("조회 기간", st.session_state.get("search_date_range"), format="YYYY-MM-DD")
         # 상세 공정 상태 목록 추가
-        status_options = ["발주접수", "제직대기", "제직중", "제직완료", "염색중", "염색완료", "봉제중", "봉제완료", "출고완료"]
+        status_options = ["전체", "발주접수", "제직대기", "제직중", "제직완료", "염색중", "염색완료", "봉제중", "봉제완료", "출고완료"]
         
-        # 초기값: 이전에 검색한 값이 있으면 유지, 없으면 빈 리스트 (전체 조회)
-        default_status = st.session_state.get("search_filter_status_new")
-        # 에러 방지: 현재 옵션에 있는 값만 필터링 (코드가 바뀌었을 때를 대비)
-        valid_default = [x for x in default_status if x in status_options]
+        # [수정] 상태 필터: 멀티셀렉트 -> 콤보박스(Selectbox)
+        saved_status = st.session_state.get("search_filter_status_single", "전체")
+        if saved_status not in status_options: saved_status = "전체"
+        filter_status = c2.selectbox("진행 상태", status_options, index=status_options.index(saved_status))
         
-        filter_status = c2.multiselect("진행 상태 (비워두면 전체)", status_options, default=valid_default)
-        filter_customer = c3.text_input("발주처 검색", value=st.session_state.get("search_filter_customer"))
+        # [수정] 검색 조건: 콤보박스 + 텍스트 입력
+        criteria_options = ["전체", "제품코드", "발주처", "제품명", "제품종류", "사종", "색상", "중량"]
+        saved_criteria = st.session_state.get("search_criteria", "전체")
+        if saved_criteria not in criteria_options: saved_criteria = "전체"
+        
+        search_criteria = c3.selectbox("검색 기준", criteria_options, index=criteria_options.index(saved_criteria))
+        search_keyword = c4.text_input("검색어 입력", value=st.session_state.get("search_keyword", ""))
         
         search_btn = st.form_submit_button("🔍 조회하기")
 
@@ -643,8 +763,9 @@ def render_order_status(db, sub_menu):
     if search_btn:
         st.session_state["search_performed"] = True
         st.session_state["search_date_range"] = date_range
-        st.session_state["search_filter_status_new"] = filter_status
-        st.session_state["search_filter_customer"] = filter_customer
+        st.session_state["search_filter_status_single"] = filter_status
+        st.session_state["search_criteria"] = search_criteria
+        st.session_state["search_keyword"] = search_keyword
         st.rerun()
 
     if st.session_state.get("search_performed"):
@@ -655,8 +776,9 @@ def render_order_status(db, sub_menu):
         if "order_status_key" not in st.session_state:
             st.session_state["order_status_key"] = 0
 
-        s_filter_status = st.session_state["search_filter_status_new"]
-        s_filter_customer = st.session_state["search_filter_customer"]
+        s_filter_status = st.session_state.get("search_filter_status_single", "전체")
+        s_criteria = st.session_state.get("search_criteria", "전체")
+        s_keyword = st.session_state.get("search_keyword", "")
 
         # 날짜 필터링을 위해 datetime 변환
         start_date = datetime.datetime.combine(s_date_range[0], datetime.time.min)
@@ -689,11 +811,26 @@ def render_order_status(db, sub_menu):
             if 'delivery_req_date' in df.columns:
                 df['delivery_req_date'] = pd.to_datetime(df['delivery_req_date'], errors='coerce').dt.strftime('%Y-%m-%d').fillna('')
             
-            # 상태 및 거래처 필터 (메모리 상에서 2차 필터)
-            if s_filter_status:
-                df = df[df['status'].isin(s_filter_status)]
-            if s_filter_customer:
-                df = df[df['customer'].str.contains(s_filter_customer, na=False)]
+            # [수정] 상태 필터 (단일 선택)
+            if s_filter_status != "전체":
+                df = df[df['status'] == s_filter_status]
+            
+            # [수정] 검색어 필터 (기준에 따라)
+            if s_keyword:
+                s_keyword = s_keyword.lower()
+                if s_criteria == "전체":
+                    # 모든 컬럼 값을 문자열로 변환하여 검색
+                    mask = df.apply(lambda row: s_keyword in row.astype(str).str.lower().str.cat(sep=' '), axis=1)
+                    df = df[mask]
+                else:
+                    col_map_search = {"제품코드": "product_code", "발주처": "customer", "제품명": "name", "제품종류": "product_type", "사종": "yarn_type", "색상": "color", "중량": "weight"}
+                    target_col = col_map_search.get(s_criteria)
+                    if target_col and target_col in df.columns:
+                        df = df[df[target_col].astype(str).str.lower().str.contains(s_keyword, na=False)]
+            
+            if df.empty:
+                st.info("조건에 맞는 발주 내역이 없습니다.")
+                return
             
             # 컬럼명 한글 매핑
             col_map = {
@@ -718,16 +855,23 @@ def render_order_status(db, sub_menu):
 
             # --- 수정/삭제를 위한 테이블 선택 기능 ---
             st.write("🔽 목록에서 수정하거나 제직대기로 보낼 행을 선택(체크)하세요. (다중 선택 가능)")
+            
+            # [NEW] 동적 높이 계산 (행당 약 35px, 최대 20행 700px)
+            table_height = min((len(df_display) + 1) * 35 + 3, 700)
+            
             selection = st.dataframe(
                 df_display, 
                 width="stretch", 
                 hide_index=True,  # 맨 왼쪽 순번(0,1,2..) 숨기기
                 on_select="rerun", # 선택 시 리런
                 selection_mode="multi-row", # 다중 선택 가능으로 변경
-                height=700, # [수정] 목록 높이 확대 (약 20행)
+                height=table_height, # [수정] 목록 높이 동적 적용
                 key=f"order_status_list_{st.session_state['order_status_key']}" # [수정] 동적 키 적용
             )
             
+            if df_display.empty:
+                st.markdown("<br>", unsafe_allow_html=True)
+
             # [MOVED] 작업 영역 로직 (테이블 상단)
             if selection.selection.rows:
                 selected_indices = selection.selection.rows

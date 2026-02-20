@@ -4,7 +4,7 @@ import datetime
 import io
 import uuid
 from firebase_admin import firestore
-from utils import get_common_codes, get_partners, is_basic_code_used, manage_code, manage_code_with_code, get_db, generate_report_html
+from utils import get_common_codes, get_partners, is_basic_code_used, manage_code, manage_code_with_code, get_db, generate_report_html, search_address_api
 
 def render_shipping_operations(db, sub_menu):
     st.header("출고 작업")
@@ -1037,36 +1037,30 @@ def render_inventory_logic(db, allow_shipping=False):
         # [NEW] 총 재고 금액 계산
         df['total_value'] = df['stock'] * df['shipping_unit_price']
 
-        # [NEW] 다중 조건 검색 기능
-        with st.expander("🔍 상세 검색 (다중 조건)", expanded=True):
-            # 검색 옵션 데이터 준비
-            all_codes = ["전체"] + sorted([str(x) for x in df['product_code'].unique() if x])
-            all_customers = ["전체"] + sorted([str(x) for x in df['customer'].unique() if x])
-            all_types = ["전체"] + sorted([str(x) for x in df['product_type'].unique() if x])
-            all_names = ["전체"] + sorted([str(x) for x in df['name'].unique() if x])
+        # [NEW] 간편 검색 기능 (사용자 요청 반영)
+        with st.expander("🔍 검색", expanded=True):
+            c_search1, c_search2 = st.columns([1, 3])
+            search_criteria = c_search1.selectbox("검색 기준", ["전체(통합)", "제품코드", "발주처", "제품종류", "제품명"], key=f"inv_search_criteria_{allow_shipping}")
+            search_keyword = c_search2.text_input("검색어 입력", key=f"inv_search_keyword_{allow_shipping}")
             
-            f1, f2, f3, f4, f5 = st.columns([1, 1, 1, 1, 2])
-            s_code = f1.selectbox("제품코드", all_codes, key=f"inv_s_code_{allow_shipping}")
-            s_customer = f2.selectbox("발주처", all_customers, key=f"inv_s_cust_{allow_shipping}")
-            s_type = f3.selectbox("제품종류", all_types, key=f"inv_s_type_{allow_shipping}")
-            s_name = f4.selectbox("제품명", all_names, key=f"inv_s_name_{allow_shipping}")
-            s_text = f5.text_input("통합 검색 (비고, 발주처, 발주번호 등)", key=f"inv_s_text_{allow_shipping}")
-            
-            # 필터링 적용
-            if s_code != "전체":
-                df = df[df['product_code'] == s_code]
-            if s_customer != "전체":
-                df = df[df['customer'] == s_customer]
-            if s_type != "전체":
-                df = df[df['product_type'] == s_type]
-            if s_name != "전체":
-                df = df[df['name'] == s_name]
-            if s_text:
-                # 여러 컬럼에서 문자열 검색
-                mask = df.apply(lambda x: s_text.lower() in str(x.get('note', '')).lower() or 
-                                          s_text.lower() in str(x.get('customer', '')).lower() or
-                                          s_text.lower() in str(x.get('order_no', '')).lower(), axis=1)
-                df = df[mask]
+            if search_keyword:
+                search_keyword = search_keyword.lower()
+                if search_criteria == "전체(통합)":
+                    mask = df.apply(lambda x: search_keyword in str(x.get('product_code', '')).lower() or
+                                              search_keyword in str(x.get('customer', '')).lower() or
+                                              search_keyword in str(x.get('product_type', '')).lower() or
+                                              search_keyword in str(x.get('name', '')).lower() or
+                                              search_keyword in str(x.get('note', '')).lower() or
+                                              search_keyword in str(x.get('order_no', '')).lower(), axis=1)
+                    df = df[mask]
+                elif search_criteria == "제품코드":
+                    df = df[df['product_code'].astype(str).str.lower().str.contains(search_keyword, na=False)]
+                elif search_criteria == "발주처":
+                    df = df[df['customer'].astype(str).str.lower().str.contains(search_keyword, na=False)]
+                elif search_criteria == "제품종류":
+                    df = df[df['product_type'].astype(str).str.lower().str.contains(search_keyword, na=False)]
+                elif search_criteria == "제품명":
+                    df = df[df['name'].astype(str).str.lower().str.contains(search_keyword, na=False)]
 
         # [NEW] 기본 정렬 설정: 제품코드(오름차순) -> 제품명(오름차순)
         sort_cols = []
@@ -2120,55 +2114,140 @@ def render_partners(db, sub_menu):
         # [NEW] 폼 초기화를 위한 키 관리
         if "partner_reg_key" not in st.session_state:
             st.session_state["partner_reg_key"] = 0
+        rk = st.session_state["partner_reg_key"]
+
+        if "show_partner_addr_dialog" not in st.session_state:
+            st.session_state.show_partner_addr_dialog = False
+
+        # [NEW] 주소 검색 모달 (Dialog)
+        @st.dialog("주소 검색")
+        def show_address_search_modal():
+            # 페이지네이션 및 검색어 상태 관리
+            if "p_addr_keyword" not in st.session_state:
+                st.session_state.p_addr_keyword = ""
+            if "p_addr_page" not in st.session_state:
+                st.session_state.p_addr_page = 1
+
+            # 검색 폼 (Enter로 검색 가능)
+            with st.form("addr_search_form_partner"):
+                keyword_input = st.text_input("도로명 또는 지번 주소 입력", value=st.session_state.p_addr_keyword, placeholder="예: 세종대로 209")
+                if st.form_submit_button("검색"):
+                    st.session_state.p_addr_keyword = keyword_input
+                    st.session_state.p_addr_page = 1 # 새 검색 시 1페이지로
+                    st.rerun()
+
+            # 검색 실행 및 결과 표시
+            if st.session_state.p_addr_keyword:
+                results, common, error = search_address_api(st.session_state.p_addr_keyword, st.session_state.p_addr_page)
+                if error:
+                    st.error(error)
+                elif results:
+                    st.session_state['p_addr_results'] = results
+                    st.session_state['p_addr_common'] = common
+                else:
+                    st.warning("검색 결과가 없습니다.")
+            
+            if 'p_addr_results' in st.session_state:
+                for idx, item in enumerate(st.session_state['p_addr_results']):
+                    road = item['roadAddr']
+                    zip_no = item['zipNo']
+                    full_addr = f"({zip_no}) {road}"
+                    if st.button(f"{full_addr}", key=f"sel_{zip_no}_{road}_{idx}"):
+                        st.session_state[f"p_addr_{rk}"] = full_addr
+                        # 검색 관련 세션 상태 정리
+                        st.session_state.show_partner_addr_dialog = False # 팝업 닫기
+                        for k in ['p_addr_keyword', 'p_addr_page', 'p_addr_results', 'p_addr_common']:
+                            if k in st.session_state:
+                                del st.session_state[k]
+                        st.rerun()
+
+                # 페이지네이션 UI
+                common_info = st.session_state.get('p_addr_common', {})
+                if common_info:
+                    total_count = int(common_info.get('totalCount', 0))
+                    current_page = int(common_info.get('currentPage', 1))
+                    count_per_page = int(common_info.get('countPerPage', 10))
+                    total_pages = (total_count + count_per_page - 1) // count_per_page if total_count > 0 else 1
+                    
+                    if total_pages > 1:
+                        st.divider()
+                        p_cols = st.columns([1, 2, 1])
+                        if p_cols[0].button("◀ 이전", disabled=(current_page <= 1)):
+                            st.session_state.p_addr_page -= 1
+                            st.rerun()
+                        p_cols[1].write(f"페이지 {current_page} / {total_pages}")
+                        if p_cols[2].button("다음 ▶", disabled=(current_page >= total_pages)):
+                            st.session_state.p_addr_page += 1
+                            st.rerun()
+            
+            st.divider()
+            if st.button("닫기", key="close_addr_partner", use_container_width=True):
+                st.session_state.show_partner_addr_dialog = False
+                st.rerun()
             
         # [NEW] 저장 성공 메시지 처리
         if "partner_success_msg" in st.session_state:
             st.success(st.session_state["partner_success_msg"])
             del st.session_state["partner_success_msg"]
 
-        with st.form(key=f"partner_form_{st.session_state['partner_reg_key']}", clear_on_submit=True):
-            c1, c2 = st.columns(2)
-            p_type = c1.selectbox("거래처 구분", partner_types)
-            p_name = c2.text_input("거래처명", placeholder="상호명 입력")
-            
-            c1, c2, c3 = st.columns(3)
-            p_rep = c1.text_input("대표자명")
-            p_biz_num = c2.text_input("사업자번호")
-            p_item = c3.text_input("업태/종목")
-            
-            c1, c2, c3, c4 = st.columns(4)
-            p_manager = c1.text_input("담당자")
-            p_phone = c2.text_input("전화번호")
-            p_fax = c3.text_input("팩스번호")
-            p_email = c4.text_input("이메일")
-            
-            p_address = st.text_input("주소")
-            p_account = st.text_input("계좌번호")
-            p_note = st.text_area("기타사항")
-            p_reg_date = st.date_input("등록일", datetime.date.today())
-            
-            if st.form_submit_button("거래처 저장"):
-                if p_name:
-                    db.collection("partners").add({
-                        "type": p_type,
-                        "name": p_name,
-                        "rep_name": p_rep,
-                        "biz_num": p_biz_num,
-                        "item": p_item,
-                        "manager": p_manager,
-                        "phone": p_phone,
-                        "fax": p_fax,
-                        "email": p_email,
-                        "address": p_address,
-                        "account": p_account,
-                        "note": p_note,
-                        "reg_date": datetime.datetime.combine(p_reg_date, datetime.datetime.now().time())
-                    })
-                    st.session_state["partner_success_msg"] = f"✅ {p_name} 저장 완료!"
-                    st.session_state["partner_reg_key"] += 1
-                    st.rerun()
-                else:
-                    st.error("거래처명을 입력해주세요.")
+        # [수정] st.form 제거 (주소 검색 팝업 유지 및 레이아웃 개선을 위해)
+        c1, c2 = st.columns(2)
+        p_type = c1.selectbox("거래처 구분", partner_types)
+        p_name = c2.text_input("거래처명", placeholder="상호명 입력")
+        
+        c1, c2, c3 = st.columns(3)
+        p_rep = c1.text_input("대표자명")
+        p_biz_num = c2.text_input("사업자번호")
+        p_item = c3.text_input("업태/종목")
+        
+        c1, c2, c3, c4 = st.columns(4)
+        p_manager = c1.text_input("담당자")
+        p_phone = c2.text_input("전화번호")
+        p_fax = c3.text_input("팩스번호")
+        p_email = c4.text_input("이메일")
+        
+        # [수정] 주소 입력 필드 레이아웃 변경 (주소 - 상세주소 - 버튼)
+        ac1, ac2, ac3 = st.columns([3.5, 2, 0.5], vertical_alignment="bottom")
+        p_address = ac1.text_input("주소", key=f"p_addr_{rk}")
+        p_addr_detail = ac2.text_input("상세주소", placeholder="동/호수 등 입력", key=f"p_addr_det_{rk}")
+        if ac3.button("🔍 주소", key=f"btn_search_addr_partner_{rk}", use_container_width=True):
+            # [NEW] 팝업 열 때 검색 상태 초기화
+            for k in ['p_addr_keyword', 'p_addr_page', 'p_addr_results', 'p_addr_common']:
+                if k in st.session_state: del st.session_state[k]
+            st.session_state.show_partner_addr_dialog = True
+            st.rerun()
+        if st.session_state.show_partner_addr_dialog:
+            show_address_search_modal()
+
+        p_account = st.text_input("계좌번호")
+        p_note = st.text_area("기타사항")
+        p_reg_date = st.date_input("등록일", datetime.date.today())
+        
+        if st.button("거래처 저장", type="primary"):
+            if p_name:
+                # 주소 합치기
+                full_address = f"{p_address} {p_addr_detail}".strip()
+                
+                db.collection("partners").add({
+                    "type": p_type,
+                    "name": p_name,
+                    "rep_name": p_rep,
+                    "biz_num": p_biz_num,
+                    "item": p_item,
+                    "manager": p_manager,
+                    "phone": p_phone,
+                    "fax": p_fax,
+                    "email": p_email,
+                    "address": full_address,
+                    "account": p_account,
+                    "note": p_note,
+                    "reg_date": datetime.datetime.combine(p_reg_date, datetime.datetime.now().time())
+                })
+                st.session_state["partner_success_msg"] = f"✅ {p_name} 저장 완료!"
+                st.session_state["partner_reg_key"] += 1
+                st.rerun()
+            else:
+                st.error("거래처명을 입력해주세요.")
 
     elif sub_menu == "거래처 목록":
         st.subheader("거래처 목록")
@@ -2652,6 +2731,14 @@ def render_my_profile(db):
                 st.info("변경할 내용이 없습니다.")
 
 def render_company_settings(db, sub_menu):
+    # [FIX] 메뉴 진입/변경 시 팝업 상태 초기화 (자동 팝업 방지)
+    if "last_comp_submenu" not in st.session_state:
+        st.session_state["last_comp_submenu"] = None
+        
+    if st.session_state["last_comp_submenu"] != sub_menu:
+        st.session_state["show_company_addr_dialog"] = False
+        st.session_state["last_comp_submenu"] = sub_menu
+
     doc_ref = db.collection("settings").document("company_info")
     doc = doc_ref.get()
     data = doc.to_dict() if doc.exists else {}
@@ -2809,6 +2896,9 @@ def render_company_settings(db, sub_menu):
                     <strong>거래은행:</strong> {data.get('bank_name', '')} {data.get('bank_account', '')}<br>
                     <strong>비고:</strong> {data.get('note', '')}
                 </div>
+                <div style="margin-top: 10px; font-size: 0.8rem; color: #888;">
+                    <strong>도로명주소 API 키:</strong> {"✅ 등록됨" if data.get('juso_api_key') else "❌ 미등록"}
+                </div>
             </div>
             """, unsafe_allow_html=True)
         else:
@@ -2818,38 +2908,127 @@ def render_company_settings(db, sub_menu):
         st.header("회사정보 수정")
         st.info("거래명세서 등 출력물에 표시될 우리 회사의 정보를 등록하거나 수정합니다.")
 
-        # 2. 정보 수정 (Edit Mode)
-        with st.form("company_info_form"):
-            c1, c2 = st.columns(2)
-            name = c1.text_input("상호(회사명)", value=data.get("name", ""))
-            rep_name = c2.text_input("대표자명", value=data.get("rep_name", ""))
+        if "show_company_addr_dialog" not in st.session_state:
+            st.session_state.show_company_addr_dialog = False
+
+        # [NEW] 주소 검색 모달 (Dialog)
+        @st.dialog("주소 검색")
+        def show_address_search_modal_company():
+            # 페이지네이션 및 검색어 상태 관리
+            if "c_addr_keyword" not in st.session_state:
+                st.session_state.c_addr_keyword = ""
+            if "c_addr_page" not in st.session_state:
+                st.session_state.c_addr_page = 1
+
+            # 검색 폼 (Enter로 검색 가능)
+            with st.form("addr_search_form_company"):
+                keyword_input = st.text_input("도로명 또는 지번 주소 입력", value=st.session_state.c_addr_keyword, placeholder="예: 세종대로 209")
+                if st.form_submit_button("검색"):
+                    st.session_state.c_addr_keyword = keyword_input
+                    st.session_state.c_addr_page = 1 # 새 검색 시 1페이지로
+                    st.rerun()
+
+            # 검색 실행 및 결과 표시
+            if st.session_state.c_addr_keyword:
+                results, common, error = search_address_api(st.session_state.c_addr_keyword, st.session_state.c_addr_page)
+                if error:
+                    st.error(error)
+                elif results:
+                    st.session_state['c_addr_results'] = results
+                    st.session_state['c_addr_common'] = common
+                else:
+                    st.warning("검색 결과가 없습니다.")
             
-            c3, c4 = st.columns(2)
-            biz_num = c3.text_input("사업자등록번호", value=data.get("biz_num", ""))
-            address = c4.text_input("사업장 주소", value=data.get("address", ""))
+            if 'c_addr_results' in st.session_state:
+                for idx, item in enumerate(st.session_state['c_addr_results']):
+                    road = item['roadAddr']
+                    zip_no = item['zipNo']
+                    full_addr = f"({zip_no}) {road}"
+                    if st.button(f"{full_addr}", key=f"sel_c_{zip_no}_{road}_{idx}"):
+                        st.session_state["company_addr_input"] = full_addr
+                        # 검색 관련 세션 상태 정리
+                        st.session_state.show_company_addr_dialog = False # 팝업 닫기
+                        for k in ['c_addr_keyword', 'c_addr_page', 'c_addr_results', 'c_addr_common']:
+                            if k in st.session_state:
+                                del st.session_state[k]
+                        st.rerun()
+
+                # 페이지네이션 UI
+                common_info = st.session_state.get('c_addr_common', {})
+                if common_info:
+                    total_count = int(common_info.get('totalCount', 0))
+                    current_page = int(common_info.get('currentPage', 1))
+                    count_per_page = int(common_info.get('countPerPage', 10))
+                    total_pages = (total_count + count_per_page - 1) // count_per_page if total_count > 0 else 1
+                    
+                    if total_pages > 1:
+                        st.divider()
+                        p_cols = st.columns([1, 2, 1])
+                        if p_cols[0].button("◀ 이전", disabled=(current_page <= 1)):
+                            st.session_state.c_addr_page -= 1
+                            st.rerun()
+                        p_cols[1].write(f"페이지 {current_page} / {total_pages}")
+                        if p_cols[2].button("다음 ▶", disabled=(current_page >= total_pages)):
+                            st.session_state.c_addr_page += 1
+                            st.rerun()
             
-            c5, c6 = st.columns(2)
-            phone = c5.text_input("전화번호", value=data.get("phone", ""))
-            fax = c6.text_input("팩스번호", value=data.get("fax", ""))
-            
-            c7, c8 = st.columns(2)
-            biz_type = c7.text_input("업태", value=data.get("biz_type", ""))
-            biz_item = c8.text_input("종목", value=data.get("biz_item", ""))
-            
-            email = st.text_input("이메일", value=data.get("email", ""))
-            
-            c9, c10 = st.columns(2)
-            bank_name = c9.text_input("거래은행", value=data.get("bank_name", ""))
-            bank_account = c10.text_input("계좌번호", value=data.get("bank_account", ""))
-            
-            note = st.text_area("비고 / 하단 문구", value=data.get("note", ""), help="명세서 하단에 들어갈 안내 문구 등을 입력하세요.")
-            
-            if st.form_submit_button("저장", type="primary"):
-                new_data = {
-                    "name": name, "rep_name": rep_name, "biz_num": biz_num, "address": address,
-                    "phone": phone, "fax": fax, "biz_type": biz_type, "biz_item": biz_item,
-                    "email": email, "bank_name": bank_name, "bank_account": bank_account, "note": note
-                }
-                doc_ref.set(new_data)
-                st.success("회사 정보가 저장되었습니다.")
+            st.divider()
+            if st.button("닫기", key="close_addr_company", use_container_width=True):
+                st.session_state.show_company_addr_dialog = False
                 st.rerun()
+
+        # 2. 정보 수정 (Edit Mode)
+        # [수정] st.form 제거 (주소 검색 팝업 유지 및 레이아웃 개선을 위해)
+        c1, c2 = st.columns(2)
+        name = c1.text_input("상호(회사명)", value=data.get("name", ""))
+        rep_name = c2.text_input("대표자명", value=data.get("rep_name", ""))
+
+        biz_num = st.text_input("사업자등록번호", value=data.get("biz_num", ""))
+        
+        # [수정] 주소 입력 필드 레이아웃 변경 (주소 - 상세주소 - 버튼)
+        ac1, ac2, ac3 = st.columns([3.5, 2, 0.5], vertical_alignment="bottom")
+        # 세션 상태 초기화 (DB 값 우선)
+        if "company_addr_input" not in st.session_state:
+            st.session_state["company_addr_input"] = data.get("address", "")
+        
+        address = ac1.text_input("사업장 주소", key="company_addr_input")
+        addr_detail = ac2.text_input("상세주소", value=data.get("address_detail", ""), key="company_addr_detail")
+        if ac3.button("🔍 주소", key="btn_search_addr_company", use_container_width=True):
+            # [NEW] 팝업 열 때 검색 상태 초기화
+            for k in ['c_addr_keyword', 'c_addr_page', 'c_addr_results', 'c_addr_common']:
+                if k in st.session_state: del st.session_state[k]
+            st.session_state.show_company_addr_dialog = True
+            st.rerun()
+        if st.session_state.show_company_addr_dialog:
+            show_address_search_modal_company()
+        
+        c5, c6 = st.columns(2)
+        phone = c5.text_input("전화번호", value=data.get("phone", ""))
+        fax = c6.text_input("팩스번호", value=data.get("fax", ""))
+        
+        c7, c8 = st.columns(2)
+        biz_type = c7.text_input("업태", value=data.get("biz_type", ""))
+        biz_item = c8.text_input("종목", value=data.get("biz_item", ""))
+        
+        email = st.text_input("이메일", value=data.get("email", ""))
+        
+        c9, c10 = st.columns(2)
+        bank_name = c9.text_input("거래은행", value=data.get("bank_name", ""))
+        bank_account = c10.text_input("계좌번호", value=data.get("bank_account", ""))
+        
+        # [NEW] 주소 검색 API 키 입력
+        juso_api_key = st.text_input("도로명주소 API 승인키", value=data.get("juso_api_key", ""), type="password", help="행정안전부 개발자센터에서 발급받은 '주소검색 API' 승인키를 입력하세요.")
+        
+        note = st.text_area("비고 / 하단 문구", value=data.get("note", ""), help="명세서 하단에 들어갈 안내 문구 등을 입력하세요.")
+        
+        if st.button("저장", type="primary"):
+            new_data = {
+                "name": name, "rep_name": rep_name, "biz_num": biz_num, 
+                "address": address, "address_detail": addr_detail, # 상세주소 별도 저장 또는 합쳐서 저장 가능 (여기선 분리 저장 예시)
+                "phone": phone, "fax": fax, "biz_type": biz_type, "biz_item": biz_item,
+                "email": email, "bank_name": bank_name, "bank_account": bank_account, "note": note,
+                "juso_api_key": juso_api_key
+            }
+            doc_ref.set(new_data)
+            st.success("회사 정보가 저장되었습니다.")
+            st.rerun()

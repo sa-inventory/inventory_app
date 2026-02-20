@@ -1307,7 +1307,11 @@ def render_inventory(db, sub_menu):
                 # 양식 다운로드
                 template_data = {
                     "제품코드": ["A20S0904080"],
+                    "발주처": ["자체보유"],
                     "제품명": ["자체재고"],
+                    "색상": ["기본"],
+                    "중량": [150],
+                    "사이즈": ["40*80"],
                     "수량": [100],
                     "단가": [5000],
                     "비고": ["기초재고"],
@@ -1368,6 +1372,22 @@ def render_inventory(db, sub_menu):
                                 reg_name = str(row.get("제품명", "")).strip()
                                 final_name = reg_name if reg_name and reg_name != "nan" else product_info.get('product_type', '자체제품')
                                 
+                                # [NEW] 추가 컬럼 처리 (발주처, 색상, 중량, 사이즈)
+                                reg_customer = str(row.get("발주처", "")).strip()
+                                if not reg_customer or reg_customer == "nan": reg_customer = "자체보유"
+                                
+                                reg_color = str(row.get("색상", "")).strip()
+                                if not reg_color or reg_color == "nan": reg_color = "기본"
+                                
+                                try:
+                                    reg_weight = int(row.get("중량"))
+                                except:
+                                    try: reg_weight = int(product_info.get('weight', 0))
+                                    except: reg_weight = 0
+                                
+                                reg_size = str(row.get("사이즈", "")).strip()
+                                if not reg_size or reg_size == "nan": reg_size = product_info.get('size', '')
+
                                 try:
                                     stock_val = int(row.get("수량", 0))
                                     price_val = int(row.get("단가", 0))
@@ -1381,10 +1401,14 @@ def render_inventory(db, sub_menu):
                                     "yarn_type": product_info.get('yarn_type'),
                                     "weight": product_info.get('weight'),
                                     "size": product_info.get('size'),
+                                    "weight": reg_weight,
+                                    "size": reg_size,
                                     "name": final_name,
                                     "color": "기본",
+                                    "color": reg_color,
                                     "order_no": stock_no,
                                     "customer": "자체보유",
+                                    "customer": reg_customer,
                                     "date": reg_date,
                                     "stock": stock_val,
                                     "shipping_unit_price": price_val,
@@ -1736,7 +1760,16 @@ def render_partners(db, sub_menu):
     partner_types = get_common_codes("partner_types", ["발주처", "염색업체", "봉제업체", "배송업체", "기타"])
 
     if sub_menu == "거래처 등록":
-        with st.form("partner_form", clear_on_submit=True):
+        # [NEW] 폼 초기화를 위한 키 관리
+        if "partner_reg_key" not in st.session_state:
+            st.session_state["partner_reg_key"] = 0
+            
+        # [NEW] 저장 성공 메시지 처리
+        if "partner_success_msg" in st.session_state:
+            st.success(st.session_state["partner_success_msg"])
+            del st.session_state["partner_success_msg"]
+
+        with st.form(key=f"partner_form_{st.session_state['partner_reg_key']}", clear_on_submit=True):
             c1, c2 = st.columns(2)
             p_type = c1.selectbox("거래처 구분", partner_types)
             p_name = c2.text_input("거래처명", placeholder="상호명 입력")
@@ -1771,7 +1804,8 @@ def render_partners(db, sub_menu):
                         "note": p_note,
                         "reg_date": datetime.datetime.now()
                     })
-                    st.success(f"{p_name} 저장 완료!")
+                    st.session_state["partner_success_msg"] = f"✅ {p_name} 저장 완료!"
+                    st.session_state["partner_reg_key"] += 1
                     st.rerun()
                 else:
                     st.error("거래처명을 입력해주세요.")

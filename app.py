@@ -25,6 +25,23 @@ st.markdown("""
         .block-container {
             padding-top: 3rem !important;
         }
+        /* [NEW] 사이드바 Expander 헤더 스타일링 (열려있는 경우 강조) */
+        [data-testid="stSidebar"] details[open] > summary {
+            background-color: #e6f3ff !important;
+            color: #1c62b0 !important;
+            font-weight: bold !important;
+            border-radius: 0.5rem;
+        }
+        /* [NEW] 탭 스타일링 (선택된 탭 강조) */
+        button[data-baseweb="tab"][aria-selected="true"] {
+            color: #1c62b0 !important;
+            font-weight: bold !important;
+            font-size: 1.1rem !important;
+        }
+        /* [NEW] 사이드바 하위 메뉴 (Expander 내부 버튼) 글자 크기 축소 */
+        [data-testid="stSidebar"] details button p {
+            font-size: 0.9rem !important;
+        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -194,10 +211,15 @@ with st.sidebar:
         is_selected = (st.session_state.get("current_menu") == main_menu and 
                        st.session_state.get("current_sub_menu") == effective_sub_menu)
         
-        # 버튼 대신 st.markdown을 사용해 클릭 가능한 링크처럼 구현 (더 깔끔함)
-        button_style = "background-color: #e6f3ff; color: #1c62b0; font-weight: bold;" if is_selected else "background-color: #f0f2f6;"
+        # [수정] 선택된 메뉴 강조 (Primary 버튼 사용)
+        btn_type = "primary" if is_selected else "secondary"
         
-        if st.button(label, use_container_width=True, key=f"menu_{main_menu}_{effective_sub_menu}"):
+        if st.button(label, use_container_width=True, key=f"menu_{main_menu}_{effective_sub_menu}", type=btn_type):
+            # [FIX] 메뉴 이동 시 열려있는 주소 검색 팝업 닫기 (상태 초기화)
+            for key in ["show_partner_addr_dialog", "show_company_addr_dialog", "show_order_addr_dialog"]:
+                if key in st.session_state:
+                    st.session_state[key] = False
+            
             st.session_state["current_menu"] = main_menu
             st.session_state["current_sub_menu"] = effective_sub_menu
             

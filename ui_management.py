@@ -33,10 +33,10 @@ def render_shipping_operations(db, sub_menu):
 
             col_map = {
                 "product_code": "제품코드", "order_no": "발주번호", "date": "접수일", 
-                "customer": "발주처", "name": "제품명", "weight": "중량(g)", "stock": "수량",
+                "customer": "발주처", "name": "제품명", "color": "색상", "weight": "중량(g)", "size": "사이즈", "stock": "수량",
                 "delivery_to": "납품처", "delivery_contact": "연락처", "delivery_address": "주소", "note": "비고"
             }
-            display_cols = ["product_code", "order_no", "date", "customer", "name", "weight", "stock", "delivery_to", "delivery_contact", "delivery_address", "note"]
+            display_cols = ["product_code", "order_no", "date", "customer", "name", "color", "weight", "size", "stock", "delivery_to", "delivery_contact", "delivery_address", "note"]
             final_cols = [c for c in display_cols if c in df.columns]
             
             st.write("🔽 출고할 항목을 선택(체크)하세요. (다중 선택 가능)")
@@ -244,37 +244,94 @@ def render_shipping_status(db, sub_menu):
             if 'shipping_date' in df.columns:
                 df['shipping_date'] = df['shipping_date'].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isnull(x) and hasattr(x, 'strftime') else x)
 
-            # [NEW] 운임비 숫자형 변환 (안전장치)
-            if 'shipping_cost' in df.columns:
-                df['shipping_cost'] = pd.to_numeric(df['shipping_cost'], errors='coerce').fillna(0).astype(int)
+            # [FIX] 그룹화 및 계산에 필요한 컬럼 존재 여부 확인 및 초기화
+            ensure_cols = ['stock', 'shipping_unit_price', 'shipping_cost', 'shipping_method', 'shipping_carrier', 'delivery_to', 'customer', 'name', 'order_no', 'color', 'weight', 'size']
+            for c in ensure_cols:
+                if c not in df.columns:
+                    if c in ['stock', 'shipping_unit_price', 'shipping_cost', 'weight']:
+                        df[c] = 0
+                    else:
+                        df[c] = ""
+                elif c in ['stock', 'shipping_unit_price', 'shipping_cost', 'weight']:
+                    df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0).astype(int)
+                else:
+                    df[c] = df[c].fillna("")
 
             # [NEW] 공급가액 계산 (단가 * 수량)
             df['supply_amount'] = df.apply(lambda x: int(x.get('stock', 0)) * int(x.get('shipping_unit_price', 0)), axis=1)
 
+            # [NEW] 원본 발주번호(Base Order No) 추출 (예: 2405001-1 -> 2405001)
+            # 문자열이 아니거나 '-'가 없으면 그대로 사용
+            df['base_order_no'] = df['order_no'].apply(lambda x: str(x).split('-')[0] if isinstance(x, str) else str(x))
+
             col_map = {
-                "shipping_date": "출고일", "customer": "발주처", "name": "제품명",
+                "shipping_date": "출고일", "customer": "발주처", "order_no": "발주번호", "name": "제품명", "color": "색상", "weight": "중량(g)", "size": "사이즈",
                 "stock": "수량", "shipping_method": "배송방법", "shipping_carrier": "배송업체", "shipping_cost": "운임비",
                 "stock": "수량", "shipping_unit_price": "단가", "supply_amount": "공급가액",
                 "shipping_method": "배송방법", "shipping_carrier": "배송업체", "shipping_cost": "운임비",
                 "delivery_to": "납품처", "delivery_contact": "납품연락처", "delivery_address": "납품주소", "note": "비고"
             }
-            display_cols = ["shipping_date", "customer", "name", "stock", "shipping_unit_price", "supply_amount", "shipping_method", "shipping_carrier", "shipping_cost", "delivery_to", "delivery_contact", "delivery_address", "note"]
+            display_cols = ["shipping_date", "customer", "order_no", "name", "color", "weight", "size", "stock", "shipping_unit_price", "supply_amount", "shipping_method", "shipping_carrier", "shipping_cost", "delivery_to", "delivery_contact", "delivery_address", "note"]
             final_cols = [c for c in display_cols if c in df.columns]
+
+            # [NEW] 묶어보기 토글
+            view_grouped = st.checkbox("📦 동일 발주번호(원본)끼리 묶어보기", help="제직/생산 과정에서 나뉜 롤들을 원래 발주번호 기준으로 합쳐서 보여줍니다. (같은 날짜/배송처인 경우만)")
             
-            st.write(f"총 **{len(df)}**건의 출고 내역이 조회되었습니다.")
+            if view_grouped:
+                # 그룹화 기준: 원본발주번호 + 출고일 + 거래처 + 배송정보 + 단가
+                # (단가가 다르면 합치지 않음, 배송방법이 다르면 합치지 않음)
+                group_keys = ['base_order_no', 'shipping_date', 'customer', 'name', 'color', 'weight', 'size', 'shipping_unit_price', 'shipping_method', 'shipping_carrier', 'delivery_to']
+                
+                # 집계 함수 정의
+                agg_funcs = {
+                    'stock': 'sum',
+                    'supply_amount': 'sum',
+                    'shipping_cost': 'sum',
+                    'id': list, # ID들을 리스트로 묶음 (취소 처리용)
+                    'order_no': lambda x: f"{x.iloc[0].split('-')[0]} (외 {len(x)-1}건)" if len(x) > 1 else x.iloc[0], # 표시용 번호
+                    'note': lambda x: ' / '.join(sorted(set([str(s) for s in x if s]))) # 비고 합치기
+                }
+                # 나머지 컬럼들은 첫 번째 값 사용
+                for c in final_cols:
+                    if c not in group_keys and c not in agg_funcs:
+                        agg_funcs[c] = 'first'
+
+                # 그룹화 실행
+                df_display_source = df.groupby(group_keys, as_index=False).agg(agg_funcs)
+                
+                # 컬럼 순서 재정렬 (final_cols 기준)
+                # order_no가 집계되면서 내용이 바뀌었으므로 display용으로 사용
+                df_display = df_display_source[final_cols].rename(columns=col_map)
+                
+                # ID 리스트는 별도 보관 (선택 시 사용)
+                df_display_ids = df_display_source['id'].tolist()
+                
+                st.info(f"💡 묶어보기 모드입니다. 총 **{len(df)}**건의 상세 내역이 **{len(df_display)}**건으로 요약되었습니다.")
+            else:
+                df_display = df[final_cols].rename(columns=col_map)
+                df_display_ids = [[i] for i in df['id'].tolist()] # 1:1 매핑
+                st.write(f"총 **{len(df)}**건의 출고 내역이 조회되었습니다.")
+
             st.write("🔽 목록에서 항목을 선택하여 거래명세서를 발행하거나 취소할 수 있습니다.")
+            
+            # [수정] 동적 키에 view_mode 반영하여 리셋 방지
             selection = st.dataframe(
-                df[final_cols].rename(columns=col_map),
+                df_display,
                 width="stretch",
                 on_select="rerun",
                 selection_mode="multi-row",
-                key=f"ship_done_list_{st.session_state['key_ship_done']}"
+                key=f"ship_done_list_{st.session_state['key_ship_done']}_{view_grouped}"
             )
             
             # [NEW] 선택 항목 합계 표시
             if selection.selection.rows:
                 sel_indices = selection.selection.rows
-                sel_rows = df.iloc[sel_indices]
+                # view_grouped 상태에 따라 참조하는 DF가 다름
+                if view_grouped:
+                    sel_rows = df_display_source.iloc[sel_indices]
+                else:
+                    sel_rows = df.iloc[sel_indices]
+                    
                 sum_qty = sel_rows['stock'].sum()
                 sum_amt = sel_rows['supply_amount'].sum()
                 sum_cost = sel_rows['shipping_cost'].sum()
@@ -319,10 +376,10 @@ def render_shipping_status(db, sub_menu):
                     
                     # [수정] 선택된 항목이 있으면 해당 항목만, 없으면 전체 목록 인쇄
                     if selection.selection.rows:
-                        target_df = df.iloc[selection.selection.rows]
+                        target_df = df_display.iloc[selection.selection.rows] # 화면에 보이는 그대로 인쇄
                         print_title = f"{lp_title} (선택 항목)"
                     else:
-                        target_df = df
+                        target_df = df_display # 화면에 보이는 그대로 인쇄
                         print_title = lp_title
 
                     # 합계 계산
@@ -330,7 +387,7 @@ def render_shipping_status(db, sub_menu):
                     total_amt = target_df['supply_amount'].sum() if 'supply_amount' in target_df.columns else 0
                     total_cost = target_df['shipping_cost'].sum() if 'shipping_cost' in target_df.columns else 0
                     
-                    print_df = target_df[final_cols].rename(columns=col_map)
+                    print_df = target_df # 이미 컬럼명 변경됨
                     
                     # 제외 컬럼 필터링
                     if lp_exclude_cols:
@@ -369,7 +426,11 @@ def render_shipping_status(db, sub_menu):
             with act_tab2:
                 if selection.selection.rows:
                     selected_indices = selection.selection.rows
-                    selected_rows = df.iloc[selected_indices]
+                    
+                    if view_grouped:
+                        selected_rows = df_display_source.iloc[selected_indices]
+                    else:
+                        selected_rows = df.iloc[selected_indices]
                     
                     # 자사 정보 가져오기 (for defaults)
                     comp_doc = db.collection("settings").document("company_info").get()
@@ -381,6 +442,9 @@ def render_shipping_status(db, sub_menu):
                         print_type = pc1.radio("인쇄 종류", ["거래처용", "보관용", "거래처용 + 보관용"], index=2, horizontal=True, key="p_type")
                         p_show_vat = pc2.checkbox("부가세/공급가액 컬럼 표시", value=True, key="p_vat_col")
                         
+                        # [NEW] 동일 품목 합산 옵션
+                        p_merge_rows = pc2.checkbox("동일 품목/단가 합산 발행", value=True, help="체크하면 같은 제품, 같은 단가의 항목을 한 줄로 합쳐서 출력합니다.")
+
                         # 2. 표시 옵션
                         pc3, pc4, pc5, pc6 = st.columns(4)
                         p_hide_price = pc3.checkbox("단가/금액 숨김", value=False, key="p_hide_price")
@@ -624,6 +688,24 @@ def render_shipping_status(db, sub_menu):
                                     'note': row.get('note', '')
                                 })
                             
+                            # [NEW] 동일 품목 합산 로직
+                            if options.get('merge_rows'):
+                                merged_data = {}
+                                for row in data_rows:
+                                    # 키: 제품명 + 규격 + 단가 + 비고 (비고가 다르면 합치지 않음)
+                                    key = (row['name'], row['size'], row['price'], row['note'])
+                                    if key not in merged_data:
+                                        merged_data[key] = row.copy()
+                                    else:
+                                        merged_data[key]['qty'] += row['qty']
+                                        merged_data[key]['supply'] += row['supply']
+                                        merged_data[key]['vat'] += row['vat']
+                                
+                                # 딕셔너리를 다시 리스트로 변환 (날짜순 정렬 유지 노력)
+                                # 여기서는 단순 변환
+                                data_rows = list(merged_data.values())
+
+                            # 전체 합계 재계산 (합산 과정에서 오차 보정 등은 생략, 단순 합계)
                             grand_total_amount = grand_total_supply + grand_total_vat
 
                             # [FIX] 변수 정의 (header_html, sign_html)
@@ -778,7 +860,8 @@ def render_shipping_status(db, sub_menu):
                             'show_sign': p_show_sign,
                             'show_approval': p_show_approval,
                             'approval_names': approval_names,
-                            'show_cust_info': p_show_cust_info
+                            'show_cust_info': p_show_cust_info,
+                            'merge_rows': p_merge_rows # [NEW] 합산 옵션 전달
                         }
 
                         for customer, group in grouped:
@@ -816,12 +899,22 @@ def render_shipping_status(db, sub_menu):
             with act_tab3:
                 if selection.selection.rows:
                     selected_indices = selection.selection.rows
-                    selected_rows = df.iloc[selected_indices]
+                    
+                    # [수정] 취소 대상 ID 목록 확보
+                    target_ids = []
+                    if view_grouped:
+                        # 그룹화된 행의 'id' 컬럼은 리스트 형태임
+                        sel_rows = df_display_source.iloc[selected_indices]
+                        for ids in sel_rows['id']:
+                            target_ids.extend(ids)
+                    else:
+                        sel_rows = df.iloc[selected_indices]
+                        target_ids = sel_rows['id'].tolist()
                     
                     if st.button("선택 항목 출고 취소", type="primary"):
-                        for idx, row in selected_rows.iterrows():
-                            db.collection("orders").document(row['id']).update({"status": "봉제완료"})
-                        st.success(f"{len(selected_rows)}건의 출고가 취소되었습니다.")
+                        for doc_id in target_ids:
+                            db.collection("orders").document(doc_id).update({"status": "봉제완료"})
+                        st.success(f"총 {len(target_ids)}건의 출고가 취소되었습니다.")
                         st.session_state["key_ship_done"] += 1
                         st.rerun()
                 else:
@@ -2104,6 +2197,14 @@ def render_product_master(db, sub_menu):
                 st.rerun()
 
 def render_partners(db, sub_menu):
+    # [FIX] 메뉴 진입/변경 시 팝업 상태 초기화 (자동 팝업 방지)
+    if "last_partner_submenu" not in st.session_state:
+        st.session_state["last_partner_submenu"] = None
+    
+    if st.session_state["last_partner_submenu"] != sub_menu:
+        st.session_state["show_partner_addr_dialog"] = False
+        st.session_state["last_partner_submenu"] = sub_menu
+
     st.header("거래처 관리")
     
     # 기초 코드에서 거래처 구분 가져오기

@@ -547,6 +547,19 @@ def render_partner_order_status(db):
 def render_order_status(db, sub_menu):
     st.header("발주 현황")
 
+    # [NEW] 인쇄 설정 세션 상태 초기화 (최초 1회)
+    print_options_keys = {
+        "os_p_title": "발주 현황 리스트", "os_p_ts": 24, "os_p_bs": 11, "os_p_pad": 6,
+        "os_p_sd": True, "os_p_dp": "Right", "os_p_ds": 12,
+        "os_p_mt": 15, "os_p_mb": 15, "os_p_ml": 15, "os_p_mr": 15,
+        "os_p_nowrap": False
+    }
+    for key, default_value in print_options_keys.items():
+        if key not in st.session_state:
+            st.session_state[key] = default_value
+
+
+
     # [FIX] KeyError 방지를 위해 세션 키가 없으면 초기화
     if "del_orders_key" not in st.session_state:
         st.session_state["del_orders_key"] = 0
@@ -931,150 +944,114 @@ def render_order_status(db, sub_menu):
             # 인쇄 옵션 설정
             with st.expander("인쇄 옵션 설정"):
                 po_c1, po_c2, po_c3, po_c4 = st.columns(4)
-                p_title = po_c1.text_input("제목", value="발주 현황 리스트")
-                p_title_size = po_c2.number_input("제목 크기(px)", value=24, step=1)
-                p_body_size = po_c3.number_input("본문 글자 크기(px)", value=11, step=1)
-                p_padding = po_c4.number_input("셀 여백(px)", value=6, step=1)
+                p_title = po_c1.text_input("제목", key="os_p_title")
+                p_title_size = po_c2.number_input("제목 크기(px)", step=1, key="os_p_ts")
+                p_body_size = po_c3.number_input("본문 글자 크기(px)", step=1, key="os_p_bs")
+                p_padding = po_c4.number_input("셀 여백(px)", step=1, key="os_p_pad")
                 
                 po_c5, po_c6, po_c7 = st.columns(3)
-                p_show_date = po_c5.checkbox("출력일시 표시", value=True)
-                p_date_pos = po_c6.selectbox("일시 위치", ["Right", "Left", "Center"], index=0)
-                p_date_size = po_c7.number_input("일시 글자 크기(px)", value=12, step=1)
+                p_show_date = po_c5.checkbox("출력일시 표시", key="os_p_sd")
+                p_date_pos = po_c6.selectbox("일시 위치", ["Right", "Left", "Center"], key="os_p_dp")
+                p_date_size = po_c7.number_input("일시 글자 크기(px)", step=1, key="os_p_ds")
                 
                 st.caption("페이지 여백 (mm)")
                 po_c8, po_c9, po_c10, po_c11 = st.columns(4)
-                p_m_top = po_c8.number_input("상단", value=15, step=1)
-                p_m_bottom = po_c9.number_input("하단", value=15, step=1)
-                p_m_left = po_c10.number_input("좌측", value=15, step=1)
-                p_m_right = po_c11.number_input("우측", value=15, step=1)
+                p_m_top = po_c8.number_input("상단", step=1, key="os_p_mt")
+                p_m_bottom = po_c9.number_input("하단", step=1, key="os_p_mb")
+                p_m_left = po_c10.number_input("좌측", step=1, key="os_p_ml")
+                p_m_right = po_c11.number_input("우측", step=1, key="os_p_mr")
                 
                 st.divider()
-                st.markdown("###### 컬럼 설정 (순서 변경 및 너비 지정)")
-                st.caption("💡 아래 버튼을 사용하여 컬럼 순서를 변경하세요.")
+                st.markdown("###### 컬럼 설정 (출력 여부, 순서, 너비)")
+                st.caption("💡 출력할 컬럼을 선택하고, 아래에서 순서와 너비를 조정하세요.")
 
-                # [수정] 인쇄 선택용 컬럼명을 한글로 변환
+                # [수정] 1. 출력 여부 및 순서 설정 (st.multiselect + 순서 변경 버튼)
                 final_cols_kr = [col_map.get(c, c) for c in final_cols]
+
+                # 세션에서 현재 선택된 컬럼 목록 가져오기 (순서 유지)
+                if "os_p_selected_cols" not in st.session_state:
+                    st.session_state["os_p_selected_cols"] = final_cols_kr.copy()
+
+                # 현재 데이터에 없는 컬럼은 선택 목록에서 제거
+                st.session_state["os_p_selected_cols"] = [c for c in st.session_state["os_p_selected_cols"] if c in final_cols_kr]
                 
-                # 세션 상태에 설정 데이터프레임 초기화 및 동기화
-                if "print_settings_df" not in st.session_state:
-                    # 초기값 생성 (기본 너비 0 = 자동)
-                    init_data = []
-                    for i, col in enumerate(final_cols_kr):
-                        init_data.append({"출력": True, "컬럼명": col, "너비(px)": 0, "순서": i+1})
-                    st.session_state["print_settings_df"] = pd.DataFrame(init_data)
-                
-                # 현재 컬럼과 동기화 (새로운 컬럼이 생기면 추가)
-                curr_df = st.session_state["print_settings_df"]
-                existing_cols = set(curr_df["컬럼명"].tolist())
-                new_cols = [c for c in final_cols_kr if c not in existing_cols]
-                
+                # 새로 추가된 컬럼은 목록 뒤에 추가
+                new_cols = [c for c in final_cols_kr if c not in st.session_state["os_p_selected_cols"]]
                 if new_cols:
-                    max_order = curr_df["순서"].max() if not curr_df.empty else 0
-                    new_rows = []
-                    for i, col in enumerate(new_cols):
-                        new_rows.append({"출력": True, "컬럼명": col, "너비(px)": 0, "순서": max_order + i + 1})
-                    if new_rows:
-                        curr_df = pd.concat([curr_df, pd.DataFrame(new_rows)], ignore_index=True)
-                        st.session_state["print_settings_df"] = curr_df
-                
-                # 화면 표시를 위해 순서대로 정렬
-                df_editor_view = st.session_state["print_settings_df"].sort_values("순서")
-                
-                # 에디터 갱신을 위한 버전 관리
-                if "print_settings_ver" not in st.session_state:
-                    st.session_state["print_settings_ver"] = 0
+                    st.session_state["os_p_selected_cols"].extend(new_cols)
 
-                # 데이터 에디터 표시
-                edited_df = st.data_editor(
-                    df_editor_view,
-                    column_config={
-                        "출력": st.column_config.CheckboxColumn("출력", width="small"),
-                        "컬럼명": st.column_config.TextColumn("컬럼명", disabled=True),
-                        "너비(px)": st.column_config.NumberColumn("너비(px)", min_value=0, max_value=500, width="small", help="0으로 설정하면 자동 너비가 적용됩니다."),
-                        "순서": st.column_config.NumberColumn("순서", width="small", disabled=True), # [수정] 직접 입력 방지
-                    },
-                    hide_index=True,
-                    width="stretch",
-                    key=f"print_settings_editor_{st.session_state['print_settings_ver']}"
+                # 멀티셀렉트로 출력 여부 결정
+                selected_cols = st.multiselect(
+                    "출력할 컬럼 선택",
+                    options=final_cols_kr,
+                    default=st.session_state["os_p_selected_cols"],
+                    key="os_p_multiselect"
                 )
-                
-                # 변경사항 저장 (리런 시 반영됨)
-                st.session_state["print_settings_df"] = edited_df
+                # 변경사항을 즉시 세션에 반영
+                st.session_state["os_p_selected_cols"] = selected_cols
 
-                # [NEW] 순서 변경 도구 (위/아래 이동 및 초기화)
-                c_move1, c_move2, c_move3, c_move4, c_move5 = st.columns([3, 1.3, 1.3, 2, 1.3])
+                # 순서 변경 도구
+                c_move1, c_move2, c_move3, c_move4 = st.columns([3, 1.3, 1.3, 2.6])
                 
-                current_cols_ordered = df_editor_view["컬럼명"].tolist()
-                
-                # 선택 상태 유지를 위한 index 계산
-                default_ix = 0
-                if "last_target_col" in st.session_state and st.session_state["last_target_col"] in current_cols_ordered:
-                    default_ix = current_cols_ordered.index(st.session_state["last_target_col"])
+                target_col = c_move1.selectbox("이동할 컬럼 선택", selected_cols, label_visibility="collapsed", key="os_sb_col_move")
 
-                with c_move1:
-                    target_col = st.selectbox("이동할 컬럼 선택", current_cols_ordered, index=default_ix, label_visibility="collapsed", key="sb_col_move")
-                
-                with c_move2:
-                    if st.button("⬆️ 위로 한칸", help="위로 이동"):
-                        st.session_state["last_target_col"] = target_col
-                        df = st.session_state["print_settings_df"].sort_values("순서").reset_index(drop=True)
-                        try:
-                            idx = df[df["컬럼명"] == target_col].index[0]
-                            if idx > 0:
-                                df.iloc[idx], df.iloc[idx-1] = df.iloc[idx-1].copy(), df.iloc[idx].copy()
-                                df["순서"] = range(1, len(df) + 1)
-                                st.session_state["print_settings_df"] = df
-                                st.session_state["print_settings_ver"] += 1
-                                st.rerun()
-                        except: pass
+                if c_move2.button("⬆️ 위로", help="위로 이동", key="os_btn_up"):
+                    if target_col and target_col in selected_cols:
+                        idx = selected_cols.index(target_col)
+                        if idx > 0:
+                            selected_cols.pop(idx)
+                            selected_cols.insert(idx - 1, target_col)
+                            st.session_state["os_p_selected_cols"] = selected_cols
+                            st.rerun()
 
-                with c_move3:
-                    if st.button("⬇️ 아래로 한칸", help="아래로 이동"):
-                        st.session_state["last_target_col"] = target_col
-                        df = st.session_state["print_settings_df"].sort_values("순서").reset_index(drop=True)
-                        try:
-                            idx = df[df["컬럼명"] == target_col].index[0]
-                            if idx < len(df) - 1:
-                                df.iloc[idx], df.iloc[idx+1] = df.iloc[idx+1].copy(), df.iloc[idx].copy()
-                                df["순서"] = range(1, len(df) + 1)
-                                st.session_state["print_settings_df"] = df
-                                st.session_state["print_settings_ver"] += 1
-                                st.rerun()
-                        except: pass
+                if c_move3.button("⬇️ 아래로", help="아래로 이동", key="os_btn_down"):
+                    if target_col and target_col in selected_cols:
+                        idx = selected_cols.index(target_col)
+                        if idx < len(selected_cols) - 1:
+                            selected_cols.pop(idx)
+                            selected_cols.insert(idx + 1, target_col)
+                            st.session_state["os_p_selected_cols"] = selected_cols
+                            st.rerun()
                 
-                with c_move5:
-                    if st.button("🔄 초기화", help="순서 초기화"):
-                        if "last_target_col" in st.session_state:
-                            del st.session_state["last_target_col"]
-                        df = st.session_state["print_settings_df"].sort_values("순서").reset_index(drop=True)
-                        
-                        # [수정] 초기화 로직 개선: 기본 컬럼 순서(final_cols_kr)대로 순서값 재할당
-                        df = st.session_state["print_settings_df"]
-                        order_map = {col: i+1 for i, col in enumerate(final_cols_kr)}
-                        df["순서"] = df["컬럼명"].map(order_map).fillna(999)
-                        df = df.sort_values("순서").reset_index(drop=True)
-                        df["순서"] = range(1, len(df) + 1)
-                        
-                        st.session_state["print_settings_df"] = df
-                        st.session_state["print_settings_ver"] += 1
-                        st.rerun()
+                if c_move4.button("🔄 순서 초기화", help="기본 순서로 되돌립니다.", key="os_btn_reset"):
+                    st.session_state["os_p_selected_cols"] = final_cols_kr.copy()
+                    st.rerun()
+
+                # [수정] 2. 너비 설정 (st.data_editor)
+                if "os_p_widths" not in st.session_state:
+                    st.session_state["os_p_widths"] = {}
+
+                width_df_data = []
+                for col in selected_cols:
+                    width = st.session_state["os_p_widths"].get(col, 0)
+                    width_df_data.append({"컬럼명": col, "너비(px)": width})
                 
-                # 인쇄 로직에 사용할 변수 추출
-                # 출력 체크된 것만, 순서대로 정렬
-                print_target = edited_df[edited_df["출력"]].sort_values("순서")
-                # 현재 데이터프레임에 존재하는 컬럼만 선택 (KeyError 방지)
-                p_selected_cols = [c for c in print_target["컬럼명"].tolist() if c in final_cols_kr]
-                # 너비 정보 딕셔너리
-                p_widths = dict(zip(print_target["컬럼명"], print_target["너비(px)"]))
+                if width_df_data:
+                    edited_widths_df = st.data_editor(
+                        pd.DataFrame(width_df_data),
+                        column_config={
+                            "컬럼명": st.column_config.TextColumn("컬럼명", disabled=True),
+                            "너비(px)": st.column_config.NumberColumn("너비(px)", min_value=0, max_value=500, width="small", help="0으로 설정하면 자동 너비가 적용됩니다."),
+                        },
+                        hide_index=True,
+                        width="stretch",
+                        key="os_p_width_editor"
+                    )
+                    # 변경된 너비 저장
+                    for _, row in edited_widths_df.iterrows():
+                        st.session_state["os_p_widths"][row["컬럼명"]] = row["너비(px)"]
                 
-                # 스타일 설정
-                p_nowrap = st.checkbox("텍스트 줄바꿈 방지 (한 줄 표시)", value=False)
+                p_nowrap = st.checkbox("텍스트 줄바꿈 방지 (한 줄 표시)", key="os_p_nowrap")
 
             # 인쇄 버튼 (HTML 생성 후 새 창 열기 방식 흉내)
             if btn_c2.button("🖨️ 바로 인쇄하기"):
                 print_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
                 date_align = p_date_pos.lower()
                 date_display = "block" if p_show_date else "none"
+
+                # [수정] 인쇄 로직에 사용할 변수 추출
+                p_selected_cols = st.session_state.get("os_p_selected_cols", [])
+                p_widths = st.session_state.get("os_p_widths", {})
                 
                 # [수정] 선택된 컬럼만 필터링
                 print_df = df_display[p_selected_cols]

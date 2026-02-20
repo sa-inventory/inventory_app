@@ -264,21 +264,21 @@ with st.sidebar:
                         menu_item("봉제중 목록", "봉제현황")
                         menu_item("봉제 완료 목록", "봉제현황")
 
-        # [수정] 하위 메뉴 권한이 하나라도 있을 때만 상위 메뉴 표시
-        has_shipping_access = check_access("출고현황") or check_access("재고현황")
-        if has_shipping_access:
-            with st.expander("출고/재고", expanded=(cm in ["출고작업", "출고현황", "재고현황"])):
-                if check_access("출고현황"):
-                    with st.expander("출고작업", expanded=(cm == "출고작업")):
-                        menu_item("주문별 출고", "출고작업")
-                        menu_item("제품별 일괄 출고", "출고작업")
-                    with st.expander("출고현황", expanded=(cm == "출고현황")):
-                        menu_item("출고 완료 내역 (조회/명세서)", "출고현황")
-                        menu_item("배송/운임 통계", "출고현황")
-                if check_access("재고현황"):
-                    with st.expander("재고현황", expanded=(cm == "재고현황")):
-                        menu_item("재고 현황 조회", "재고현황")
-                        menu_item("재고 임의 등록", "재고현황")
+        # [수정] 출고관리 메뉴 (출고작업 + 출고현황)
+        if check_access("출고현황"):
+            with st.expander("출고관리", expanded=(cm in ["출고작업", "출고현황"])):
+                with st.expander("출고작업", expanded=(cm == "출고작업")):
+                    menu_item("주문별 출고", "출고작업")
+                    menu_item("제품별 일괄 출고", "출고작업")
+                with st.expander("출고현황", expanded=(cm == "출고현황")):
+                    menu_item("출고 완료 내역 (조회/명세서)", "출고현황")
+                    menu_item("배송/운임 통계", "출고현황")
+
+        # [수정] 재고관리 메뉴 (재고현황 분리)
+        if check_access("재고현황"):
+            with st.expander("재고관리", expanded=(cm == "재고현황")):
+                menu_item("재고 현황 조회", "재고현황")
+                menu_item("재고 임의 등록", "재고현황")
 
         if st.session_state.get("role") == "admin":
             with st.expander("내역조회", expanded=(cm == "내역조회")):

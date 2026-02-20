@@ -959,6 +959,40 @@ def render_inventory_logic(db, allow_shipping=False):
         df['weight'] = pd.to_numeric(df['weight'], errors='coerce').fillna(0).astype(int)
         df['shipping_unit_price'] = pd.to_numeric(df['shipping_unit_price'], errors='coerce').fillna(0).astype(int)
 
+        # [NEW] 다중 조건 검색 기능
+        with st.expander("🔍 상세 검색 (다중 조건)", expanded=True):
+            # 검색 옵션 데이터 준비
+            all_codes = ["전체"] + sorted([str(x) for x in df['product_code'].unique() if x])
+            all_types = ["전체"] + sorted([str(x) for x in df['product_type'].unique() if x])
+            all_names = ["전체"] + sorted([str(x) for x in df['name'].unique() if x])
+            
+            f1, f2, f3, f4 = st.columns([1, 1, 1, 2])
+            s_code = f1.selectbox("제품코드", all_codes, key=f"inv_s_code_{allow_shipping}")
+            s_type = f2.selectbox("제품종류", all_types, key=f"inv_s_type_{allow_shipping}")
+            s_name = f3.selectbox("제품명", all_names, key=f"inv_s_name_{allow_shipping}")
+            s_text = f4.text_input("통합 검색 (비고, 발주처, 발주번호 등)", key=f"inv_s_text_{allow_shipping}")
+            
+            # 필터링 적용
+            if s_code != "전체":
+                df = df[df['product_code'] == s_code]
+            if s_type != "전체":
+                df = df[df['product_type'] == s_type]
+            if s_name != "전체":
+                df = df[df['name'] == s_name]
+            if s_text:
+                # 여러 컬럼에서 문자열 검색
+                mask = df.apply(lambda x: s_text.lower() in str(x.get('note', '')).lower() or 
+                                          s_text.lower() in str(x.get('customer', '')).lower() or
+                                          s_text.lower() in str(x.get('order_no', '')).lower(), axis=1)
+                df = df[mask]
+
+        # [NEW] 기본 정렬 설정: 제품코드(오름차순) -> 제품명(오름차순)
+        sort_cols = []
+        if 'product_code' in df.columns: sort_cols.append('product_code')
+        if 'name' in df.columns: sort_cols.append('name')
+        if sort_cols:
+            df = df.sort_values(by=sort_cols, ascending=[True] * len(sort_cols))
+
         summary = df.groupby('product_code').agg({
             'product_type': 'first',
             'yarn_type': 'first',
@@ -1014,6 +1048,7 @@ def render_inventory_logic(db, allow_shipping=False):
             
             pe_c7, pe_c8 = st.columns(2)
             p_show_date = pe_c7.checkbox("출력일시 표시", value=True, key=f"inv_p_date_{allow_shipping}")
+            p_show_total = pe_c8.checkbox("하단 합계수량 표시", value=True, key=f"inv_p_total_{allow_shipping}")
             
             st.caption("페이지 여백 (mm)")
             pe_m1, pe_m2, pe_m3, pe_m4 = st.columns(4)
@@ -1048,16 +1083,24 @@ def render_inventory_logic(db, allow_shipping=False):
                 'mt': p_m_top, 'mb': p_m_bottom, 'ml': p_m_left, 'mr': p_m_right
             }
             
+            # 합계 텍스트 생성
+            def get_summary_text(count_text, total_qty):
+                if p_show_total:
+                    return f"{count_text} / 총 재고수량: {total_qty:,}"
+                return count_text
+
             if print_mode == "요약 목록":
                 df_print = summary[disp_cols].rename(columns=summary_cols)
-                html = generate_report_html(p_title, df_print, f"총 {len(df_print)}개 품목", options)
+                total_q = summary['stock'].sum()
+                html = generate_report_html(p_title, df_print, get_summary_text(f"총 {len(df_print)}개 품목", total_q), options)
                 st.components.v1.html(html, height=0, width=0)
                 
             elif print_mode == "전체 상세내역 (리스트)":
                 # 제품코드, 제품명 순으로 정렬
                 if "제품코드" in df_detail_final.columns:
                     df_detail_final = df_detail_final.sort_values(by=["제품코드", "제품명"])
-                html = generate_report_html(p_title, df_detail_final, f"총 {len(df_detail_final)}건", options)
+                total_q = df_detail_final['stock'].sum()
+                html = generate_report_html(p_title, df_detail_final, get_summary_text(f"총 {len(df_detail_final)}건", total_q), options)
                 st.components.v1.html(html, height=0, width=0)
                 
             elif print_mode == "제품별 상세내역(그룹)":
@@ -1079,6 +1122,7 @@ def render_inventory_logic(db, allow_shipping=False):
                         th {{ background-color: #f0f0f0; }}
                         .group-header {{ background-color: #e6f3ff; font-weight: bold; text-align: left; padding: 8px; border: 1px solid #444; margin-top: 10px; }}
                         .no-data {{ text-align: center; padding: 10px; color: #888; }}
+                        .grand-total {{ text-align: right; font-weight: bold; font-size: {p_font_size + 2}px; margin-top: 20px; border-top: 2px solid #333; padding-top: 10px; }}
                         @media screen {{ body {{ display: none; }} }}
                     </style>
                 </head>
@@ -1087,6 +1131,7 @@ def render_inventory_logic(db, allow_shipping=False):
                     <div class="info">출력일시: {print_now}</div>
                 """
                 
+                grand_total_stock = 0
                 # 요약 목록 순서대로 반복
                 for _, row in summary.iterrows():
                     p_code = row['product_code']
@@ -1096,6 +1141,7 @@ def render_inventory_logic(db, allow_shipping=False):
                     
                     # 해당 제품의 상세 내역 필터링
                     sub_df = df_detail_final[df_detail_final['제품코드'] == p_code]
+                    grand_total_stock += p_stock
                     
                     # 그룹 헤더
                     html_content += f"""
@@ -1111,6 +1157,9 @@ def render_inventory_logic(db, allow_shipping=False):
                     else:
                         html_content += "<div class='no-data'>상세 내역 없음</div>"
                         
+                if p_show_total:
+                    html_content += f"<div class='grand-total'>총 재고수량 합계: {grand_total_stock:,}</div>"
+
                 html_content += "</body></html>"
                 st.components.v1.html(html_content, height=0, width=0)
         
@@ -1119,16 +1168,27 @@ def render_inventory_logic(db, allow_shipping=False):
         # [NEW] 선택된 행을 저장할 변수 (출고용)
         selected_rows_for_shipping = None
 
+        # 관리자 권한 확인 (삭제 기능용)
+        is_admin = st.session_state.get("role") == "admin"
+
         if view_mode == "제품별 요약 (제품코드)":
             st.write("🔽 상세 내역을 확인할 제품을 선택하세요.")
+            
+            # [수정] 동적 높이 계산 (행당 약 35px, 최대 20행 700px)
+            summary_height = min((len(summary) + 1) * 35 + 3, 700)
+            
             selection_summary = st.dataframe(
                 summary[disp_cols].rename(columns=summary_cols),
                 width="stretch",
                 hide_index=True,
                 on_select="rerun",
                 selection_mode="single-row",
+                height=summary_height,
                 key=f"inv_summary_list_{allow_shipping}"
             )
+            
+            # [NEW] 제품별 요약 목록 합계 표시
+            st.markdown(f"<div style='text-align:right; font-weight:bold; padding:5px; color:#333;'>총 재고수량 합계: {summary['stock'].sum():,}</div>", unsafe_allow_html=True)
 
             if selection_summary.selection.rows:
                 idx = selection_summary.selection.rows[0]
@@ -1155,20 +1215,70 @@ def render_inventory_logic(db, allow_shipping=False):
                 for c in detail_cols_view:
                     if c not in detail_df.columns: detail_df[c] = ""
                 
+                # [수정] 안내 문구 및 선택 모드 설정
                 if allow_shipping:
-                    st.write("🔽 출고할 항목을 선택(체크)하세요. (다중 선택 가능)")
+                    st.info("🔽 출고할 항목을 선택(체크)하면 하단에 출고 입력 폼이 나타납니다.")
+                    sel_mode = "multi-row"
+                elif is_admin:
+                    st.write("🔽 삭제할 항목을 선택(체크)하세요. (관리자 기능)")
+                    sel_mode = "multi-row"
+                else:
+                    sel_mode = "single-row"
+                
+                # [수정] 동적 높이 계산
+                detail_height = min((len(detail_df) + 1) * 35 + 3, 600)
                 
                 selection_detail = st.dataframe(
                     detail_df[detail_cols_view].rename(columns=detail_map_view),
                     width="stretch",
                     hide_index=True,
                     on_select="rerun",
-                    selection_mode="multi-row" if allow_shipping else "single-row",
+                    selection_mode=sel_mode,
+                    height=detail_height,
                     key=f"inv_detail_list_{sel_p_code}_{allow_shipping}"
                 )
                 
+                # [NEW] 화면 하단 합계 표시
+                st.markdown(f"<div style='text-align:right; font-weight:bold; padding:5px; color:#333;'>합계 수량: {detail_df['stock'].sum():,}</div>", unsafe_allow_html=True)
+
                 if allow_shipping and selection_detail.selection.rows:
                     selected_rows_for_shipping = detail_df.iloc[selection_detail.selection.rows]
+                
+                # [NEW] 관리자 삭제 기능 (제품별 상세 내역)
+                if is_admin and not allow_shipping and selection_detail.selection.rows:
+                    del_rows = detail_df.iloc[selection_detail.selection.rows]
+                    st.markdown(f"#### 🗑️ 선택 항목 삭제 ({len(del_rows)}건)")
+                    
+                    if st.button("선택 항목 삭제", type="primary", key=f"btn_del_inv_sub_{sel_p_code}"):
+                        st.session_state[f"confirm_del_{sel_p_code}"] = True
+                    
+                    if st.session_state.get(f"confirm_del_{sel_p_code}"):
+                        st.warning("⚠️ 정말로 삭제하시겠습니까? (복구할 수 없습니다)")
+                        if st.button("✅ 예, 삭제합니다", key=f"btn_yes_del_{sel_p_code}"):
+                            for idx, row in del_rows.iterrows():
+                                db.collection("orders").document(row['id']).delete()
+                            st.success("삭제되었습니다.")
+                            st.session_state[f"confirm_del_{sel_p_code}"] = False
+                            st.rerun()
+                        if st.button("❌ 취소", key=f"btn_no_del_{sel_p_code}"):
+                            st.session_state[f"confirm_del_{sel_p_code}"] = False
+                            st.rerun()
+                
+                # [NEW] 제품 전체 삭제 기능 (관리자 전용)
+                if is_admin and not allow_shipping:
+                    st.divider()
+                    if st.button(f"🗑️ '{sel_p_code}' 제품 재고 전체 삭제", type="secondary", key=f"btn_del_all_{sel_p_code}"):
+                        st.session_state[f"confirm_del_all_{sel_p_code}"] = True
+                    
+                    if st.session_state.get(f"confirm_del_all_{sel_p_code}"):
+                        st.warning(f"⚠️ 경고: '{sel_p_code}' 제품의 모든 재고({len(detail_df)}건)가 삭제됩니다. 이 작업은 되돌릴 수 없습니다.")
+                        if st.button("✅ 예, 모두 삭제합니다", key=f"btn_yes_del_all_{sel_p_code}"):
+                            for idx, row in detail_df.iterrows():
+                                db.collection("orders").document(row['id']).delete()
+                            st.success("모든 재고가 삭제되었습니다.")
+                            st.session_state[f"confirm_del_all_{sel_p_code}"] = False
+                            st.rerun()
+
         
         else: # 전체 상세 내역 (리스트)
             st.write("🔽 전체 재고 내역입니다.")
@@ -1192,13 +1302,55 @@ def render_inventory_logic(db, allow_shipping=False):
             for c in full_cols:
                 if c not in full_df.columns: full_df[c] = ""
 
-            # [수정] 체크박스(선택 기능) 제거
-            st.dataframe(
+            # [수정] 선택 모드 설정 (관리자 삭제 또는 출고 작업 시 다중 선택)
+            if allow_shipping:
+                st.info("🔽 출고할 항목을 선택(체크)하면 하단에 출고 입력 폼이 나타납니다.")
+                sel_mode = "multi-row"
+            elif is_admin:
+                st.write("🔽 삭제할 항목을 선택(체크)하세요. (관리자 기능)")
+                sel_mode = "multi-row"
+            else:
+                sel_mode = "single-row" # 일반 조회 시 선택 불필요하지만 UI 통일성 유지
+
+            # [수정] 동적 높이 계산
+            full_height = min((len(full_df) + 1) * 35 + 3, 700)
+
+            selection_full = st.dataframe(
                 full_df[full_cols].rename(columns=full_map),
                 width="stretch",
                 hide_index=True,
+                on_select="rerun",
+                selection_mode=sel_mode,
+                height=full_height,
                 key=f"inv_full_list_{allow_shipping}"
             )
+            
+            # [NEW] 화면 하단 합계 표시
+            st.markdown(f"<div style='text-align:right; font-weight:bold; padding:5px; color:#333;'>합계 수량: {full_df['stock'].sum():,}</div>", unsafe_allow_html=True)
+
+            if allow_shipping and selection_full.selection.rows:
+                selected_rows_for_shipping = full_df.iloc[selection_full.selection.rows]
+
+            # [NEW] 관리자 삭제 기능 (전체 리스트)
+            if is_admin and not allow_shipping and selection_full.selection.rows:
+                del_rows = full_df.iloc[selection_full.selection.rows]
+                st.markdown(f"#### 🗑️ 재고 삭제 (선택: {len(del_rows)}건)")
+                
+                if st.button("선택 항목 삭제", type="primary", key="btn_del_inv_full"):
+                    st.session_state["confirm_del_full"] = True
+                
+                if st.session_state.get("confirm_del_full"):
+                    st.warning("⚠️ 정말로 삭제하시겠습니까? (복구할 수 없습니다)")
+                    c_conf1, c_conf2 = st.columns(2)
+                    if c_conf1.button("✅ 예, 삭제합니다", key="btn_yes_del_full"):
+                        for idx, row in del_rows.iterrows():
+                            db.collection("orders").document(row['id']).delete()
+                        st.success("삭제되었습니다.")
+                        st.session_state["confirm_del_full"] = False
+                        st.rerun()
+                    if c_conf2.button("❌ 취소", key="btn_no_del_full"):
+                        st.session_state["confirm_del_full"] = False
+                        st.rerun()
 
         # [MOVED] 출고 처리 로직 (공통)
         if allow_shipping and selected_rows_for_shipping is not None and not selected_rows_for_shipping.empty:
@@ -1282,6 +1434,8 @@ def render_inventory_logic(db, allow_shipping=False):
                         db.collection("orders").document(row['id']).update(update_data)
                     st.success(f"{len(sel_rows)}건 출고 처리 완료!")
                 st.rerun()
+        elif allow_shipping:
+            st.info("👆 목록에서 출고할 항목을 선택해주세요.")
         
     else:
         st.info("현재 보유 중인 완제품 재고가 없습니다. (모두 출고되었거나 생산 중입니다.)")

@@ -7,6 +7,7 @@ import json
 import pandas as pd
 import io
 import uuid
+import streamlit.components.v1 as components
 # [NEW] 분리한 utils 파일에서 공통 함수 임포트
 from utils import get_db, firestore
 from ui_orders import render_order_entry, render_order_status, render_partner_order_status
@@ -77,6 +78,31 @@ if not st.session_state["logged_in"]:
 # 로그인 화면 처리
 if not st.session_state["logged_in"]:
     st.markdown("<h1 style='text-align: center;'>🔒 세안타올 생산 관리</h1>", unsafe_allow_html=True)
+    
+    # [NEW] 아이디 입력 후 엔터 시 비밀번호 필드로 포커스 이동 (JS 주입)
+    components.html("""
+    <script>
+        const doc = window.parent.document;
+        const observer = new MutationObserver(() => {
+            const idInputs = doc.querySelectorAll('input[aria-label="아이디"]');
+            const pwInputs = doc.querySelectorAll('input[aria-label="비밀번호"]');
+            
+            idInputs.forEach((idInput, idx) => {
+                if (pwInputs[idx] && !idInput.dataset.hasEnterListener) {
+                    idInput.dataset.hasEnterListener = "true";
+                    idInput.addEventListener('keydown', (e) => {
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            pwInputs[idx].focus();
+                        }
+                    });
+                }
+            });
+        });
+        observer.observe(doc.body, { childList: true, subtree: true });
+    </script>
+    """, height=0, width=0)
     
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
@@ -289,9 +315,7 @@ with st.sidebar:
         # [수정] 출고관리 메뉴 (출고작업 + 출고현황)
         if check_access("출고현황"):
             with st.expander("출고관리", expanded=(cm in ["출고작업", "출고현황"])):
-                with st.expander("출고작업", expanded=(cm == "출고작업")):
-                    menu_item("주문별 출고", "출고작업")
-                    menu_item("제품별 일괄 출고", "출고작업")
+                menu_item("출고작업", "출고작업")
                 with st.expander("출고현황", expanded=(cm == "출고현황")):
                     menu_item("출고 완료 내역 (조회/명세서)", "출고현황")
                     menu_item("배송/운임 통계", "출고현황")
@@ -334,6 +358,7 @@ with st.sidebar:
                         menu_item("거래처 목록", "거래처관리")
                         menu_item("거래처 등록", "거래처관리")
                         menu_item("거래처 구분 관리", "거래처관리")
+                        menu_item("배송방법 관리", "거래처관리")
                 if check_access("제직기관리"):
                     with st.expander("제직기관리", expanded=(cm == "제직기관리")):
                         menu_item("제직기 목록", "제직기관리")

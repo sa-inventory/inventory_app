@@ -3,8 +3,15 @@ import pandas as pd
 import datetime
 import base64
 import calendar
+import streamlit.components.v1 as components
 import uuid
 from firebase_admin import firestore
+
+# [FIX] holidays 라이브러리를 선택적으로 임포트하여 Pylance 경고 해결
+try:
+    import holidays # type: ignore
+except ImportError:
+    holidays = None
 
 def render_notice_board(db):
     st.title("공지사항")
@@ -339,6 +346,29 @@ def render_notice_board(db):
                         st.warning("제목과 내용을 입력하세요.")
         
         else: # Detail View (선택된 글이 있을 때)
+            # [NEW] 상세 보기 시 자동 스크롤을 위한 앵커 및 스크립트
+            st.markdown('<div id="notice-detail-section"></div>', unsafe_allow_html=True)
+            # [FIX] 매번 다른 내용의 스크립트를 주입하여 재선택 시에도 스크롤이 동작하도록 수정
+            js_uuid = uuid.uuid4()
+            components.html(
+                f"""
+                <script>
+                    setTimeout(function() {{
+                        // Force re-run with unique ID: {js_uuid}
+                        function attemptScroll(count) {{
+                            const anchor = window.parent.document.getElementById('notice-detail-section');
+                            if (anchor) {{
+                                anchor.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+                            }} else if (count > 0) {{
+                                setTimeout(() => attemptScroll(count - 1), 100);
+                            }}
+                        }}
+                        attemptScroll(10);
+                    }}, 200);
+                </script>
+                """, height=0
+            )
+
             c_back1, c_back2 = st.columns([6, 1])
             with c_back2:
                 if st.button("닫기", use_container_width=True, help="상세 내용을 닫습니다."):
@@ -525,29 +555,30 @@ def render_schedule(db):
             
             # 본인 또는 관리자만 수정 가능
             if sch_to_edit.get('author') == current_user_name or current_role == 'admin':
-                with st.dialog("일정 수정"):
+                @st.dialog("일정 수정")
+                def edit_schedule_dialog(sch_data, doc_id):
                     with st.form("edit_schedule_form"):
-                        st.write(f"**{sch_to_edit.get('date')}** 일정 수정")
+                        st.write(f"**{sch_data.get('date')}** 일정 수정")
                         
                         # 기존 값 로드
-                        is_all_day = sch_to_edit.get('is_all_day', True)
+                        is_all_day = sch_data.get('is_all_day', True)
                         time_opt_index = 0 if is_all_day else 1
                         
-                        new_time_opt = st.radio("시간 설정", ["하루 종일", "시간 지정"], index=time_opt_index, horizontal=True, key=f"edit_time_opt_{edit_id}")
+                        new_time_opt = st.radio("시간 설정", ["하루 종일", "시간 지정"], index=time_opt_index, horizontal=True, key=f"edit_time_opt_{doc_id}")
                         
                         new_time = None
                         if new_time_opt == "시간 지정":
                             try:
-                                default_time = datetime.datetime.strptime(sch_to_edit.get('time', '09:00'), "%H:%M").time()
+                                default_time = datetime.datetime.strptime(sch_data.get('time', '09:00'), "%H:%M").time()
                             except:
                                 default_time = datetime.time(9, 0)
-                            new_time = st.time_input("시간", value=default_time, key=f"edit_time_{edit_id}")
+                            new_time = st.time_input("시간", value=default_time, key=f"edit_time_{doc_id}")
 
-                        new_content = st.text_input("내용", value=sch_to_edit.get('content', ''))
+                        new_content = st.text_input("내용", value=sch_data.get('content', ''))
                         
                         type_opts = ["일반", "긴급"]
-                        type_idx = type_opts.index(sch_to_edit.get('type', '일반')) if sch_to_edit.get('type', '일반') in type_opts else 0
-                        new_type = st.selectbox("구분", type_opts, index=type_idx, key=f"edit_type_{edit_id}")
+                        type_idx = type_opts.index(sch_data.get('type', '일반')) if sch_data.get('type', '일반') in type_opts else 0
+                        new_type = st.selectbox("구분", type_opts, index=type_idx, key=f"edit_type_{doc_id}")
                         
                         c1, c2 = st.columns(2)
                         if c1.form_submit_button("수정 저장", type="primary"):
@@ -557,7 +588,7 @@ def render_schedule(db):
                             else:
                                 updates["time"] = firestore.DELETE_FIELD
                             
-                            doc_ref.update(updates)
+                            db.collection("schedules").document(doc_id).update(updates)
                             st.success("일정이 수정되었습니다.")
                             st.query_params.clear()
                             st.rerun()
@@ -565,18 +596,24 @@ def render_schedule(db):
                         if c2.form_submit_button("닫기"):
                             st.query_params.clear()
                             st.rerun()
+                
+                edit_schedule_dialog(sch_to_edit, edit_id)
             else:
-                with st.dialog("권한 없음"):
+                @st.dialog("권한 없음")
+                def no_permission_dialog():
                     st.warning("이 일정을 수정할 권한이 없습니다.")
                     if st.button("닫기"):
                         st.query_params.clear()
                         st.rerun()
+                no_permission_dialog()
         else:
-            with st.dialog("오류"):
+            @st.dialog("오류")
+            def error_dialog():
                 st.warning("수정할 일정을 찾을 수 없습니다. 삭제되었을 수 있습니다.")
                 if st.button("닫기"):
                     st.query_params.clear()
                     st.rerun()
+            error_dialog()
 
     # 1. 달력 컨트롤 (년/월 선택)
     today = datetime.date.today()
@@ -678,18 +715,9 @@ def render_schedule(db):
             with c2:
                 # [NEW] 공휴일 자동 등록 버튼
                 if st.button(f"📅 {sel_year_for_list}년 공휴일 자동 등록 (Korea)", use_container_width=True, help="대한민국 공휴일을 자동으로 가져와 등록합니다."):
-                    try:
-                        import holidays
-                    except ImportError:
-                        import subprocess
-                        import sys
-                        st.warning("라이브러리(holidays)가 없어 자동 설치를 시도합니다...")
-                        try:
-                            subprocess.check_call([sys.executable, "-m", "pip", "install", "holidays"])
-                            import holidays
-                        except Exception:
-                            st.error("❌ 'holidays' 라이브러리 설치에 실패했습니다. 터미널에서 `pip install holidays`를 실행해주세요.")
-                            st.stop()
+                    if holidays is None:
+                        st.error("❌ 'holidays' 라이브러리가 설치되지 않았습니다. 서버 관리자에게 설치를 요청하거나, 터미널에서 `pip install holidays`를 실행해주세요.")
+                        st.stop()
 
                     try:
                         kr_holidays = holidays.KR(years=sel_year_for_list)
@@ -722,7 +750,7 @@ def render_schedule(db):
                             st.info("추가할 공휴일이 없습니다 (이미 등록됨).")
                             
                     except Exception as e:
-                        st.error(f"오류 발생: {e}")
+                        st.error(f"공휴일 정보를 가져오는 중 오류가 발생했습니다: {e}")
 
                 # [NEW] 그룹화 로직
                 holiday_groups = {}
@@ -737,7 +765,7 @@ def render_schedule(db):
                             holiday_groups[gid]['name'] = h_data.get('name')
                     
                 # [수정] 목록을 접었다 펼칠 수 있도록 expander 적용
-                with st.expander(f"📋 {sel_year_for_list}년 등록된 특정일 목록", expanded=True):
+                with st.expander(f"📋 {sel_year_for_list}년 등록된 특정일 목록", expanded=False):
                     if holiday_groups:
                         # 그룹별 표시
                         # 날짜순 정렬을 위해 각 그룹의 첫 번째 날짜 기준 정렬
@@ -1002,22 +1030,84 @@ def render_schedule(db):
     
     st.divider()
     
-    # 4. 일정 관리 (추가/삭제) - [수정] 레이아웃 변경
-    st.subheader(f"{sel_month}월 일정 목록")
+    # 4. 일정 목록 및 관리
+    
+    # [NEW] 목록 조회 기간 설정
+    with st.expander("📋 일정 목록 조회 설정", expanded=False):
+        # [수정] 레이아웃 변경: 라디오버튼 옆에 입력필드 배치
+        c_opt, c_range = st.columns([1.5, 3.5])
+        list_mode = c_opt.radio("조회 기준", ["달력과 동일 (위)", "별도 기간 선택"], horizontal=True, key="sch_list_mode")
+        
+        # 기본값 (달력 기준)
+        l_start = datetime.date(sel_year, sel_month, 1)
+        l_last = calendar.monthrange(sel_year, sel_month)[1]
+        l_end = datetime.date(sel_year, sel_month, l_last)
+        
+        if list_mode == "별도 기간 선택":
+            with c_range:
+                # [수정] 입력필드 작게, ~ 표시 추가
+                rc1, rc2, rc3, rc4, rc5 = st.columns([1, 0.8, 0.2, 1, 0.8])
+                s_year = rc1.number_input("시작 년도", value=sel_year, step=1, key="sch_s_year", label_visibility="collapsed")
+                s_month = rc2.selectbox("시작 월", range(1, 13), index=sel_month-1, key="sch_s_month", label_visibility="collapsed")
+                rc3.markdown("<div style='text-align: center; padding-top: 5px; font-weight:bold;'>~</div>", unsafe_allow_html=True)
+                e_year = rc4.number_input("종료 년도", value=sel_year, step=1, key="sch_e_year", label_visibility="collapsed")
+                e_month = rc5.selectbox("종료 월", range(1, 13), index=sel_month-1, key="sch_e_month", label_visibility="collapsed")
+            
+            l_start = datetime.date(s_year, s_month, 1)
+            l_last_day = calendar.monthrange(e_year, e_month)[1]
+            l_end = datetime.date(e_year, e_month, l_last_day)
+            
+            if l_start > l_end:
+                st.error("시작일이 종료일보다 늦을 수 없습니다.")
+                l_end = l_start
+
+    if list_mode == "별도 기간 선택":
+        st.subheader(f"{l_start.strftime('%Y.%m')} ~ {l_end.strftime('%Y.%m')} 일정 목록")
+    else:
+        st.subheader(f"{sel_month}월 일정 목록")
     
     final_schedules = []
 
+    # 목록용 데이터 준비
+    l_holiday_map = {}
+    l_raw_schedules = []
+
+    if list_mode == "별도 기간 선택":
+        # 별도 기간 데이터 조회
+        l_s_str = l_start.strftime("%Y-%m-%d")
+        l_e_str = l_end.strftime("%Y-%m-%d")
+        
+        # 휴일 조회
+        l_h_docs = db.collection("holidays").where("date", ">=", l_s_str).where("date", "<=", l_e_str).stream()
+        l_holiday_map = {doc.id: doc.to_dict() for doc in l_h_docs}
+        
+        # 일정 조회
+        l_s_docs = db.collection("schedules").where("date", ">=", l_s_str).where("date", "<=", l_e_str).stream()
+        for doc in l_s_docs:
+            d = doc.to_dict()
+            d['id'] = doc.id
+            if show_my_only and d.get('author') != current_user_name: continue
+            l_raw_schedules.append(d)
+    else:
+        # 달력 데이터 재사용
+        l_holiday_map = holiday_map
+        for day_list in schedule_map.values():
+            l_raw_schedules.extend(day_list)
+
     # 1. 특정일(휴일) 데이터 처리 (미리 병합)
     holiday_groups_map = {}
-    for h_date_str, h_data in holiday_map.items():
-        h_year, h_month, _ = map(int, h_date_str.split('-'))
-        if h_year == sel_year and h_month == sel_month:
-            gid = h_data.get('group_id', f"single_h_{h_date_str}")
-            if gid not in holiday_groups_map:
-                holiday_groups_map[gid] = {'dates': [], 'name': '', 'color': h_data.get('color', '#d93025')}
-            holiday_groups_map[gid]['dates'].append(h_date_str)
-            if h_data.get('name'):
-                holiday_groups_map[gid]['name'] = h_data.get('name')
+    for h_date_str, h_data in l_holiday_map.items():
+        try:
+            h_date = datetime.datetime.strptime(h_date_str, "%Y-%m-%d").date()
+            if l_start <= h_date <= l_end:
+                gid = h_data.get('group_id', f"single_h_{h_date_str}")
+                if gid not in holiday_groups_map:
+                    holiday_groups_map[gid] = {'dates': [], 'name': '', 'color': h_data.get('color', '#d93025')}
+                holiday_groups_map[gid]['dates'].append(h_date_str)
+                if h_data.get('name'):
+                    holiday_groups_map[gid]['name'] = h_data.get('name')
+        except:
+            pass
     
     for gid, info in holiday_groups_map.items():
         dates = sorted(info['dates'])
@@ -1032,16 +1122,15 @@ def render_schedule(db):
         final_schedules.append(holiday_sch)
     
     # 2. 일반 일정 데이터 처리 (병합 로직 적용)
-    raw_schedules = [sch for day in sorted(schedule_map.keys()) for sch in schedule_map[day]]
-    raw_schedules.sort(key=lambda x: (x.get('date', ''), x.get('time', '00:00')))
+    l_raw_schedules.sort(key=lambda x: (x.get('date', ''), x.get('time', '00:00')))
     
     merged_normal_schedules = []
-    if raw_schedules:
-        curr = raw_schedules[0].copy()
+    if l_raw_schedules:
+        curr = l_raw_schedules[0].copy()
         curr['end_date'] = curr['date']
         curr['merged_ids'] = [curr['id']]
         
-        for next_sch in raw_schedules[1:]:
+        for next_sch in l_raw_schedules[1:]:
             is_same_meta = (curr['content'] == next_sch['content'] and curr.get('author') == next_sch.get('author') and curr.get('type') == next_sch.get('type') and curr.get('time') == next_sch.get('time'))
             curr_gid, next_gid = curr.get('group_id'), next_sch.get('group_id')
             is_same_group = (curr_gid is not None) and (curr_gid == next_gid)
@@ -1068,7 +1157,8 @@ def render_schedule(db):
     
     if final_schedules:
         for sch in final_schedules:
-            col1, col2 = st.columns([5, 1])
+            # [수정] 버튼 간격을 좁히기 위해 컬럼 비율 조정
+            col1, col2 = st.columns([7, 1.2])
             date_str = f"{sch['date']} ~ {sch['end_date']}" if sch['date'] != sch['end_date'] else sch['date']
             time_display = "하루일정" if sch.get('is_all_day', True) else sch.get('time', '')
             author_str, content_str, custom_color = sch.get('author', 'Unknown'), sch['content'], sch.get('color', None)
@@ -1083,17 +1173,23 @@ def render_schedule(db):
             if not sch.get('is_holiday') and (current_user_name == author_str or current_role == 'admin'):
                 del_key = f"confirm_del_{sch['id']}"
                 if st.session_state.get(del_key):
-                    if col2.button("✅", key=f"yes_{sch['id']}", help="삭제 확인"):
+                    dc1, dc2 = col2.columns(2)
+                    if dc1.button("✅", key=f"yes_{sch['id']}", help="삭제 확인"):
                         batch = db.batch()
                         for mid in sch['merged_ids']: batch.delete(db.collection("schedules").document(mid))
                         batch.commit()
                         del st.session_state[del_key]
                         st.rerun()
-                    if col2.button("❌", key=f"no_{sch['id']}", help="취소"):
+                    if dc2.button("❌", key=f"no_{sch['id']}", help="취소"):
                         del st.session_state[del_key]
                         st.rerun()
                 else:
-                    if col2.button("삭제", key=f"del_sch_cal_{sch['id']}"):
+                    # [수정] 버튼 간격 최소화
+                    ec1, ec2 = col2.columns(2, gap="small")
+                    if ec1.button("수정", key=f"edit_sch_{sch['id']}"):
+                        st.query_params["edit_schedule_id"] = sch['id']
+                        st.rerun()
+                    if ec2.button("삭제", key=f"del_sch_cal_{sch['id']}"):
                         st.session_state[del_key] = True
                         st.rerun()
     else:

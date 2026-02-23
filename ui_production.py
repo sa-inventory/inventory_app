@@ -70,16 +70,64 @@ def render_weaving(db, sub_menu=None, readonly=False):
         if "key_weaving_wait" not in st.session_state:
             st.session_state["key_weaving_wait"] = 0
             
+        # [NEW] 검색 UI 추가
+        with st.expander("🔍 검색 및 필터", expanded=True):
+            c_f1, c_f2, c_f3 = st.columns([1.2, 1, 2])
+            today = datetime.date.today()
+            # 기간 검색 (접수일 기준) - 기본 3개월
+            s_date_range = c_f1.date_input("접수일 기간", [today - datetime.timedelta(days=90), today], key="weav_wait_date_range")
+            
+            search_criteria = c_f2.selectbox("검색 기준", ["전체", "발주처", "제품명", "제품종류"], key="weav_wait_criteria")
+            search_keyword = c_f3.text_input("검색어 입력", key="weav_wait_keyword")
+
         # '제직대기' 상태인 건만 가져오기 (발주현황에서 '제직대기'로 변경된 건)
         docs = db.collection("orders").where("status", "==", "제직대기").stream()
         rows = []
+        
+        # 날짜 필터링 준비
+        start_dt, end_dt = None, None
+        if len(s_date_range) == 2:
+            start_dt = datetime.datetime.combine(s_date_range[0], datetime.time.min)
+            end_dt = datetime.datetime.combine(s_date_range[1], datetime.time.max)
+        elif len(s_date_range) == 1:
+            start_dt = datetime.datetime.combine(s_date_range[0], datetime.time.min)
+            end_dt = datetime.datetime.combine(s_date_range[0], datetime.time.max)
+
         for doc in docs:
             d = doc.to_dict()
             d['id'] = doc.id
+            
+            # 1. 날짜 필터 (접수일 기준)
+            if start_dt and end_dt:
+                d_date = d.get('date')
+                if d_date:
+                    if d_date.tzinfo: d_date = d_date.replace(tzinfo=None)
+                    if not (start_dt <= d_date <= end_dt): continue
+                else:
+                    continue
+            
             rows.append(d)
         
         if rows:
             df = pd.DataFrame(rows)
+            
+            # 2. 키워드 검색 필터
+            if search_keyword:
+                search_keyword = search_keyword.lower()
+                if search_criteria == "전체":
+                     mask = df.apply(lambda x: search_keyword in str(x.get('customer', '')).lower() or
+                                              search_keyword in str(x.get('name', '')).lower() or
+                                              search_keyword in str(x.get('product_type', '')).lower() or
+                                              search_keyword in str(x.get('order_no', '')).lower() or
+                                              search_keyword in str(x.get('note', '')).lower(), axis=1)
+                     df = df[mask]
+                elif search_criteria == "발주처":
+                    df = df[df['customer'].astype(str).str.lower().str.contains(search_keyword, na=False)]
+                elif search_criteria == "제품명":
+                    df = df[df['name'].astype(str).str.lower().str.contains(search_keyword, na=False)]
+                elif search_criteria == "제품종류":
+                    df = df[df['product_type'].astype(str).str.lower().str.contains(search_keyword, na=False)]
+
             # 날짜 포맷팅
             if 'date' in df.columns:
                 df['date'] = df['date'].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isnull(x) and hasattr(x, 'strftime') else x)

@@ -14,15 +14,50 @@ def render_shipping_operations(db, sub_menu):
         st.session_state["ship_op_key"] = 0
 
     shipping_partners = get_partners("배송업체")
+    shipping_methods = get_common_codes("shipping_methods", ["택배", "화물", "용차", "직배송", "퀵서비스", "기타"])
     
-    # --- Tab 1: 주문별 출고 (기존 출고 대기 목록) ---
-    if sub_menu == "주문별 출고":
+    # [수정] 작업 모드 선택 (메뉴 통합)
+    op_mode = st.radio("작업 모드", ["주문별 보기 (접수일순)", "제품별 보기 (재고순)"], horizontal=True)
+    
+    if op_mode == "주문별 보기 (접수일순)":
         st.subheader("주문별 출고 (발주번호 기준)")
+        
+        # [NEW] 검색 및 필터 UI
+        with st.expander("🔍 검색 및 필터", expanded=True):
+            # [수정] 레이아웃 변경: 한 줄로 배치 및 날짜 입력 폭 축소
+            c_f1, c_f2, c_f3 = st.columns([1.2, 1, 2])
+            today = datetime.date.today()
+            # [수정] 기간 검색 (접수일 기준) - 기본 3개월
+            s_date_range = c_f1.date_input("접수일 기간", [today - datetime.timedelta(days=90), today], key="ship_ord_date_range")
+            
+            search_criteria = c_f2.selectbox("검색 기준", ["전체(통합)", "제품코드", "발주처", "제품명", "발주번호"], key="ship_ord_criteria")
+            search_keyword = c_f3.text_input("검색어 입력", key="ship_ord_keyword")
+
         docs = db.collection("orders").where("status", "==", "봉제완료").stream()
         rows = []
+        
+        # 날짜 필터링 준비
+        start_dt, end_dt = None, None
+        if len(s_date_range) == 2:
+            start_dt = datetime.datetime.combine(s_date_range[0], datetime.time.min)
+            end_dt = datetime.datetime.combine(s_date_range[1], datetime.time.max)
+        elif len(s_date_range) == 1:
+            start_dt = datetime.datetime.combine(s_date_range[0], datetime.time.min)
+            end_dt = datetime.datetime.combine(s_date_range[0], datetime.time.max)
+
         for doc in docs:
             d = doc.to_dict()
             d['id'] = doc.id
+            
+            # 1. 날짜 필터 (접수일 기준)
+            if start_dt and end_dt:
+                d_date = d.get('date')
+                if d_date:
+                    if d_date.tzinfo: d_date = d_date.replace(tzinfo=None)
+                    if not (start_dt <= d_date <= end_dt): continue
+                else:
+                    continue
+            
             rows.append(d)
         rows.sort(key=lambda x: x.get('date', datetime.datetime.max))
         
@@ -30,6 +65,25 @@ def render_shipping_operations(db, sub_menu):
             df = pd.DataFrame(rows)
             if 'date' in df.columns:
                 df['date'] = df['date'].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isnull(x) and hasattr(x, 'strftime') else x)
+
+            # 3. 키워드 검색 필터
+            if search_keyword:
+                search_keyword = search_keyword.lower()
+                if search_criteria == "전체(통합)":
+                     mask = df.apply(lambda x: search_keyword in str(x.get('product_code', '')).lower() or
+                                              search_keyword in str(x.get('customer', '')).lower() or
+                                              search_keyword in str(x.get('name', '')).lower() or
+                                              search_keyword in str(x.get('order_no', '')).lower() or
+                                              search_keyword in str(x.get('note', '')).lower(), axis=1)
+                     df = df[mask]
+                elif search_criteria == "제품코드":
+                    df = df[df['product_code'].astype(str).str.lower().str.contains(search_keyword, na=False)]
+                elif search_criteria == "발주처":
+                    df = df[df['customer'].astype(str).str.lower().str.contains(search_keyword, na=False)]
+                elif search_criteria == "제품명":
+                    df = df[df['name'].astype(str).str.lower().str.contains(search_keyword, na=False)]
+                elif search_criteria == "발주번호":
+                    df = df[df['order_no'].astype(str).str.lower().str.contains(search_keyword, na=False)]
 
             col_map = {
                 "product_code": "제품코드", "order_no": "발주번호", "date": "접수일", 
@@ -39,13 +93,26 @@ def render_shipping_operations(db, sub_menu):
             display_cols = ["product_code", "order_no", "date", "customer", "name", "color", "weight", "size", "stock", "delivery_to", "delivery_contact", "delivery_address", "note"]
             final_cols = [c for c in display_cols if c in df.columns]
             
-            st.write("🔽 출고할 항목을 선택(체크)하세요. (다중 선택 가능)")
+            # [수정] 테이블 우측 상단에 '모든 품목 조회' 체크박스 배치
+            c_h1, c_h2 = st.columns([6, 1])
+            c_h1.write("🔽 출고할 항목을 선택(체크)하세요. (다중 선택 가능)")
+            show_all_items = c_h2.checkbox("모든 품목 조회", value=False, help="체크하면 재고가 0인 품목도 표시됩니다.", key="ship_ord_show_all")
+            
+            # [수정] 재고 필터 적용 (기본: 재고 > 0)
+            df['stock'] = pd.to_numeric(df['stock'], errors='coerce').fillna(0).astype(int)
+            if not show_all_items:
+                df = df[df['stock'] > 0]
+            
+            # [NEW] 동적 높이 계산 (행당 약 35px, 최대 20행 700px)
+            table_height = min((len(df) + 1) * 35 + 3, 700)
+            
             selection = st.dataframe(
                 df[final_cols].rename(columns=col_map),
                 width="stretch",
                 hide_index=True,
                 on_select="rerun",
                 selection_mode="multi-row",
+                height=table_height,
                 key=f"ship_op_list_{st.session_state['ship_op_key']}"
             )
             
@@ -67,7 +134,7 @@ def render_shipping_operations(db, sub_menu):
                 st.markdown("##### 배송 정보")
                 c1, c2, c3 = st.columns(3)
                 s_date = c1.date_input("출고일자", datetime.date.today())
-                s_method = c2.selectbox("배송방법", ["택배", "화물", "용차", "직배송", "퀵서비스", "기타"])
+                s_method = c2.selectbox("배송방법", shipping_methods)
                 s_carrier = c3.selectbox("배송업체", ["직접입력"] + shipping_partners)
                 if s_carrier == "직접입력":
                     s_carrier_input = c3.text_input("업체명 직접입력", placeholder="택배사/기사님 성함")
@@ -95,8 +162,13 @@ def render_shipping_operations(db, sub_menu):
                     default_price = int(product_prices.get(p_code, 0))
                     
                     c_q1, c_q2 = st.columns(2)
-                    ship_qty = c_q1.number_input("출고 수량", min_value=1, max_value=current_stock, value=current_stock, step=10)
-                    if ship_qty < current_stock:
+                    # [FIX] current_stock이 0일 때 오류 방지
+                    if current_stock > 0:
+                        ship_qty = c_q1.number_input("출고 수량", min_value=1, max_value=current_stock, value=current_stock, step=10)
+                    else:
+                        ship_qty = c_q1.number_input("출고 수량", value=0, disabled=True)
+                    
+                    if current_stock > 0 and ship_qty < current_stock:
                         partial_ship = True
                         st.info(f"ℹ️ 부분 출고: {ship_qty}장 출고 후 {current_stock - ship_qty}장은 대기 목록에 남습니다.")
                     s_unit_price = c_q2.number_input("출고 단가 (원)", value=default_price, step=100)
@@ -171,8 +243,7 @@ def render_shipping_operations(db, sub_menu):
         else:
             st.info("출고 대기 중인 건이 없습니다.")
 
-    # --- Tab 2: 제품별 일괄 출고 (기존 재고현황 기능 이관) ---
-    elif sub_menu == "제품별 일괄 출고":
+    else: # 제품별 보기 (재고순)
         st.subheader("제품별 일괄 출고")
         # 재고 현황 로직 재사용 (출고 기능 포함)
         render_inventory_logic(db, allow_shipping=True)
@@ -1131,7 +1202,7 @@ def render_inventory_logic(db, allow_shipping=False):
         df['total_value'] = df['stock'] * df['shipping_unit_price']
 
         # [NEW] 간편 검색 기능 (사용자 요청 반영)
-        with st.expander("🔍 검색", expanded=True):
+        with st.expander("🔍 검색 및 필터", expanded=True):
             c_search1, c_search2 = st.columns([1, 3])
             search_criteria = c_search1.selectbox("검색 기준", ["전체(통합)", "제품코드", "발주처", "제품종류", "제품명"], key=f"inv_search_criteria_{allow_shipping}")
             search_keyword = c_search2.text_input("검색어 입력", key=f"inv_search_keyword_{allow_shipping}")
@@ -1161,7 +1232,24 @@ def render_inventory_logic(db, allow_shipping=False):
         if 'name' in df.columns: sort_cols.append('name')
         if sort_cols:
             df = df.sort_values(by=sort_cols, ascending=[True] * len(sort_cols))
+        
+        # [NEW] 조회 방식 선택 (요약 vs 전체 리스트)
+        view_mode = st.radio("조회 방식", ["제품별 요약 (제품코드)", "전체 상세 내역 (리스트)"], horizontal=True, key=f"inv_view_mode_{allow_shipping}")
 
+        # [NEW] 테이블 우측 상단에 '모든 품목 조회' 체크박스 배치
+        c_h1, c_h2 = st.columns([6, 1])
+        if view_mode == "제품별 요약 (제품코드)":
+             c_h1.write("🔽 상세 내역을 확인할 제품을 선택하세요.")
+        else:
+             c_h1.write("🔽 전체 재고 내역입니다.")
+             
+        show_all_items = c_h2.checkbox("모든 품목 조회", value=False, help="체크하면 재고가 0인 품목도 표시됩니다.", key=f"inv_show_all_{allow_shipping}")
+
+        # [NEW] 재고 필터 적용 (기본: 재고 > 0)
+        if not show_all_items:
+            df = df[df['stock'] > 0]
+
+        # [MOVED] 요약 데이터 계산 (필터링 후)
         summary = df.groupby('product_code').agg({
             'product_type': 'first',
             'yarn_type': 'first',
@@ -1182,9 +1270,6 @@ def render_inventory_logic(db, allow_shipping=False):
         }
         
         disp_cols = ['product_code', 'product_type', 'yarn_type', 'weight', 'size', 'shipping_unit_price', 'stock', 'total_value']
-        
-        # [NEW] 조회 방식 선택 (요약 vs 전체 리스트)
-        view_mode = st.radio("조회 방식", ["제품별 요약 (제품코드)", "전체 상세 내역 (리스트)"], horizontal=True, key=f"inv_view_mode_{allow_shipping}")
 
         # [MOVED] 인쇄 및 엑셀 내보내기 설정 (공통 영역으로 이동)
         # 데이터 준비 (공통)
@@ -1220,8 +1305,6 @@ def render_inventory_logic(db, allow_shipping=False):
         is_admin = st.session_state.get("role") == "admin"
 
         if view_mode == "제품별 요약 (제품코드)":
-            st.write("🔽 상세 내역을 확인할 제품을 선택하세요.")
-            
             # [수정] 동적 높이 계산 (행당 약 35px, 최대 20행 700px)
             summary_height = min((len(summary) + 1) * 35 + 3, 700)
             
@@ -1384,8 +1467,6 @@ def render_inventory_logic(db, allow_shipping=False):
 
         
         else: # 전체 상세 내역 (리스트)
-            st.write("🔽 전체 재고 내역입니다.")
-            
             full_df = df.copy()
             if 'date' in full_df.columns:
                 full_df['date'] = full_df['date'].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isnull(x) and hasattr(x, 'strftime') else str(x)[:10])
@@ -1648,21 +1729,32 @@ def render_inventory_logic(db, allow_shipping=False):
             st.divider()
             st.markdown(f"#### 선택 항목 즉시 출고 ({len(sel_rows)}건)")
             
-            c1, c2 = st.columns(2)
+            # [수정] 상세 배송 정보 입력 폼으로 확장 (주문별 출고와 동일하게)
+            st.markdown("##### 배송 정보")
+            c1, c2, c3 = st.columns(3)
             q_date = c1.date_input("출고일자", datetime.date.today())
+            shipping_methods = get_common_codes("shipping_methods", ["택배", "화물", "용차", "직배송", "퀵서비스", "기타"])
+            q_method = c2.selectbox("배송방법", shipping_methods)
             
-            partners = get_partners("발주처")
-            if not partners:
-                c2.error("등록된 발주처가 없습니다. [거래처 관리]에서 먼저 등록해주세요.")
-                st.stop()
-            final_customer = c2.selectbox("납품처(거래처) 선택", partners, help="목록에 없는 거래처는 [거래처 관리]에서 먼저 등록해야 합니다.")
-                
-            c3, c4 = st.columns(2)
-            q_method = c3.selectbox("배송방법", ["택배", "화물", "용차", "직배송", "기타"])
-            q_note = c4.text_input("비고 (송장번호 등)")
-            
+            shipping_partners = get_partners("배송업체")
+            q_carrier = c3.selectbox("배송업체", ["직접입력"] + shipping_partners)
+            if q_carrier == "직접입력":
+                final_carrier = c3.text_input("업체명 직접입력", placeholder="택배사/기사님 성함")
+            else:
+                final_carrier = q_carrier
+
+            st.markdown("##### 납품처 정보")
+            first_row = sel_rows.iloc[0]
+            # 재고 데이터에는 배송지 정보가 없을 수 있으므로 빈 값 또는 기본값 처리
+            c_d1, c_d2, c_d3 = st.columns(3)
+            q_to = c_d1.text_input("납품처명", value=first_row.get('delivery_to', first_row.get('customer', '')))
+            q_contact = c_d2.text_input("납품연락처", value=first_row.get('delivery_contact', ''))
+            q_addr = c_d3.text_input("납품주소", value=first_row.get('delivery_address', ''))
+            q_note = st.text_area("비고 (송장번호/차량번호 등)", placeholder="예: 경동택배 123-456-7890")
+
             st.markdown("##### 수량 및 단가 확인")
             partial_ship = False
+            q_ship_qty = 0
             
             if len(sel_rows) == 1:
                 first_row = sel_rows.iloc[0]
@@ -1670,8 +1762,13 @@ def render_inventory_logic(db, allow_shipping=False):
                 default_price = int(first_row.get('shipping_unit_price', 0))
                 
                 q_c1, q_c2 = st.columns(2)
-                q_ship_qty = q_c1.number_input("출고 수량", min_value=1, max_value=current_stock, value=current_stock, step=10)
-                if q_ship_qty < current_stock:
+                # [FIX] current_stock이 0일 때 오류 방지
+                if current_stock > 0:
+                    q_ship_qty = q_c1.number_input("출고 수량", min_value=1, max_value=current_stock, value=current_stock, step=10)
+                else:
+                    q_ship_qty = q_c1.number_input("출고 수량", value=0, disabled=True)
+                
+                if current_stock > 0 and q_ship_qty < current_stock:
                     partial_ship = True
                     st.info(f"ℹ️ 부분 출고: {q_ship_qty}장 출고 후 {current_stock - q_ship_qty}장은 재고에 남습니다.")
                 
@@ -1683,6 +1780,7 @@ def render_inventory_logic(db, allow_shipping=False):
                 
                 q_c1, q_c2 = st.columns(2)
                 q_c1.text_input("총 출고 수량", value=f"{total_ship_qty:,}장 (일괄 전량 출고)", disabled=True)
+                q_ship_qty = total_ship_qty
                 q_price = q_c2.number_input("적용 단가 (원)", value=default_price, step=100, help="선택된 항목들에 일괄 적용됩니다.")
                 calc_qty = total_ship_qty
 
@@ -1697,15 +1795,28 @@ def render_inventory_logic(db, allow_shipping=False):
                 q_total_amount = q_supply_price + q_vat
             st.info(f"💰 **예상 금액**: 공급가액 {q_supply_price:,}원 + 부가세 {q_vat:,}원 = 합계 {q_total_amount:,}원")
             
+            st.markdown("##### 운임비 설정 (선택)")
+            c_cost1, c_cost2 = st.columns(2)
+            q_cost = c_cost1.number_input("운임비 (원)", min_value=0, step=1000)
+            q_cost_mode = c_cost2.radio("운임비 적용 방식", ["건당 운임비", "묶음 운임비(N분할)"], horizontal=True)
+
             if st.button("출고 처리", type="primary"):
+                # 운임비 계산
+                total_items = len(sel_rows)
+                cost_per_item = 0
+                if total_items > 0 and q_cost > 0:
+                    cost_per_item = int(q_cost / total_items) if q_cost_mode == "묶음 운임비(N분할)" else q_cost
+
                 update_data = {
                     "status": "출고완료",
                     "shipping_date": datetime.datetime.combine(q_date, datetime.datetime.now().time()),
-                    "delivery_to": final_customer,
                     "shipping_method": q_method,
+                    "shipping_carrier": final_carrier,
+                    "shipping_cost": cost_per_item,
                     "shipping_unit_price": q_price,
-                    "note": q_note,
-                    "vat_included": q_vat_inc
+                    "vat_included": q_vat_inc,
+                    "delivery_to": q_to, "delivery_contact": q_contact, "delivery_address": q_addr,
+                    "note": q_note
                 }
                 if partial_ship and len(sel_rows) == 1:
                     doc_id = sel_rows.iloc[0]['id']
@@ -2502,6 +2613,11 @@ def render_partners(db, sub_menu):
         st.subheader("거래처 구분 관리")
         st.info("거래처 등록 시 사용할 구분을 관리합니다.")
         manage_code("partner_types", partner_types, "거래처 구분")
+
+    elif sub_menu == "배송방법 관리":
+        st.subheader("배송방법 관리")
+        st.info("출고 작업 시 선택할 배송방법을 관리합니다.")
+        manage_code("shipping_methods", ["택배", "화물", "용차", "직배송", "퀵서비스", "기타"], "배송방법")
 
 def render_machines(db, sub_menu):
     st.header("제직기 관리")

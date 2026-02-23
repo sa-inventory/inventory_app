@@ -379,7 +379,9 @@ def render_partner_order_status(db):
         if 'date' in d and d['date']:
             d['date'] = d['date'].strftime("%Y-%m-%d")
         if 'delivery_req_date' in d:
-             d['delivery_req_date'] = str(d['delivery_req_date'])[:10]
+             val = d['delivery_req_date']
+             # [수정] None이나 nan 문자열이 들어가지 않도록 처리
+             d['delivery_req_date'] = str(val)[:10] if val and str(val).lower() not in ['nan', 'none', 'nat'] else ""
              
         rows.append(d)
         
@@ -402,6 +404,9 @@ def render_partner_order_status(db):
         final_cols = [c for c in display_cols if c in df.columns]
         
         df_display = df[final_cols].rename(columns=col_map)
+        # [수정] NaN/NaT 및 문자열 "nan", "None" 등을 빈 문자열로 변환
+        df_display = df_display.fillna("")
+        df_display = df_display.replace(["nan", "None", "NaT"], "")
         
         # [NEW] 동적 높이 계산 (행당 약 35px, 최대 20행 700px)
         table_height = min((len(df_display) + 1) * 35 + 3, 700)
@@ -881,6 +886,9 @@ def render_order_status(db, sub_menu):
             
             # 화면 표시용 데이터프레임 (한글 컬럼 적용)
             df_display = df[final_cols].rename(columns=col_map)
+            # [수정] NaN/NaT 및 문자열 "nan", "None" 등을 빈 문자열로 변환
+            df_display = df_display.fillna("")
+            df_display = df_display.replace(["nan", "None", "NaT"], "")
             
             # [NEW] 테이블 위 작업 영역 (상태변경, 수정버튼 등)
             action_placeholder = st.container()

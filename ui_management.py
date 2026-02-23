@@ -4,7 +4,7 @@ import datetime
 import io
 import uuid
 from firebase_admin import firestore
-from utils import get_common_codes, get_partners, is_basic_code_used, manage_code, manage_code_with_code, get_db, generate_report_html, search_address_api
+from utils import get_common_codes, get_partners, is_basic_code_used, manage_code, manage_code_with_code, get_db, generate_report_html, search_address_api, validate_password
 
 def render_shipping_operations(db, sub_menu):
     st.header("출고 작업")
@@ -2831,6 +2831,12 @@ def render_users(db, sub_menu):
                         st.success("사용자 정보가 수정되었습니다.")
                         st.rerun()
                     
+                    # [NEW] 비밀번호 초기화 버튼
+                    if st.button("🔑 비밀번호 초기화 (0000)", key=f"btn_reset_pw_{sel_uid}", help="비밀번호를 '0000'으로 초기화합니다. 사용자는 다음 로그인 시 새 비밀번호를 설정해야 합니다."):
+                        db.collection("users").document(sel_uid).update({"password": "0000"})
+                        st.success(f"{sel_user['name']}님의 비밀번호가 '0000'으로 초기화되었습니다.")
+                        st.rerun()
+                    
                     if st.button("🗑️ 사용자 삭제", type="primary", key=f"btn_del_{sel_uid}"):
                         db.collection("users").document(sel_uid).delete()
                         st.success("사용자가 삭제되었습니다.")
@@ -3046,6 +3052,34 @@ def render_my_profile(db):
     
     st.subheader(f"내 정보 수정 ({user_data.get('name')}님)")
     
+    # [NEW] 자동 로그아웃 설정
+    st.markdown("##### ⚙️ 환경 설정")
+    current_logout_min = user_data.get("auto_logout_minutes", 60)
+    
+    # [수정] 시간/분 분리 입력
+    c_h, c_m, _ = st.columns([1, 1, 4])
+    curr_h = current_logout_min // 60
+    curr_m = current_logout_min % 60
+    
+    new_h = c_h.number_input("자동 로그아웃 (시간)", min_value=0, max_value=8, value=curr_h, key="alo_h")
+    
+    # [수정] 8시간 설정 시 분 단위 비활성화 (최대 8시간 제한)
+    m_disabled = (new_h == 8)
+    m_value = 0 if m_disabled else curr_m
+    
+    new_m = c_m.number_input("자동 로그아웃 (분)", min_value=0, max_value=59, value=m_value, disabled=m_disabled, key="alo_m")
+    st.caption("※ 최대 8시간까지 설정 가능합니다.")
+    
+    if st.button("환경 설정 저장"):
+        total_min = new_h * 60 + new_m
+        if total_min == 0: total_min = 10 # 최소 10분 안전장치
+        if total_min > 480: total_min = 480
+        
+        db.collection("users").document(user_id).update({"auto_logout_minutes": total_min})
+        st.session_state["auto_logout_minutes"] = total_min # 세션 즉시 반영
+        st.success(f"자동 로그아웃 시간이 {new_h}시간 {new_m}분으로 설정되었습니다.")
+        st.rerun()
+
     with st.form("my_profile_form"):
         st.write("📝 기본 정보")
         c1, c2 = st.columns(2)
@@ -3053,7 +3087,7 @@ def render_my_profile(db):
         new_dept = c2.text_input("부서/직책", value=user_data.get("department", ""))
         
         st.divider()
-        st.write("🔒 비밀번호 변경 (변경 시에만 입력하세요)")
+        st.write("🔒 비밀번호 변경 (3개월 주기 변경 권장)")
         cur_pw = st.text_input("현재 비밀번호", type="password")
         new_pw = st.text_input("새 비밀번호", type="password")
         new_pw_chk = st.text_input("새 비밀번호 확인", type="password")
@@ -3074,7 +3108,18 @@ def render_my_profile(db):
                 if new_pw != new_pw_chk:
                     st.error("새 비밀번호가 서로 일치하지 않습니다.")
                     return
+                if new_pw == cur_pw:
+                    st.error("현재 비밀번호와 동일한 비밀번호는 사용할 수 없습니다.")
+                    return
+                
+                # [NEW] 비밀번호 정책 검증
+                is_valid, err_msg = validate_password(new_pw)
+                if not is_valid:
+                    st.error(err_msg)
+                    return
+
                 updates["password"] = new_pw
+                updates["password_changed_at"] = datetime.datetime.now() # [NEW] 변경일시 저장
             
             if updates:
                 db.collection("users").document(user_id).update(updates)

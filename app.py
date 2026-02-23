@@ -9,7 +9,7 @@ import io
 import uuid
 import streamlit.components.v1 as components
 # [NEW] 분리한 utils 파일에서 공통 함수 임포트
-from utils import get_db, firestore
+from utils import get_db, firestore, validate_password
 from ui_orders import render_order_entry, render_order_status, render_partner_order_status
 from ui_production import render_weaving, render_dyeing, render_sewing
 from ui_management import render_shipping_operations, render_shipping_status, render_inventory, render_product_master, render_partners, render_machines, render_codes, render_users, render_my_profile, render_company_settings
@@ -53,6 +53,13 @@ if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
     st.session_state["role"] = None
 
+# [NEW] 강제 로그아웃 처리 (URL 파라미터 감지)
+if st.query_params.get("logout"):
+    st.query_params.clear()
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+    st.rerun()
+
 # [NEW] 자동 로그인 처리 (URL의 session_id 확인)
 if not st.session_state["logged_in"]:
     session_id = st.query_params.get("session_id")
@@ -74,6 +81,8 @@ if not st.session_state["logged_in"]:
                 st.session_state["department"] = user_data.get("department", "")
                 st.session_state["linked_partner"] = user_data.get("linked_partner", "")
                 st.session_state["permissions"] = user_data.get("permissions", [])
+                st.session_state["auto_logout_minutes"] = user_data.get("auto_logout_minutes", 60)
+                st.session_state["login_time"] = s_data.get("created_at", datetime.datetime.now())
 
 # 로그인 화면 처리
 if not st.session_state["logged_in"]:
@@ -131,6 +140,24 @@ if not st.session_state["logged_in"]:
                                 st.session_state["linked_partner"] = user_data.get("linked_partner", "")
                                 # [NEW] 권한 목록 세션 저장
                                 st.session_state["permissions"] = user_data.get("permissions") or []
+                                st.session_state["auto_logout_minutes"] = user_data.get("auto_logout_minutes", 60)
+                                st.session_state["login_time"] = datetime.datetime.now()
+                                
+                                # [NEW] 비밀번호 만료 체크 (90일)
+                                pw_changed = user_data.get("password_changed_at")
+                                if pw_changed:
+                                    if hasattr(pw_changed, 'tzinfo') and pw_changed.tzinfo:
+                                        pw_changed = pw_changed.replace(tzinfo=None)
+                                    if (datetime.datetime.now() - pw_changed).days >= 90:
+                                        st.session_state["password_expired"] = True
+                                else:
+                                    # 변경 기록이 없으면 현재 시간으로 초기화 (바로 만료시키지 않음)
+                                    db.collection("users").document(login_id).update({"password_changed_at": datetime.datetime.now()})
+                                
+                                # [NEW] 비밀번호 초기화 상태 체크 (0000)
+                                if user_data.get("password") == "0000":
+                                    st.session_state["password_reset_needed"] = True
+
                                 if "current_menu" in st.session_state:
                                     del st.session_state["current_menu"]
                                 
@@ -166,6 +193,23 @@ if not st.session_state["logged_in"]:
                                 st.session_state["user_name"] = user_data.get("name")
                                 st.session_state["user_id"] = p_id
                                 st.session_state["linked_partner"] = user_data.get("linked_partner")
+                                st.session_state["auto_logout_minutes"] = user_data.get("auto_logout_minutes", 60)
+                                st.session_state["login_time"] = datetime.datetime.now()
+                                
+                                # [NEW] 비밀번호 만료 체크 (90일)
+                                pw_changed = user_data.get("password_changed_at")
+                                if pw_changed:
+                                    if hasattr(pw_changed, 'tzinfo') and pw_changed.tzinfo:
+                                        pw_changed = pw_changed.replace(tzinfo=None)
+                                    if (datetime.datetime.now() - pw_changed).days >= 90:
+                                        st.session_state["password_expired"] = True
+                                else:
+                                    db.collection("users").document(p_id).update({"password_changed_at": datetime.datetime.now()})
+                                
+                                # [NEW] 비밀번호 초기화 상태 체크 (0000)
+                                if user_data.get("password") == "0000":
+                                    st.session_state["password_reset_needed"] = True
+
                                 if "current_menu" in st.session_state:
                                     del st.session_state["current_menu"]
                                 
@@ -187,6 +231,11 @@ if not st.session_state["logged_in"]:
 
 # 3. [왼쪽 사이드바] 상품 등록 기능
 with st.sidebar:
+    # [NEW] 비밀번호 만료 시 사이드바 숨김 처리 등을 위해 체크
+    if st.session_state.get("password_expired"):
+        st.warning("비밀번호 변경이 필요합니다.")
+        st.stop() # 사이드바 렌더링 중단
+
     # [NEW] 회사 정보 가져오기 (상호명 표시용)
     try:
         comp_info_ref = db.collection("settings").document("company_info").get()
@@ -402,6 +451,121 @@ with st.sidebar:
  
 menu = st.session_state["current_menu"]
 sub_menu = st.session_state.get("current_sub_menu")
+
+# [NEW] 비밀번호 만료 또는 초기화 시 강제 변경 화면 표시
+if st.session_state.get("password_expired") or st.session_state.get("password_reset_needed"):
+    if st.session_state.get("password_reset_needed"):
+        st.error("🔒 비밀번호 초기화 안내")
+        st.warning("관리자에 의해 비밀번호가 초기화되었습니다. 보안을 위해 새로운 비밀번호를 설정해주세요.")
+    else:
+        st.error("🔒 비밀번호 만료 안내")
+        st.warning("비밀번호를 변경한 지 3개월(90일)이 지났습니다. 보안을 위해 비밀번호를 변경해주세요.")
+    
+    with st.form("force_pw_change_form"):
+        new_pw = st.text_input("새 비밀번호", type="password")
+        new_pw_chk = st.text_input("새 비밀번호 확인", type="password")
+        
+        if st.form_submit_button("비밀번호 변경 및 로그인"):
+            if new_pw and new_pw == new_pw_chk:
+                # [NEW] 비밀번호 정책 검증
+                is_valid, err_msg = validate_password(new_pw)
+                if not is_valid:
+                    st.error(err_msg)
+                    st.stop()
+                
+                uid = st.session_state["user_id"]
+                db.collection("users").document(uid).update({
+                    "password": new_pw,
+                    "password_changed_at": datetime.datetime.now()
+                })
+                st.session_state["password_expired"] = False
+                st.session_state["password_reset_needed"] = False
+                st.success("비밀번호가 변경되었습니다.")
+                st.rerun()
+            elif not new_pw:
+                st.error("비밀번호를 입력해주세요.")
+            else:
+                st.error("비밀번호가 일치하지 않습니다.")
+    st.stop() # 메인 화면 렌더링 중단
+
+# [NEW] 자동 로그아웃 타이머 및 감지 스크립트 주입
+if st.session_state.get("logged_in"):
+    timeout_min = st.session_state.get("auto_logout_minutes", 60)
+    login_time = st.session_state.get("login_time", datetime.datetime.now())
+    login_time_str = login_time.strftime("%Y년 %m월 %d일 %H시 %M분")
+    
+    js_code = f"""
+    <script>
+        (function() {{
+            const loginTimeStr = "{login_time_str}";
+            const timeoutMinutes = {timeout_min};
+            const timeoutMs = timeoutMinutes * 60 * 1000;
+            let lastActivity = Date.now();
+            
+            function updateTimer() {{
+                const now = Date.now();
+                const idleMs = now - lastActivity;
+                const remainingMs = timeoutMs - idleMs;
+                
+                if (remainingMs <= 0) {{
+                    // Trigger logout
+                    window.parent.location.href = window.parent.location.href.split('?')[0] + '?logout=true';
+                    return;
+                }}
+                
+                // Format time (1분 이상이면 분 단위, 미만이면 초 단위)
+                let timeStr = "";
+                if (remainingMs > 60000) {{
+                    const totalMin = Math.ceil(remainingMs / 60000);
+                    const h = Math.floor(totalMin / 60);
+                    const m = totalMin % 60;
+                    timeStr = (h > 0 ? h + "시간 " : "") + m + "분";
+                }} else {{
+                    timeStr = Math.ceil(remainingMs / 1000) + "초";
+                }}
+                
+                // Update display
+                let timerDiv = window.parent.document.getElementById('auto-logout-timer');
+                if (!timerDiv) {{
+                    timerDiv = window.parent.document.createElement('div');
+                    timerDiv.id = 'auto-logout-timer';
+                    timerDiv.style.position = 'fixed';
+                    timerDiv.style.top = '60px'; 
+                    timerDiv.style.right = '20px';
+                    timerDiv.style.backgroundColor = 'rgba(255, 255, 255, 0.8)';
+                    timerDiv.style.color = '#000000';
+                    timerDiv.style.padding = '4px 8px';
+                    timerDiv.style.borderRadius = '4px';
+                    timerDiv.style.fontSize = '12px';
+                    timerDiv.style.fontWeight = 'normal';
+                    timerDiv.style.zIndex = '999999';
+                    timerDiv.style.pointerEvents = 'none';
+                    timerDiv.style.lineHeight = '1.3';
+                    window.parent.document.body.appendChild(timerDiv);
+                }}
+                timerDiv.innerHTML = '접속시간 ' + loginTimeStr + '<br>자동로그아웃 ' + timeStr;
+            }}
+            
+            function resetTimer() {{
+                lastActivity = Date.now();
+                updateTimer();
+            }}
+            
+            // Attach events to parent window
+            const doc = window.parent.document;
+            doc.addEventListener('mousemove', resetTimer);
+            doc.addEventListener('keydown', resetTimer);
+            doc.addEventListener('click', resetTimer);
+            doc.addEventListener('scroll', resetTimer);
+            
+            // Interval
+            if (!window.logoutInterval) {{
+                window.logoutInterval = setInterval(updateTimer, 1000);
+            }}
+        }})();
+    </script>
+    """
+    components.html(js_code, height=0)
 
 # 4. [메인 화면] 메뉴별 기능 구현
 if menu == "공지사항":

@@ -228,25 +228,41 @@ def render_order_entry(db, sub_menu):
                     now = datetime.datetime.now()
                     prefix = now.strftime("%y%m") # 예: 2405
                     
-                    # 해당 월의 가장 마지막 발주번호 조회 (orders 컬렉션에서)
-                    last_docs = db.collection("orders")\
-                        .where("order_no", ">=", f"{prefix}000")\
-                        .where("order_no", "<=", f"{prefix}999")\
-                        .order_by("order_no", direction=firestore.Query.DESCENDING)\
-                        .limit(1)\
-                        .stream()
+                    # [수정] 발주번호 생성 및 중복 방지 재시도 로직
+                    order_no = ""
+                    max_retries = 3
                     
-                    last_seq = 0
-                    for doc in last_docs:
-                        last_val = doc.to_dict().get("order_no")
-                        if last_val and len(last_val) == 7:
-                            try:
-                                last_seq = int(last_val[-3:])
-                            except:
-                                pass
+                    for attempt in range(max_retries):
+                        # 해당 월의 가장 마지막 발주번호 조회
+                        last_docs = db.collection("orders")\
+                            .where("order_no", ">=", f"{prefix}000")\
+                            .where("order_no", "<=", f"{prefix}999")\
+                            .order_by("order_no", direction=firestore.Query.DESCENDING)\
+                            .limit(1)\
+                            .stream()
+                        
+                        last_seq = 0
+                        for doc in last_docs:
+                            last_val = doc.to_dict().get("order_no")
+                            if last_val and len(last_val) == 7:
+                                try:
+                                    last_seq = int(last_val[-3:])
+                                except:
+                                    pass
+                        
+                        # 시도 횟수에 따라 번호 증가 (동시 충돌 시 회피)
+                        new_seq = last_seq + 1 + attempt
+                        temp_order_no = f"{prefix}{new_seq:03d}"
+                        
+                        # [안전장치] DB에 해당 번호가 진짜 없는지 이중 확인
+                        dup_check = list(db.collection("orders").where("order_no", "==", temp_order_no).limit(1).stream())
+                        if not dup_check:
+                            order_no = temp_order_no
+                            break
                     
-                    new_seq = last_seq + 1
-                    order_no = f"{prefix}{new_seq:03d}"
+                    if not order_no:
+                        st.error("발주번호 생성 중 충돌이 발생했습니다. 잠시 후 다시 시도해주세요.")
+                        st.stop()
 
                     # 주소 합치기
                     full_delivery_addr = f"{delivery_address} {delivery_addr_detail}".strip()

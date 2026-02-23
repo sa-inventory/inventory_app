@@ -6,7 +6,7 @@ from firebase_admin import firestore
 from utils import get_partners, generate_report_html, get_common_codes, manage_code_with_code
 
 def render_weaving(db, sub_menu=None, readonly=False):
-    st.header("제직 현황" if not readonly else "제직 조회 (Read-Only)")
+    st.header("제직 현황" if not readonly else "제직 조회 (보기 전용)")
     if "weaving_df_key" not in st.session_state:
         st.session_state["weaving_df_key"] = 0
     st.info("발주된 건을 확인하고 제직 작업을 지시하거나, 완료된 건을 염색 공정으로 넘깁니다.")
@@ -59,6 +59,11 @@ def render_weaving(db, sub_menu=None, readonly=False):
                                 st.error(f"**{m_name}**\n\n{item.get('customer', '')}  \n{item.get('name')} ({cur_roll}/{roll_cnt}롤) / {int(item.get('stock', 0)):,}장")
                             else:
                                 st.success(f"**{m_name}**\n\n대기중\n\n{m_desc}")
+            
+            # [NEW] 새로고침 버튼 (하단 배치)
+            rb_c1, rb_c2 = st.columns([8.5, 1.5])
+            if rb_c2.button("🔄 현황 새로고침", key="refresh_weaving_dash", help="최신 제직 현황을 불러옵니다."):
+                st.rerun()
         
         st.divider()
 
@@ -185,7 +190,12 @@ def render_weaving(db, sub_menu=None, readonly=False):
                         
                         if st.form_submit_button("제직 시작"):
                             sel_m_no = m_display_map.get(s_machine)
-                            if sel_m_no in busy_machines:
+                            
+                            # [수정] 저장 직전 DB 실시간 상태 재확인 (동시성 제어)
+                            # 현재 해당 제직기로 '제직중'인 작업이 있는지 쿼리
+                            check_busy = list(db.collection("orders").where("status", "==", "제직중").where("machine_no", "==", int(sel_m_no)).stream())
+                            
+                            if check_busy:
                                 st.error(f"⛔ 해당 제직기는 이미 작업 중입니다!")
                             else:
                                 start_dt = datetime.datetime.combine(s_date, s_time)

@@ -17,7 +17,7 @@ from ui_statistics import render_statistics
 from ui_board import render_notice_board, render_schedule
 
 # 1. 화면 기본 설정 (제목 등)
-st.set_page_config(page_title="타올 생산 현황 관리", layout="wide")
+st.set_page_config(page_title="타올 생산 현황 관리", page_icon="🏭", layout="wide")
 
 # [수정] 상단 여백 축소 및 제목 스타일 변경
 st.markdown("""

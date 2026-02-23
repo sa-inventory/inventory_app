@@ -19,8 +19,8 @@ from ui_board import render_notice_board, render_schedule
 # 1. 화면 기본 설정 (제목 등)
 st.set_page_config(page_title="타올 생산 현황 관리", page_icon="logo.png", layout="wide")
 
-# [수정] 상단 여백 축소 및 제목 스타일 변경
-st.markdown("""
+# [수정] CSS 스타일 정의 (관리자 여부에 따라 메뉴 표시/숨김 분기)
+base_css = """
     <style>
         /* 메인 영역 상단 여백 줄이기 (기본값은 약 6rem) */
         .block-container {
@@ -43,8 +43,19 @@ st.markdown("""
         [data-testid="stSidebar"] details button p {
             font-size: 0.9rem !important;
         }
-    </style>
-""", unsafe_allow_html=True)
+"""
+
+# 관리자가 아니면(일반 사용자, 파트너, 비로그인) Streamlit 기본 메뉴 숨김
+if st.session_state.get("role") != "admin":
+    base_css += """
+        /* [NEW] 보안 및 깔끔한 화면을 위해 Streamlit 기본 메뉴 숨기기 */
+        #MainMenu {visibility: hidden;} /* 우측 상단 햄버거 메뉴 숨김 */
+        footer {visibility: hidden;}    /* 하단 'Made with Streamlit' 숨김 */
+        header {visibility: hidden;}    /* 상단 헤더(Deploy 버튼 등) 숨김 */
+    """
+
+base_css += "</style>"
+st.markdown(base_css, unsafe_allow_html=True)
 
 db = get_db()
 

@@ -299,3 +299,28 @@ def validate_password(password):
             return False, "연속된 문자나 숫자를 4자리 이상 사용할 수 없습니다."
             
     return True, ""
+
+# --- 공통 함수: 비밀번호 유효성 검사 ---
+def validate_password(password):
+    """
+    비밀번호 정책 검사:
+    1. 4자리 이상 12자리 이하
+    2. 영문과 숫자만 허용 (특수문자 불가)
+    3. 동일한 문자/숫자 4번 연속 금지 (예: 1111, aaaa)
+    4. 연속된 문자/숫자 4자리 이상 금지 (예: 1234, abcd)
+    """
+    if not (4 <= len(password) <= 12):
+        return False, "비밀번호는 4자리 이상 12자리 이하여야 합니다."
+    
+    if not password.isalnum():
+        return False, "비밀번호는 영문과 숫자만 사용할 수 있습니다."
+    
+    for i in range(len(password) - 3):
+        # 동일 문자 4번 연속
+        if password[i] == password[i+1] == password[i+2] == password[i+3]:
+            return False, "동일한 문자를 4번 이상 연속해서 사용할 수 없습니다."
+        # 연속된 문자 (ASCII 코드 기준)
+        if ord(password[i+1]) == ord(password[i]) + 1 and ord(password[i+2]) == ord(password[i]) + 2 and ord(password[i+3]) == ord(password[i]) + 3:
+            return False, "연속된 문자나 숫자를 4자리 이상 사용할 수 없습니다."
+            
+    return True, ""

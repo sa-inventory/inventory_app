@@ -11,6 +11,57 @@ def render_weaving(db, sub_menu=None, readonly=False):
         st.session_state["weaving_df_key"] = 0
     st.info("발주된 건을 확인하고 제직 작업을 지시하거나, 완료된 건을 염색 공정으로 넘깁니다.")
 
+    # [NEW] 제직 현황 카드 및 툴팁 스타일 정의
+    st.markdown("""
+    <style>
+        .weaving-card {
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 10px;
+            position: relative;
+            cursor: help;
+            transition: all 0.2s ease-in-out;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            text-align: center;
+            height: 110px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+        .weaving-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+            z-index: 10;
+        }
+        .wc-busy { background-color: #ffebee; border: 1px solid #ef9a9a; color: #c62828; }
+        .wc-free { background-color: #f1f8e9; border: 1px solid #a5d6a7; color: #33691e; }
+        .wc-header { font-weight: bold; font-size: 1.1em; margin-bottom: 5px; }
+        .wc-body { font-size: 0.9em; line-height: 1.3; }
+        
+        /* Tooltip */
+        .weaving-card .wc-tooltip {
+            visibility: hidden;
+            width: 240px;
+            background-color: rgba(0, 0, 0, 0.9);
+            color: #fff;
+            text-align: left;
+            border-radius: 6px;
+            padding: 12px;
+            position: absolute;
+            z-index: 100;
+            top: 100%; left: 50%; margin-left: -120px;
+            opacity: 0; transition: opacity 0.3s;
+            font-size: 0.85em; line-height: 1.5; pointer-events: none; margin-top: 8px;
+        }
+        .weaving-card .wc-tooltip::after {
+            content: ""; position: absolute; bottom: 100%; left: 50%; margin-left: -5px;
+            border-width: 5px; border-style: solid; border-color: transparent transparent rgba(0, 0, 0, 0.9) transparent;
+        }
+        .weaving-card:hover .wc-tooltip { visibility: visible; opacity: 1; }
+    </style>
+    """, unsafe_allow_html=True)
+
     # [공통] 제직기 설정 가져오기 (작업일지 등에서도 사용됨)
     machines_docs = list(db.collection("machines").order_by("machine_no").stream())
     
@@ -53,12 +104,45 @@ def render_weaving(db, sub_menu=None, readonly=False):
                             if m_no in busy_machines:
                                 item = busy_machines[m_no]
                                 roll_cnt = item.get('weaving_roll_count', 0)
-                                # 진행률 표시
                                 cur_roll = item.get('completed_rolls', 0) + 1
-                                # [수정] 발주처 표시 추가 (발주처 / 품명 / 롤정보 / 수량)
-                                st.error(f"**{m_name}**\n\n{item.get('customer', '')}  \n{item.get('name')} ({cur_roll}/{roll_cnt}롤) / {int(item.get('stock', 0)):,}장")
+                                
+                                # [수정] 카드에는 핵심 정보만, 상세 정보는 툴팁으로 이동
+                                card_html = f"""
+                                <div class="weaving-card wc-busy">
+                                    <div class="wc-header">{m_name}</div>
+                                    <div class="wc-body">
+                                        가동중<br>
+                                        <span style="font-size:0.9em; font-weight:bold;">{item.get('name', '-')}</span><br>
+                                        <span style="font-size:0.8em;">({cur_roll}/{roll_cnt}롤)</span>
+                                    </div>
+                                    <div class="wc-tooltip">
+                                        <strong>[{m_name}] 상세 정보</strong><hr style="margin:5px 0; border-color:#555;">
+                                        <b>발주처:</b> {item.get('customer', '-')}<br>
+                                        <b>제품명:</b> {item.get('name', '-')}<br>
+                                        <b>종류:</b> {item.get('product_type', item.get('weaving_type', '-'))}<br>
+                                        <b>규격:</b> {item.get('size', '-')}<br>
+                                        <b>중량:</b> {item.get('weight', '-')}g<br>
+                                        <b>수량:</b> {int(item.get('stock', 0)):,}장<br>
+                                        <b>납품요청일:</b> {str(item.get('delivery_req_date', '-'))[:10]}
+                                    </div>
+                                </div>
+                                """
+                                st.markdown(card_html, unsafe_allow_html=True)
                             else:
-                                st.success(f"**{m_name}**\n\n대기중\n\n{m_desc}")
+                                card_html = f"""
+                                <div class="weaving-card wc-free">
+                                    <div class="wc-header">{m_name}</div>
+                                    <div class="wc-body">
+                                        대기중<br>
+                                        <span style="font-size:0.8em;">{m_desc if m_desc else '-'}</span>
+                                    </div>
+                                    <div class="wc-tooltip">
+                                        <strong>[{m_name}] 상태 정보</strong><hr style="margin:5px 0; border-color:#555;">
+                                        작업 대기중
+                                    </div>
+                                </div>
+                                """
+                                st.markdown(card_html, unsafe_allow_html=True)
             
             # [NEW] 새로고침 버튼 (하단 배치)
             rb_c1, rb_c2 = st.columns([8.5, 1.5])

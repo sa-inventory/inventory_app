@@ -350,7 +350,7 @@ def render_shipping_status(db, sub_menu):
             final_cols = [c for c in display_cols if c in df.columns]
 
             # [NEW] 묶어보기 토글
-            view_grouped = st.checkbox("📦 동일 발주번호(원본)끼리 묶어보기", help="제직/생산 과정에서 나뉜 롤들을 원래 발주번호 기준으로 합쳐서 보여줍니다. (같은 날짜/배송처인 경우만)")
+            view_grouped = st.checkbox("동일 출고건 묶어보기 (발주번호 기준)", help="체크하면 분할된 롤들을 원래 발주번호 기준으로 합쳐서 보여줍니다. (단, 출고일, 배송지, 단가가 모두 같아야 합쳐집니다)")
             
             if view_grouped:
                 # 그룹화 기준: 원본발주번호 + 출고일 + 거래처 + 배송정보 + 단가
@@ -363,7 +363,7 @@ def render_shipping_status(db, sub_menu):
                     'supply_amount': 'sum',
                     'shipping_cost': 'sum',
                     'id': list, # ID들을 리스트로 묶음 (취소 처리용)
-                    'order_no': lambda x: f"{x.iloc[0].split('-')[0]} (외 {len(x)-1}건)" if len(x) > 1 else x.iloc[0], # 표시용 번호
+                    'order_no': lambda x: f"{str(x.iloc[0]).split('-')[0]} (외 {len(x)-1}건)" if len(x) > 1 else str(x.iloc[0]), # 표시용 번호
                     'note': lambda x: ' / '.join(sorted(set([str(s) for s in x if s]))) # 비고 합치기
                 }
                 # 나머지 컬럼들은 첫 번째 값 사용
@@ -414,11 +414,12 @@ def render_shipping_status(db, sub_menu):
             
             st.divider()
             
-            # [NEW] 기능 탭 분리
-            act_tab1, act_tab2, act_tab3 = st.tabs(["목록 인쇄/엑셀", "거래명세서 발행", "출고 취소"])
+            # [NEW] 기능 선택 (버튼식)
+            action_mode = st.radio("작업 선택", ["목록 인쇄/엑셀", "거래명세서 발행", "출고 취소"], horizontal=True, label_visibility="collapsed")
+            st.markdown("<div style='margin-bottom: 15px;'></div>", unsafe_allow_html=True)
             
             # 1. 목록 인쇄 및 엑셀 다운로드
-            with act_tab1:
+            if action_mode == "목록 인쇄/엑셀":
                 st.markdown("##### 현재 조회된 목록 내보내기")
                 
                 with st.expander("목록 인쇄 옵션"):
@@ -442,7 +443,8 @@ def render_shipping_status(db, sub_menu):
                 # 엑셀 다운로드
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                    df[final_cols].rename(columns=col_map).to_excel(writer, index=False)
+                    # [FIX] 화면에 보이는 그대로(그룹화 여부 반영) 엑셀 다운로드
+                    df_display.to_excel(writer, index=False)
                 lc1.download_button("💾 엑셀 다운로드", buffer.getvalue(), f"출고목록_{today}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                 
                 # 목록 인쇄
@@ -498,7 +500,7 @@ def render_shipping_status(db, sub_menu):
                     st.components.v1.html(html, height=0, width=0)
 
             # 2. 거래명세서 발행 (기존 로직 이동)
-            with act_tab2:
+            elif action_mode == "거래명세서 발행":
                 if selection.selection.rows:
                     selected_indices = selection.selection.rows
                     
@@ -590,26 +592,60 @@ def render_shipping_status(db, sub_menu):
                             # [수정] 헤더/푸터 높이 동적 계산 (불필요한 여유 공간 제거)
                             # 헤더: 제목(10) + 날짜(5) + 공급자테이블(30) + 간격 + 발행일자추가 + 여유분 = 약 85mm (겹침 방지)
                             header_h = 85
+                            # [수정] 헤더 높이 정밀 조정 (mm)
+                            # 문서종류(3) + 제목(15) + 공급자정보(40) + 여유(5) = 약 63mm
+                            header_h = 63
+                            # 문서종류(3) + 제목(15) + 공급자정보(40) + 여유(2) = 약 60mm (기존 63mm에서 축소)
+                            header_h = 60
                             if options.get('show_approval'):
                                 header_h += 20 # 결재란 높이 추가
                             
                             # 푸터: 합계(8) + 비고(15) + 계좌(8) + 페이지(4) = 약 35mm
                             footer_h = 35
+                            # [수정] 푸터 높이 정밀 조정 (mm)
+                            # 합계(10) + 비고(25) + 계좌/참고(15) + 페이지(5) = 약 55mm
+                            footer_h = 55
+                            # 합계(10) + 비고(20) + 계좌/참고(10) + 페이지(5) = 약 45mm (기존 55mm에서 축소)
+                            footer_h = 45
                             if options.get('show_sign'):
                                 footer_h += 20 # 서명란 높이 추가
+                                footer_h += 15 # 서명란 높이 추가
                                 
                             table_header_h = 10
                             fixed_h = header_h + footer_h + table_header_h
                             table_h = avail_h - fixed_h
+                            table_header_h = 12
+                            
+                            # [수정] 렌더링 오차 및 하단 여백 확보를 위해 안전 마진 증가 (약 1행 높이 추가)
+                            # 기존 5mm -> 15mm로 넉넉하게 설정하여 겹침 방지
+                            safety_margin = 15
+                            # 기존 15mm -> 8mm로 조정하여 한 행 정도 더 표시되도록 수정
+                            safety_margin = 8
+                            # 기존 8mm -> 3mm로 과감하게 축소하여 행 추가 확보
+                            safety_margin = 3
                             
                             # 행 높이 추정 (폰트크기 + 패딩*2 + 테두리)
                             # 1px ≈ 0.264mm. 줄간격 1.3배. 테두리 포함.
+                            # 테이블 본문 가용 높이 (전체 - 헤더 - 푸터 - 안전여백)
+                            max_table_body_h = avail_h - header_h - footer_h - table_header_h - safety_margin
+                            
+                            # 행 높이 계산 (폰트크기 + 패딩*2 + 테두리)
                             font_size = options.get('font_size', 12)
                             padding = options.get('padding', 5)
                             row_h = (font_size * 1.3 * 0.264) + (padding * 2 * 0.264) + 0.2
+                            # 1px ≈ 0.264mm. 줄간격 1.4배. 테두리 포함.
+                            row_h = (font_size * 1.4 * 0.264) + (padding * 2 * 0.264) + 0.5
                             
-                            # [수정] 하단 여백을 채우기 위해 행 수 추가 (+2)
-                            return max(5, int(table_h / row_h) + 2)
+                            # [수정] 하단 여백을 채우기 위해 행 수 추가 (고정값 +6 대신 높이 기반 계산)
+                            # 글자 크기가 커지면 행 높이(row_h)가 커져서 추가되는 행 수가 줄어듦 (겹침 방지)
+                            # 약 38mm의 여유 공간을 채우는 방식으로 변경 (10pt 기준 6행 유지, 11pt 이상은 줄어듦)
+                            extra_rows = int(38 / row_h)
+                            return max(5, int(table_h / row_h) + extra_rows)
+                            # 가용 높이에 들어갈 수 있는 행 수 계산 (내림)
+                            # 공간이 좁아지거나 행이 커지면, 자동으로 행 개수(rows)가 줄어들어 침범을 방지함
+                            rows = int(max_table_body_h / row_h)
+                            
+                            return max(5, rows)
 
                         def generate_invoice_pages(customer, group_df, page_type_str, comp_info, bank_info, notes_info, remarks_info, options, partners_map):
                             # 날짜
@@ -760,15 +796,17 @@ def render_shipping_status(db, sub_menu):
                                     'price': price,
                                     'supply': supply,
                                     'vat': vat,
-                                    'note': row.get('note', '')
+                                    'note': row.get('note', ''),
+                                    'base_order_no': row.get('base_order_no', '')
                                 })
                             
                             # [NEW] 동일 품목 합산 로직
                             if options.get('merge_rows'):
                                 merged_data = {}
                                 for row in data_rows:
-                                    # 키: 제품명 + 규격 + 단가 + 비고 (비고가 다르면 합치지 않음)
-                                    key = (row['name'], row['size'], row['price'], row['note'])
+                                    # 키: 원본발주번호 + 제품명 + 규격 + 단가 + 비고 (비고가 다르면 합치지 않음)
+                                    # [FIX] 다른 발주건끼리 합쳐지는 것을 방지하기 위해 base_order_no 포함
+                                    key = (row['base_order_no'], row['name'], row['size'], row['price'], row['note'])
                                     if key not in merged_data:
                                         merged_data[key] = row.copy()
                                     else:
@@ -971,7 +1009,7 @@ def render_shipping_status(db, sub_menu):
                     st.info("거래명세서를 발행할 항목을 선택하세요.")
 
             # 3. 출고 취소 (기존 로직 이동)
-            with act_tab3:
+            elif action_mode == "출고 취소":
                 if selection.selection.rows:
                     selected_indices = selection.selection.rows
                     

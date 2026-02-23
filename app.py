@@ -571,20 +571,33 @@ if st.session_state.get("logged_in"):
     login_time = st.session_state.get("login_time", datetime.datetime.now())
     login_time_str = login_time.strftime("%Y년 %m월 %d일 %H시 %M분")
     
+    # [NEW] 사용자별 고유 키 생성을 위해 user_id 사용
+    user_id = st.session_state.get("user_id", "unknown")
+    
     js_code = f"""
     <script>
         (function() {{
             const loginTimeStr = "{login_time_str}";
             const timeoutMinutes = {timeout_min};
             const timeoutMs = timeoutMinutes * 60 * 1000;
-            let lastActivity = Date.now();
+            const storageKey = "lastActivity_" + "{user_id}"; // 사용자별 키 분리
+
+            // [FIX] 초기화: 저장된 활동 시간이 없으면 현재 시간으로 설정 (Local Storage 사용)
+            if (!localStorage.getItem(storageKey)) {{
+                localStorage.setItem(storageKey, Date.now());
+            }}
             
             function updateTimer() {{
                 const now = Date.now();
+                // [FIX] 저장소에서 최신 활동 시간 가져오기 (절전모드 복귀 시에도 유지됨)
+                let lastActivity = parseInt(localStorage.getItem(storageKey) || now);
+                
                 const idleMs = now - lastActivity;
                 const remainingMs = timeoutMs - idleMs;
                 
                 if (remainingMs <= 0) {{
+                    // 로그아웃 처리 전 스토리지 클리어
+                    localStorage.removeItem(storageKey);
                     // Trigger logout
                     window.parent.location.href = window.parent.location.href.split('?')[0] + '?logout=true';
                     return;
@@ -624,7 +637,8 @@ if st.session_state.get("logged_in"):
             }}
             
             function resetTimer() {{
-                lastActivity = Date.now();
+                // [FIX] 활동 감지 시 스토리지 시간 갱신
+                localStorage.setItem(storageKey, Date.now());
                 updateTimer();
             }}
             
@@ -639,6 +653,9 @@ if st.session_state.get("logged_in"):
             if (!window.logoutInterval) {{
                 window.logoutInterval = setInterval(updateTimer, 1000);
             }}
+            
+            // 초기 1회 실행
+            updateTimer();
         }})();
     </script>
     """

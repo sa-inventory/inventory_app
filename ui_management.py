@@ -23,7 +23,7 @@ def render_shipping_operations(db, sub_menu):
         st.subheader("주문별 출고 (발주번호 기준)")
         
         # [NEW] 검색 및 필터 UI
-        with st.expander("🔍 검색 및 필터", expanded=True):
+        with st.expander("검색", expanded=True):
             # [수정] 레이아웃 변경: 한 줄로 배치 및 날짜 입력 폭 축소
             c_f1, c_f2, c_f3 = st.columns([1.2, 1, 2])
             today = datetime.date.today()
@@ -84,6 +84,10 @@ def render_shipping_operations(db, sub_menu):
                     df = df[df['name'].astype(str).str.lower().str.contains(search_keyword, na=False)]
                 elif search_criteria == "발주번호":
                     df = df[df['order_no'].astype(str).str.lower().str.contains(search_keyword, na=False)]
+
+            # [NEW] 임의 등록 재고 발주번호 마스킹 (STOCK-으로 시작하면 -로 표시)
+            if 'order_no' in df.columns:
+                df['order_no'] = df['order_no'].apply(lambda x: '-' if str(x).startswith('STOCK-') else x)
 
             col_map = {
                 "product_code": "제품코드", "order_no": "발주번호", "date": "접수일", 
@@ -268,7 +272,7 @@ def render_shipping_status(db, sub_menu):
             st.session_state["key_ship_done"] = 0
 
         # [수정] 검색 필터 UI 개선 (실시간 반영을 위해 form 제거 및 expander 활용)
-        with st.expander("검색 및 필터 설정", expanded=True):
+        with st.expander("검색", expanded=True):
             c1, c2 = st.columns([2, 1])
             today = datetime.date.today()
             s_period = c1.date_input("조회 기간 (출고일)", [today - datetime.timedelta(days=30), today], key="ship_period")
@@ -1097,6 +1101,11 @@ def render_shipping_status(db, sub_menu):
 
 # [NEW] 재고 현황 로직을 별도 함수로 분리 (출고 작업과 재고 현황에서 공유)
 def render_inventory_logic(db, allow_shipping=False):
+    # [NEW] 파트너 권한 확인
+    user_role = st.session_state.get("role")
+    linked_partner = st.session_state.get("linked_partner")
+    is_partner = (user_role == "partner")
+
     # [NEW] 스마트 데이터 에디터 - 1. 변경사항 검토 및 확정 UI
     changes_key = f'inventory_changes_{allow_shipping}'
     if st.session_state.get(changes_key):
@@ -1177,6 +1186,11 @@ def render_inventory_logic(db, allow_shipping=False):
     rows = []
     for doc in docs:
         d = doc.to_dict()
+        
+        # [NEW] 파트너인 경우 본인 데이터만 필터링
+        if is_partner and linked_partner:
+            if d.get("customer") != linked_partner: continue
+            
         d['id'] = doc.id
         rows.append(d)
 
@@ -1202,7 +1216,7 @@ def render_inventory_logic(db, allow_shipping=False):
         df['total_value'] = df['stock'] * df['shipping_unit_price']
 
         # [NEW] 간편 검색 기능 (사용자 요청 반영)
-        with st.expander("🔍 검색 및 필터", expanded=True):
+        with st.expander("검색", expanded=True):
             c_search1, c_search2 = st.columns([1, 3])
             search_criteria = c_search1.selectbox("검색 기준", ["전체(통합)", "제품코드", "발주처", "제품종류", "제품명"], key=f"inv_search_criteria_{allow_shipping}")
             search_keyword = c_search2.text_input("검색어 입력", key=f"inv_search_keyword_{allow_shipping}")
@@ -1234,10 +1248,14 @@ def render_inventory_logic(db, allow_shipping=False):
             df = df.sort_values(by=sort_cols, ascending=[True] * len(sort_cols))
         
         # [NEW] 조회 방식 선택 (요약 vs 전체 리스트)
-        view_mode = st.radio("조회 방식", ["제품별 요약 (제품코드)", "전체 상세 내역 (리스트)"], horizontal=True, key=f"inv_view_mode_{allow_shipping}")
+        if is_partner:
+            view_mode = "전체 상세 내역 (리스트)"
+        else:
+            view_mode = st.radio("조회 방식", ["제품별 요약 (제품코드)", "전체 상세 내역 (리스트)"], horizontal=True, key=f"inv_view_mode_{allow_shipping}")
 
         # [NEW] 테이블 우측 상단에 '모든 품목 조회' 체크박스 배치
-        c_h1, c_h2 = st.columns([6, 1])
+        # [수정] 체크박스 공간 확보를 위해 비율 조정
+        c_h1, c_h2 = st.columns([5, 1.5])
         if view_mode == "제품별 요약 (제품코드)":
              c_h1.write("🔽 상세 내역을 확인할 제품을 선택하세요.")
         else:
@@ -1333,6 +1351,10 @@ def render_inventory_logic(db, allow_shipping=False):
                 if 'date' in detail_df.columns:
                     detail_df['date'] = detail_df['date'].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isnull(x) and hasattr(x, 'strftime') else str(x)[:10])
                 
+                # [NEW] 임의 등록 재고 발주번호 마스킹
+                if 'order_no' in detail_df.columns:
+                    detail_df['order_no'] = detail_df['order_no'].apply(lambda x: '-' if str(x).startswith('STOCK-') else x)
+
                 # [NEW] 스마트 데이터 에디터 - 3. 수정 모드 분기
                 if edit_mode:
                     st.info("수정할 셀을 더블클릭하여 값을 변경한 후, 하단의 '변경사항 저장' 버튼을 누르세요.")
@@ -1471,6 +1493,10 @@ def render_inventory_logic(db, allow_shipping=False):
             if 'date' in full_df.columns:
                 full_df['date'] = full_df['date'].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isnull(x) and hasattr(x, 'strftime') else str(x)[:10])
             
+            # [NEW] 임의 등록 재고 발주번호 마스킹
+            if 'order_no' in full_df.columns:
+                full_df['order_no'] = full_df['order_no'].apply(lambda x: '-' if str(x).startswith('STOCK-') else x)
+
             if edit_mode:
                 st.info("수정할 셀을 더블클릭하여 값을 변경한 후, 하단의 '변경사항 저장' 버튼을 누르세요.")
                 
@@ -2482,7 +2508,7 @@ def render_partners(db, sub_menu):
                     df[col] = ""
             
             # [NEW] 다중 조건 검색 기능
-            with st.expander("🔍 상세 검색 (다중 조건)", expanded=True):
+            with st.expander("검색", expanded=True):
                 sp_c1, sp_c2, sp_c3 = st.columns([1, 1, 2])
                 
                 # 검색 옵션 준비
@@ -2807,7 +2833,14 @@ def render_users(db, sub_menu):
                     
                     # 권한 설정
                     current_perms = sel_user['permissions'] if isinstance(sel_user['permissions'], list) else []
-                    e_perms = st.multiselect("접근 가능 메뉴", all_menus, default=[p for p in current_perms if p in all_menus], key=f"e_perms_{sel_uid}")
+                    
+                    # [수정] 파트너인 경우 메뉴 제한
+                    if e_role == "partner":
+                        menu_opts = ["발주현황(거래처)", "재고현황(거래처)"]
+                    else:
+                        menu_opts = all_menus
+                    
+                    e_perms = st.multiselect("접근 가능 메뉴", menu_opts, default=[p for p in current_perms if p in menu_opts], key=f"e_perms_{sel_uid}")
                     
                     # [NEW] 거래처 계정일 경우 연동 거래처 선택
                     e_linked_partner = ""
@@ -2874,8 +2907,15 @@ def render_users(db, sub_menu):
                 else:
                     st.warning("등록된 발주처가 없습니다.")
             
-            default_perms = ["발주현황"] if u_role == "partner" else ["발주서접수", "발주현황"]
-            u_perms = st.multiselect("접근 가능 메뉴", all_menus, default=default_perms, key=f"new_u_perms_{rk}")
+            # [수정] 파트너인 경우 메뉴 제한 및 기본값 설정
+            if u_role == "partner":
+                menu_opts = ["발주현황(거래처)", "재고현황(거래처)"]
+                default_perms = ["발주현황(거래처)", "재고현황(거래처)"]
+            else:
+                menu_opts = all_menus
+                default_perms = ["발주서접수", "발주현황"]
+            
+            u_perms = st.multiselect("접근 가능 메뉴", menu_opts, default=default_perms, key=f"new_u_perms_{rk}")
             
             if st.button("사용자 등록", type="primary", key=f"btn_add_new_user_{rk}"):
                 if u_id and u_pw and u_name:

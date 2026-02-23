@@ -71,7 +71,7 @@ def render_weaving(db, sub_menu=None, readonly=False):
             st.session_state["key_weaving_wait"] = 0
             
         # [NEW] 검색 UI 추가
-        with st.expander("🔍 검색 및 필터", expanded=True):
+        with st.expander("검색", expanded=True):
             c_f1, c_f2, c_f3 = st.columns([1.2, 1, 2])
             today = datetime.date.today()
             # 기간 검색 (접수일 기준) - 기본 3개월
@@ -383,13 +383,14 @@ def render_weaving(db, sub_menu=None, readonly=False):
             st.session_state["key_weaving_done"] = 0
 
         # 검색 조건 (기간 + 발주처 + 제품명)
-        with st.form("search_weaving_done"):
-            c1, c2, c3 = st.columns([2, 1, 1])
-            today = datetime.date.today()
-            s_date = c1.date_input("조회 기간 (완료일)", [today - datetime.timedelta(days=30), today])
-            s_cust = c2.text_input("발주처 검색")
-            s_prod = c3.text_input("제품명 검색")
-            st.form_submit_button("🔍 조회")
+        with st.expander("검색", expanded=True):
+            with st.form("search_weaving_done"):
+                c1, c2, c3 = st.columns([2, 1, 1])
+                today = datetime.date.today()
+                s_date = c1.date_input("조회 기간 (완료일)", [today - datetime.timedelta(days=30), today])
+                s_cust = c2.text_input("발주처 검색")
+                s_prod = c3.text_input("제품명 검색")
+                st.form_submit_button("조회")
 
         # 날짜 범위 계산
         if len(s_date) == 2:
@@ -1288,13 +1289,14 @@ def render_dyeing(db, sub_menu):
             st.session_state["key_dyeing_done"] = 0
         
         # 검색 조건 (기간 + 염색업체 + 발주처)
-        with st.form("search_dye_done"):
-            c1, c2, c3 = st.columns([2, 1, 1])
-            today = datetime.date.today()
-            s_date = c1.date_input("조회 기간 (완료일)", [today - datetime.timedelta(days=30), today])
-            s_partner = c2.text_input("염색업체")
-            s_customer = c3.text_input("발주처")
-            st.form_submit_button("🔍 조회")
+        with st.expander("검색", expanded=True):
+            with st.form("search_dye_done"):
+                c1, c2, c3 = st.columns([2, 1, 1])
+                today = datetime.date.today()
+                s_date = c1.date_input("조회 기간 (완료일)", [today - datetime.timedelta(days=30), today])
+                s_partner = c2.text_input("염색업체")
+                s_customer = c3.text_input("발주처")
+                st.form_submit_button("조회")
 
         # 날짜 범위 계산
         if len(s_date) == 2:
@@ -1787,13 +1789,14 @@ def render_sewing(db, sub_menu):
             st.session_state["key_sewing_done"] = 0
         
         # 검색 및 엑셀 다운로드
-        with st.form("search_sew_done"):
-            c1, c2, c3 = st.columns([2, 1, 1])
-            today = datetime.date.today()
-            s_date = c1.date_input("조회 기간 (완료일)", [today - datetime.timedelta(days=30), today])
-            s_partner = c2.text_input("봉제업체")
-            s_customer = c3.text_input("발주처")
-            st.form_submit_button("🔍 조회")
+        with st.expander("검색", expanded=True):
+            with st.form("search_sew_done"):
+                c1, c2, c3 = st.columns([2, 1, 1])
+                today = datetime.date.today()
+                s_date = c1.date_input("조회 기간 (완료일)", [today - datetime.timedelta(days=30), today])
+                s_partner = c2.text_input("봉제업체")
+                s_customer = c3.text_input("발주처")
+                st.form_submit_button("조회")
             
         # 날짜 범위 계산
         if len(s_date) == 2:

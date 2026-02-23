@@ -158,8 +158,14 @@ if not st.session_state["logged_in"]:
                                 if user_data.get("password") == "0000":
                                     st.session_state["password_reset_needed"] = True
 
+                                # [수정] 로그인 시 기본 메뉴 설정 (권한 기반)
                                 if "current_menu" in st.session_state:
                                     del st.session_state["current_menu"]
+                                
+                                # [수정] 직원은 공지사항을 기본 화면으로 설정
+                                st.session_state["current_menu"] = "공지사항"
+                                if "current_sub_menu" in st.session_state:
+                                    del st.session_state["current_sub_menu"]
                                 
                                 # [NEW] 세션 생성 및 URL 저장 (새로고침 유지용)
                                 new_session_id = str(uuid.uuid4())
@@ -195,6 +201,7 @@ if not st.session_state["logged_in"]:
                                 st.session_state["linked_partner"] = user_data.get("linked_partner")
                                 st.session_state["auto_logout_minutes"] = user_data.get("auto_logout_minutes", 60)
                                 st.session_state["login_time"] = datetime.datetime.now()
+                                st.session_state["permissions"] = user_data.get("permissions") or []
                                 
                                 # [NEW] 비밀번호 만료 체크 (90일)
                                 pw_changed = user_data.get("password_changed_at")
@@ -210,8 +217,15 @@ if not st.session_state["logged_in"]:
                                 if user_data.get("password") == "0000":
                                     st.session_state["password_reset_needed"] = True
 
+                                # [수정] 로그인 시 기본 메뉴 설정 (권한 기반)
                                 if "current_menu" in st.session_state:
                                     del st.session_state["current_menu"]
+                                
+                                # 권한 목록이 있으면 첫 번째 메뉴를 기본값으로, 없으면 발주현황(거래처)
+                                user_perms = user_data.get("permissions", [])
+                                st.session_state["current_menu"] = user_perms[0] if user_perms else "발주현황(거래처)"
+                                if "current_sub_menu" in st.session_state:
+                                    del st.session_state["current_sub_menu"]
                                 
                                 # [NEW] 세션 생성 및 URL 저장
                                 new_session_id = str(uuid.uuid4())
@@ -259,11 +273,14 @@ with st.sidebar:
     
     # 메뉴 선택 기능 추가
     if "current_menu" not in st.session_state:
-        # 거래처 계정은 기본 메뉴가 '발주현황'
+        # [수정] 새로고침 시에도 권한 기반 기본 메뉴 설정
         if st.session_state.get("role") == "partner":
-            st.session_state["current_menu"] = "발주현황(거래처)"
+            perms = st.session_state.get("permissions", [])
+            st.session_state["current_menu"] = perms[0] if perms else "발주현황(거래처)"
         else:
-            st.session_state["current_menu"] = "공지사항"
+            # 직원은 공지사항이 기본이지만, 권한이 없을 수도 있으므로 체크
+            perms = st.session_state.get("permissions", [])
+            st.session_state["current_menu"] = "공지사항" # 공지사항은 보통 공통 권한
     
     # [NEW] 하위 메뉴 상태 초기화
     if "current_sub_menu" not in st.session_state:
@@ -309,7 +326,11 @@ with st.sidebar:
     # [NEW] 거래처(partner) 계정일 경우 메뉴 간소화
     if st.session_state.get("role") == "partner":
         st.info(f"**{st.session_state.get('linked_partner')}** 전용")
-        menu_item("발주 현황 조회", "발주현황(거래처)")
+        # [수정] 권한이 있는 메뉴만 표시
+        if check_access("발주현황(거래처)"):
+            menu_item("발주 현황 조회", "발주현황(거래처)")
+        if check_access("재고현황(거래처)"):
+            menu_item("재고 현황 조회", "재고현황(거래처)")
             
     else:
         # [NEW] 직원용 전체 메뉴 구조
@@ -578,6 +599,8 @@ elif menu == "발주현황":
     render_order_status(db, sub_menu)
 elif menu == "발주현황(거래처)":
     render_partner_order_status(db)
+elif menu == "재고현황(거래처)":
+    render_inventory(db, "재고 현황 조회")
 
 elif menu == "제직현황":
     render_weaving(db, sub_menu)

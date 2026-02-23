@@ -78,12 +78,12 @@ def render_notice_board(db):
     if "notice_page" not in st.session_state: st.session_state["notice_page"] = 1
 
     # [NEW] 검색 UI
-    with st.expander("공지사항 검색", expanded=False):
-        c1, c2, c3, c4 = st.columns([1, 1, 0.3, 0.3])
+    with st.expander("검색", expanded=True):
+        c1, c2, c3, c4 = st.columns([1, 1, 0.3, 0.3], vertical_alignment="bottom")
         s_author = c1.text_input("작성자", value=st.session_state["n_search_author"])
         s_keyword = c2.text_input("제목+내용", value=st.session_state["n_search_keyword"])
         
-        if c3.button("검색", type="primary", use_container_width=True, help="조건에 맞는 공지사항을 검색합니다."):
+        if c3.button("조회", type="primary", use_container_width=True, help="조건에 맞는 공지사항을 검색합니다."):
             st.session_state["n_search_author"] = s_author
             st.session_state["n_search_keyword"] = s_keyword
             st.session_state["notice_page"] = 1 # 검색 시 1페이지로 초기화
@@ -1033,7 +1033,7 @@ def render_schedule(db):
     # 4. 일정 목록 및 관리
     
     # [NEW] 목록 조회 기간 설정
-    with st.expander("📋 일정 목록 조회 설정", expanded=False):
+    with st.expander("검색", expanded=True):
         # [수정] 레이아웃 변경: 라디오버튼 옆에 입력필드 배치
         c_opt, c_range = st.columns([1.5, 3.5])
         list_mode = c_opt.radio("조회 기준", ["달력과 동일 (위)", "별도 기간 선택"], horizontal=True, key="sch_list_mode")

@@ -45,7 +45,8 @@ def render_order_entry(db, sub_menu):
     if "weaving_type" in df_products.columns and "product_type" not in df_products.columns:
         df_products.rename(columns={"weaving_type": "product_type"}, inplace=True)
 
-    if sub_menu == "개별 접수":
+    # [수정] sub_menu가 없거나 '개별 접수'인 경우 기본 화면 표시
+    if sub_menu == "개별 접수" or sub_menu is None:
         # --- 1. 제품 선택 ---
         st.subheader("1. 제품 선택")
 
@@ -58,7 +59,7 @@ def render_order_entry(db, sub_menu):
         final_cols = [c for c in display_cols if c in df_products.columns]
 
         # 검색 필터 추가
-        with st.expander("제품 검색조건", expanded=True):
+        with st.expander("검색", expanded=True):
             f1, f2, f3, f4 = st.columns(4)
             
             # 필터 옵션 생성 (전체 + 고유값)
@@ -297,21 +298,22 @@ def render_partner_order_status(db):
     st.info(f"**{partner_name}**님의 발주 내역 및 현재 공정 상태를 조회합니다.")
 
     # 검색 조건
-    with st.form("partner_search_form"):
-        c1, c2, c3, c4 = st.columns([2, 1.5, 1.5, 2])
-        today = datetime.date.today()
-        date_range = c1.date_input("조회 기간 (접수일)", [today - datetime.timedelta(days=90), today])
-        
-        # 상태 필터
-        status_options = ["전체", "발주접수", "제직대기", "제직중", "제직완료", "염색중", "염색완료", "봉제중", "봉제완료", "출고완료"]
-        filter_status = c2.selectbox("진행 상태", status_options)
-        
-        # [NEW] 검색 기준 및 키워드 (거래처용)
-        criteria_options = ["전체", "제품명", "제품코드", "제품종류", "사종", "색상"]
-        search_criteria = c3.selectbox("검색 기준", criteria_options)
-        search_keyword = c4.text_input("검색어 입력")
-        
-        st.form_submit_button("🔍 조회하기")
+    with st.expander("검색", expanded=True):
+        with st.form("partner_search_form"):
+            c1, c2, c3, c4 = st.columns([2, 1.5, 1.5, 2])
+            today = datetime.date.today()
+            date_range = c1.date_input("조회 기간 (접수일)", [today - datetime.timedelta(days=90), today])
+            
+            # 상태 필터
+            status_options = ["전체", "발주접수", "제직대기", "제직중", "제직완료", "염색중", "염색완료", "봉제중", "봉제완료", "출고완료"]
+            filter_status = c2.selectbox("진행 상태", status_options)
+            
+            # [NEW] 검색 기준 및 키워드 (거래처용)
+            criteria_options = ["전체", "제품명", "제품코드", "제품종류", "사종", "색상"]
+            search_criteria = c3.selectbox("검색 기준", criteria_options)
+            search_keyword = c4.text_input("검색어 입력")
+            
+            st.form_submit_button("조회")
 
     # 데이터 조회
     start_date = datetime.datetime.combine(date_range[0], datetime.time.min)
@@ -750,27 +752,28 @@ def render_order_status(db, sub_menu):
         st.session_state["search_criteria"] = "전체"
         st.session_state["search_keyword"] = ""
 
-    with st.form("search_form"):
-        c1, c2, c3, c4 = st.columns([2, 1.5, 1.5, 2])
-        # 날짜 범위 선택 (기본값: 세션에 저장된 값 사용)
-        date_range = c1.date_input("조회 기간", st.session_state.get("search_date_range"), format="YYYY-MM-DD")
-        # 상세 공정 상태 목록 추가
-        status_options = ["전체", "발주접수", "제직대기", "제직중", "제직완료", "염색중", "염색완료", "봉제중", "봉제완료", "출고완료"]
-        
-        # [수정] 상태 필터: 멀티셀렉트 -> 콤보박스(Selectbox)
-        saved_status = st.session_state.get("search_filter_status_single", "전체")
-        if saved_status not in status_options: saved_status = "전체"
-        filter_status = c2.selectbox("진행 상태", status_options, index=status_options.index(saved_status))
-        
-        # [수정] 검색 조건: 콤보박스 + 텍스트 입력
-        criteria_options = ["전체", "제품코드", "발주처", "제품명", "제품종류", "사종", "색상", "중량"]
-        saved_criteria = st.session_state.get("search_criteria", "전체")
-        if saved_criteria not in criteria_options: saved_criteria = "전체"
-        
-        search_criteria = c3.selectbox("검색 기준", criteria_options, index=criteria_options.index(saved_criteria))
-        search_keyword = c4.text_input("검색어 입력", value=st.session_state.get("search_keyword", ""))
-        
-        search_btn = st.form_submit_button("🔍 조회하기")
+    with st.expander("검색", expanded=True):
+        with st.form("search_form"):
+            c1, c2, c3, c4 = st.columns([2, 1.5, 1.5, 2])
+            # 날짜 범위 선택 (기본값: 세션에 저장된 값 사용)
+            date_range = c1.date_input("조회 기간", st.session_state.get("search_date_range"), format="YYYY-MM-DD")
+            # 상세 공정 상태 목록 추가
+            status_options = ["전체", "발주접수", "제직대기", "제직중", "제직완료", "염색중", "염색완료", "봉제중", "봉제완료", "출고완료"]
+            
+            # [수정] 상태 필터: 멀티셀렉트 -> 콤보박스(Selectbox)
+            saved_status = st.session_state.get("search_filter_status_single", "전체")
+            if saved_status not in status_options: saved_status = "전체"
+            filter_status = c2.selectbox("진행 상태", status_options, index=status_options.index(saved_status))
+            
+            # [수정] 검색 조건: 콤보박스 + 텍스트 입력
+            criteria_options = ["전체", "제품코드", "발주처", "제품명", "제품종류", "사종", "색상", "중량"]
+            saved_criteria = st.session_state.get("search_criteria", "전체")
+            if saved_criteria not in criteria_options: saved_criteria = "전체"
+            
+            search_criteria = c3.selectbox("검색 기준", criteria_options, index=criteria_options.index(saved_criteria))
+            search_keyword = c4.text_input("검색어 입력", value=st.session_state.get("search_keyword", ""))
+            
+            search_btn = st.form_submit_button("조회")
 
     # 검색 버튼 클릭 시 세션에 검색 조건 저장 (새로고침 되어도 유지되도록)
     if search_btn:

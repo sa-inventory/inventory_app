@@ -36,7 +36,7 @@ def render_statistics(db, sub_menu):
     st.info("발주부터 출고까지 전 공정의 현황을 년도별/월별/기간별로 분석합니다.")
     
     # --- 공통 조회 조건 ---
-    with st.expander("조회 조건 설정", expanded=True):
+    with st.expander("검색", expanded=True):
         c1, c2, c3, c4 = st.columns(4)
         stat_type = c1.radio("분석 기준", ["기간별", "월별", "년도별"], horizontal=True)
         

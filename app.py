@@ -59,6 +59,22 @@ st.markdown(base_css, unsafe_allow_html=True)
 
 db = get_db()
 
+# [NEW] 브라우저 탭 제목 동적 변경 (사용자 설정 반영)
+try:
+    c_doc = db.collection("settings").document("company_info").get()
+    if c_doc.exists:
+        app_title = c_doc.to_dict().get("app_title", "타올 생산 현황 관리")
+    else:
+        app_title = "타올 생산 현황 관리"
+except:
+    app_title = "타올 생산 현황 관리"
+
+components.html(f"""
+    <script>
+        window.parent.document.title = "{app_title}";
+    </script>
+""", height=0)
+
 # --- 로그인 기능 추가 ---
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False

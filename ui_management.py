@@ -3302,6 +3302,8 @@ def render_company_settings(db, sub_menu):
         c1, c2 = st.columns(2)
         name = c1.text_input("상호(회사명)", value=data.get("name", ""))
         rep_name = c2.text_input("대표자명", value=data.get("rep_name", ""))
+            
+        app_title = st.text_input("시스템 제목 (브라우저 탭)", value=data.get("app_title", "타올 생산 현황 관리"), help="웹브라우저 탭에 표시될 제목입니다.")
 
         biz_num = st.text_input("사업자등록번호", value=data.get("biz_num", ""))
         
@@ -3347,7 +3349,8 @@ def render_company_settings(db, sub_menu):
                 "address": address, "address_detail": addr_detail, # 상세주소 별도 저장 또는 합쳐서 저장 가능 (여기선 분리 저장 예시)
                 "phone": phone, "fax": fax, "biz_type": biz_type, "biz_item": biz_item,
                 "email": email, "bank_name": bank_name, "bank_account": bank_account, "note": note,
-                "juso_api_key": juso_api_key
+                "juso_api_key": juso_api_key,
+                "app_title": app_title
             }
             doc_ref.set(new_data)
             st.success("회사 정보가 저장되었습니다.")

@@ -1,4 +1,8 @@
 import streamlit as st
+
+# 1. 화면 기본 설정 (제목 등) - 반드시 다른 Streamlit 명령이나 커스텀 모듈 임포트보다 먼저 실행되어야 함
+st.set_page_config(page_title="타올 생산 현황 관리", page_icon="logo.png", layout="wide")
+
 import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import firestore
@@ -15,9 +19,6 @@ from ui_production import render_weaving, render_dyeing, render_sewing
 from ui_management import render_shipping_operations, render_shipping_status, render_inventory, render_product_master, render_partners, render_machines, render_codes, render_users, render_my_profile, render_company_settings
 from ui_statistics import render_statistics
 from ui_board import render_notice_board, render_schedule
-
-# 1. 화면 기본 설정 (제목 등)
-st.set_page_config(page_title="타올 생산 현황 관리", page_icon="logo.png", layout="wide")
 
 # [수정] CSS 스타일 정의 (관리자 여부에 따라 메뉴 표시/숨김 분기)
 base_css = """
@@ -160,6 +161,9 @@ if not st.session_state["logged_in"]:
                 login_pw = st.text_input("비밀번호", type="password", placeholder="비밀번호를 입력하세요")
                 
                 if st.form_submit_button("로그인", use_container_width=True):
+                    if not login_id:
+                        st.error("아이디를 입력해주세요.")
+                        st.stop()
                     user_doc = db.collection("users").document(login_id).get()
                     if user_doc.exists:
                         user_data = user_doc.to_dict()
@@ -224,6 +228,9 @@ if not st.session_state["logged_in"]:
                 p_pw = st.text_input("비밀번호", type="password", placeholder="비밀번호를 입력하세요")
                 
                 if st.form_submit_button("로그인", use_container_width=True):
+                    if not p_id:
+                        st.error("아이디를 입력해주세요.")
+                        st.stop()
                     user_doc = db.collection("users").document(p_id).get()
                     if user_doc.exists:
                         user_data = user_doc.to_dict()

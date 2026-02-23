@@ -2784,7 +2784,7 @@ def render_users(db, sub_menu):
     else:
         st.info("시스템 사용자를 등록하고 권한을 설정합니다.")
         
-        all_menus = ["발주서접수", "발주현황", "제직현황", "제직조회", "염색현황", "봉제현황", "출고현황", "재고현황", "제품 관리", "거래처관리", "제직기관리", "제품코드설정", "사용자 관리"]
+        all_menus = ["발주서접수", "발주현황", "제직현황", "제직조회", "염색현황", "봉제현황", "출고현황", "재고현황", "제품 관리", "거래처관리", "제직기관리", "제품코드설정", "사용자 관리", "발주현황(거래처)", "재고현황(거래처)"]
         
         if sub_menu == "사용자 목록":
             # 사용자 목록 조회
@@ -2837,10 +2837,17 @@ def render_users(db, sub_menu):
                     # [수정] 파트너인 경우 메뉴 제한
                     if e_role == "partner":
                         menu_opts = ["발주현황(거래처)", "재고현황(거래처)"]
+                        # 기존 권한이 파트너 메뉴와 맞지 않으면 기본값 설정
+                        if not any(p in menu_opts for p in current_perms):
+                             default_edit_perms = ["발주현황(거래처)", "재고현황(거래처)"]
+                        else:
+                             default_edit_perms = [p for p in current_perms if p in menu_opts]
                     else:
                         menu_opts = all_menus
+                        default_edit_perms = [p for p in current_perms if p in menu_opts]
                     
-                    e_perms = st.multiselect("접근 가능 메뉴", menu_opts, default=[p for p in current_perms if p in menu_opts], key=f"e_perms_{sel_uid}")
+                    # [FIX] key에 role을 포함시켜 역할 변경 시 위젯 초기화 유도
+                    e_perms = st.multiselect("접근 가능 메뉴", menu_opts, default=default_edit_perms, key=f"e_perms_{sel_uid}_{e_role}")
                     
                     # [NEW] 거래처 계정일 경우 연동 거래처 선택
                     e_linked_partner = ""
@@ -2915,7 +2922,8 @@ def render_users(db, sub_menu):
                 menu_opts = all_menus
                 default_perms = ["발주서접수", "발주현황"]
             
-            u_perms = st.multiselect("접근 가능 메뉴", menu_opts, default=default_perms, key=f"new_u_perms_{rk}")
+            # [FIX] key에 role을 포함시켜 역할 변경 시 위젯 초기화 유도
+            u_perms = st.multiselect("접근 가능 메뉴", menu_opts, default=default_perms, key=f"new_u_perms_{rk}_{u_role}")
             
             if st.button("사용자 등록", type="primary", key=f"btn_add_new_user_{rk}"):
                 if u_id and u_pw and u_name:

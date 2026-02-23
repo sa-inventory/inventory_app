@@ -290,8 +290,21 @@ with st.sidebar:
     def check_access(menu_name):
         # 관리자는 모든 메뉴 접근 가능
         if st.session_state.get("role") == "admin": return True
+        
+        # [FIX] 파트너 계정인데 권한 목록이 비어있는 경우 (등록 오류 등) 기본 메뉴 접근 허용
+        if st.session_state.get("role") == "partner" and not st.session_state.get("permissions"):
+            return menu_name in ["발주현황(거래처)", "재고현황(거래처)"]
+            
         # 사용자는 permissions 목록에 있는 메뉴만 접근 가능
         user_perms = st.session_state.get("permissions", [])
+        
+        # [FIX] 파트너 계정의 경우, 구버전 권한(직원용 메뉴명) 호환성 처리
+        if st.session_state.get("role") == "partner":
+            if menu_name == "발주현황(거래처)" and ("발주현황" in user_perms or "발주현황(거래처)" in user_perms):
+                return True
+            if menu_name == "재고현황(거래처)" and ("재고현황" in user_perms or "재고현황(거래처)" in user_perms):
+                return True
+                
         return menu_name in user_perms
 
     # [NEW] 메뉴 아이템 생성 헬퍼 함수
@@ -540,7 +553,7 @@ if st.session_state.get("logged_in"):
                     const totalMin = Math.ceil(remainingMs / 60000);
                     const h = Math.floor(totalMin / 60);
                     const m = totalMin % 60;
-                    timeStr = (h > 0 ? h + "시간 " : "") + m + "분";
+                    timeStr = h + "시간 " + m + "분";
                 }} else {{
                     timeStr = Math.ceil(remainingMs / 1000) + "초";
                 }}
@@ -564,7 +577,7 @@ if st.session_state.get("logged_in"):
                     timerDiv.style.lineHeight = '1.3';
                     window.parent.document.body.appendChild(timerDiv);
                 }}
-                timerDiv.innerHTML = '접속시간 ' + loginTimeStr + '<br>자동로그아웃 ' + timeStr;
+                timerDiv.innerHTML = '접속시간 ' + loginTimeStr + '<br>[미조작 시 로그아웃] ' + timeStr + ' 남음';
             }}
             
             function resetTimer() {{

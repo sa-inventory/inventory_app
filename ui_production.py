@@ -760,8 +760,6 @@ def render_weaving(db, sub_menu=None, readonly=False):
         html_content += f"<div class='work-date'>작성일자: {view_date}</div>"
         
         # 주간 섹션
-        st.markdown("#### ☀️ 주간 작업")
-        html_content += "<div class='section-title'>☀️ 주간 작업</div>"
         st.markdown("#### 주간 작업")
         html_content += "<div class='section-title'>주간 작업</div>"
         if day_logs:
@@ -789,9 +787,8 @@ def render_weaving(db, sub_menu=None, readonly=False):
         st.divider()
 
         # 야간 섹션
-        st.markdown("#### 🌙 야간 작업")
         st.markdown("#### 야간 작업")
-        html_content += "<div class='section-title'>🌙 야간 작업</div>"
+        html_content += "<div class='section-title'>야간 작업</div>"
         if night_logs:
             df_night = pd.DataFrame(night_logs)
             df_night['log_time'] = df_night['log_time'].apply(lambda x: x.strftime('%H:%M') if hasattr(x, 'strftime') else str(x)[11:16])

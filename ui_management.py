@@ -1584,19 +1584,28 @@ def render_inventory_logic(db, allow_shipping=False):
 
                 full_height = min((len(full_df) + 1) * 35 + 3, 700)
 
-                selection_full = st.dataframe(
-                    full_df[full_cols].rename(columns=full_map),
-                    width="stretch", hide_index=True, on_select="rerun",
-                    selection_mode=sel_mode, height=full_height,
-                    key=f"inv_full_list_{allow_shipping}"
-                )
+                # [수정] 파트너인 경우 선택 기능 비활성화 (단순 조회)
+                if is_partner:
+                    st.dataframe(
+                        full_df[full_cols].rename(columns=full_map),
+                        width="stretch", hide_index=True, height=full_height,
+                        key=f"inv_full_list_{allow_shipping}"
+                    )
+                    selection_full = None
+                else:
+                    selection_full = st.dataframe(
+                        full_df[full_cols].rename(columns=full_map),
+                        width="stretch", hide_index=True, on_select="rerun",
+                        selection_mode=sel_mode, height=full_height,
+                        key=f"inv_full_list_{allow_shipping}"
+                    )
                 
                 st.markdown(f"<div style='text-align:right; font-weight:bold; padding:5px; color:#333;'>합계 수량: {full_df['stock'].sum():,}</div>", unsafe_allow_html=True)
 
-                if allow_shipping and selection_full.selection.rows:
+                if allow_shipping and selection_full and selection_full.selection.rows:
                     selected_rows_for_shipping = full_df.iloc[selection_full.selection.rows]
 
-                if is_admin and not allow_shipping and selection_full.selection.rows:
+                if is_admin and not allow_shipping and selection_full and selection_full.selection.rows:
                     del_rows = full_df.iloc[selection_full.selection.rows]
                     st.markdown(f"#### 🗑️ 재고 삭제 (선택: {len(del_rows)}건)")
                     
@@ -1684,7 +1693,8 @@ def render_inventory_logic(db, allow_shipping=False):
                 # 제품코드, 제품명 순으로 정렬
                 if "제품코드" in df_detail_final.columns:
                     df_detail_final = df_detail_final.sort_values(by=["제품코드", "제품명"])
-                total_q = df_detail_final['stock'].sum()
+                # [FIX] 컬럼명 변경 반영 (stock -> 재고수량)
+                total_q = df_detail_final['재고수량'].sum()
                 html = generate_report_html(p_title, df_detail_final, get_summary_text(f"총 {len(df_detail_final)}건", total_q), options)
                 st.components.v1.html(html, height=0, width=0)
                 

@@ -123,7 +123,8 @@ def render_weaving(db, sub_menu=None, readonly=False):
                                         <b>규격:</b> {item.get('size', '-')}<br>
                                         <b>중량:</b> {item.get('weight', '-')}g<br>
                                         <b>수량:</b> {int(item.get('stock', 0)):,}장<br>
-                                        <b>납품요청일:</b> {str(item.get('delivery_req_date', '-'))[:10]}
+                                        <b>납품요청일:</b> {str(item.get('delivery_req_date', '-'))[:10]}<br>
+                                        <b>진행:</b> {roll_cnt}롤 중 {cur_roll}번째 롤
                                     </div>
                                 </div>
                                 """

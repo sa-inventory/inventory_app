@@ -52,6 +52,7 @@ if st.session_state.get("role") != "admin":
         #MainMenu {visibility: hidden;} /* 우측 상단 햄버거 메뉴 숨김 */
         footer {visibility: hidden;}    /* 하단 'Made with Streamlit' 숨김 */
         header {visibility: hidden;}    /* 상단 헤더(Deploy 버튼 등) 숨김 */
+        [data-testid="stDecoration"] {visibility: hidden;} /* 상단 데코레이션(고양이 등) 숨김 */
     """
 
 base_css += "</style>"
@@ -71,7 +72,15 @@ except:
 
 components.html(f"""
     <script>
-        window.parent.document.title = "{app_title}";
+        const title = "{app_title}";
+        window.parent.document.title = title;
+        
+        // Title Observer to prevent "- Streamlit" suffix
+        new MutationObserver(function(mutations) {{
+            if (window.parent.document.title !== title) {{
+                window.parent.document.title = title;
+            }}
+        }}).observe(window.parent.document.querySelector('title'), {{ childList: true }});
     </script>
 """, height=0)
 

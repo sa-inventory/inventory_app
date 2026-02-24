@@ -294,14 +294,14 @@ def render_weaving(db, sub_menu=None, readonly=False):
                                 st.success(f"제직을 시작합니다.")
                                 st.session_state["key_weaving_wait"] += 1 # 목록 선택 초기화
                                 st.rerun()
-                
-                # 발주접수로 되돌리기 기능 추가
-                st.divider()
-                if st.button("🚫 발주접수로 되돌리기", key="back_to_order_waiting"):
-                    db.collection("orders").document(sel_id).update({"status": "발주접수"})
-                    st.success("발주접수 상태로 되돌렸습니다.")
-                    st.session_state["key_weaving_wait"] += 1
-                    st.rerun()
+                    
+                    # [FIX] 발주접수로 되돌리기 기능은 readonly가 아닐 때만 표시
+                    st.divider()
+                    if st.button("🚫 발주접수로 되돌리기", key="back_to_order_waiting"):
+                        db.collection("orders").document(sel_id).update({"status": "발주접수"})
+                        st.success("발주접수 상태로 되돌렸습니다.")
+                        st.session_state["key_weaving_wait"] += 1
+                        st.rerun()
         else:
             st.info("대기 중인 작업이 없습니다.")
 
@@ -457,15 +457,16 @@ def render_weaving(db, sub_menu=None, readonly=False):
                         if ss_kg_key in st.session_state: del st.session_state[ss_kg_key]
                         
                         st.rerun()
-                
-                if st.button("🚫 제직 취소 (대기로 되돌리기)", key="cancel_weaving"):
-                    db.collection("orders").document(sel_id).update({
-                        "status": "제직대기",
-                        "machine_no": firestore.DELETE_FIELD,
-                        "weaving_start_time": firestore.DELETE_FIELD
-                    })
-                    st.session_state["weaving_df_key"] += 1
-                    st.rerun()
+                    
+                    # [FIX] 제직 취소 기능은 readonly가 아닐 때만 표시
+                    if st.button("🚫 제직 취소 (대기로 되돌리기)", key="cancel_weaving"):
+                        db.collection("orders").document(sel_id).update({
+                            "status": "제직대기",
+                            "machine_no": firestore.DELETE_FIELD,
+                            "weaving_start_time": firestore.DELETE_FIELD
+                        })
+                        st.session_state["weaving_df_key"] += 1
+                        st.rerun()
         else:
             st.info("현재 제직 중인 작업이 없습니다.")
 

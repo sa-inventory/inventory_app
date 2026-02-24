@@ -217,13 +217,14 @@ def render_order_entry(db, sub_menu):
             
             customer_list = get_partners("발주처")
 
-            c1, c2, c3 = st.columns(3)
+            c1, c2, c3, c4 = st.columns(4)
             order_date = c1.date_input("발주접수일", datetime.date.today(), format="YYYY-MM-DD")
+            order_type = c2.selectbox("신규/추가 구분", ["신규제직", "추가제직"])
             if customer_list:
-                customer = c2.selectbox("발주처 선택", customer_list)
+                customer = c3.selectbox("발주처 선택", customer_list)
             else:
-                customer = c2.text_input("발주처 (기초정보관리에서 거래처를 등록하세요)")
-            delivery_req_date = c3.date_input("납품요청일", datetime.date.today() + datetime.timedelta(days=7), format="YYYY-MM-DD")
+                customer = c3.text_input("발주처 (기초정보관리에서 거래처를 등록하세요)")
+            delivery_req_date = c4.date_input("납품요청일", datetime.date.today() + datetime.timedelta(days=7), format="YYYY-MM-DD")
 
             c1, c2, c3 = st.columns(3)
             name = c1.text_input("제품명 (고객사 요청 제품명)", help="고객사가 부르는 제품명을 입력하세요. 예: 프리미엄 호텔타올")
@@ -309,6 +310,7 @@ def render_order_entry(db, sub_menu):
                         # 주문 고유 정보
                         "order_no": order_no,
                         "date": datetime.datetime.combine(order_date, datetime.time.min),
+                        "order_type": order_type,
                         "customer": customer,
                         "delivery_req_date": str(delivery_req_date),
                         "name": name, # 고객사 제품명
@@ -619,17 +621,20 @@ def render_order_status(db, sub_menu):
 
     # [NEW] 발주내역삭제(엑셀업로드) - 관리자 전용
     if sub_menu == "발주내역삭제(엑셀업로드)" and st.session_state.get("role") == "admin":
-            st.subheader("엑셀 파일로 일괄 등록")
+            st.subheader("엑셀 파일로 일괄 등록 (과거 데이터 포함)")
             st.markdown("""
             **업로드 규칙**
             1. 아래 **양식 다운로드** 버튼을 눌러 엑셀 파일을 받으세요.
             2. `제품코드`는 시스템에 등록된 코드와 정확히 일치해야 합니다.
-            3. `접수일자`와 `납품요청일`은 `YYYY-MM-DD` 형식으로 입력하세요.
+            3. `현재상태`를 입력하면 해당 상태로 등록됩니다. (비워두면 '발주접수')
+               - 예: 발주접수, 제직완료, 염색완료, 봉제완료, 출고완료 등
+            4. 날짜 컬럼은 `YYYY-MM-DD` 형식으로 입력하세요.
             """)
             
             # 양식 다운로드
             template_data = {
                 "접수일자": [datetime.date.today().strftime("%Y-%m-%d")],
+                "구분": ["신규제직"],
                 "발주처": ["예시상사"],
                 "제품코드": ["A20S0904080"],
                 "제품명(고객용)": ["호텔타올"],
@@ -639,7 +644,21 @@ def render_order_status(db, sub_menu):
                 "납품처": ["서울시 강남구..."],
                 "납품연락처": ["010-0000-0000"],
                 "납품주소": ["서울시..."],
-                "비고": ["특이사항"]
+                "비고": ["기초데이터"],
+                # [NEW] 상태 및 상세 정보 컬럼 추가
+                "현재상태": ["출고완료"],
+                "제직기번호": [1],
+                "제직완료일": ["2024-01-01"],
+                "생산수량": [100],
+                "생산중량": [20.5],
+                "염색업체": ["태광염색"],
+                "염색입고일": ["2024-01-05"],
+                "봉제업체": ["미소봉제"],
+                "봉제완료일": ["2024-01-10"],
+                "출고일": ["2024-01-15"],
+                "배송방법": ["택배"],
+                "배송업체": ["경동택배"],
+                "운임비": [5000]
             }
             df_template = pd.DataFrame(template_data)
             
@@ -699,11 +718,21 @@ def render_order_status(db, sub_menu):
                             last_seq += 1
                             order_no = f"{prefix}{last_seq:03d}"
                             
-                            # 날짜 처리
-                            try:
-                                reg_date = pd.to_datetime(row.get("접수일자", datetime.date.today())).to_pydatetime()
-                            except:
-                                reg_date = datetime.datetime.now()
+                            # 날짜 파싱 헬퍼 함수
+                            def parse_date_val(val):
+                                if pd.isna(val) or str(val).strip() == "": return None
+                                try: return pd.to_datetime(val).to_pydatetime()
+                                except: return None
+                            
+                            def parse_str_date(val):
+                                if pd.isna(val) or str(val).strip() == "": return ""
+                                return str(val)[:10]
+
+                            reg_date = parse_date_val(row.get("접수일자")) or datetime.datetime.now()
+                            
+                            # 상태 처리
+                            status = str(row.get("현재상태", "발주접수")).strip()
+                            if not status or status == "nan": status = "발주접수"
                                 
                             doc_data = {
                                 "product_code": p_code,
@@ -714,6 +743,7 @@ def render_order_status(db, sub_menu):
                                 
                                 "order_no": order_no,
                                 "date": reg_date,
+                                "order_type": str(row.get("구분", "")),
                                 "customer": str(row.get("발주처", "")),
                                 "delivery_req_date": str(row.get("납품요청일", "")),
                                 "name": str(row.get("제품명(고객용)", "")),
@@ -723,8 +753,29 @@ def render_order_status(db, sub_menu):
                                 "delivery_contact": str(row.get("납품연락처", "")),
                                 "delivery_address": str(row.get("납품주소", "")),
                                 "note": str(row.get("비고", "")),
-                                "status": "발주접수"
+                                "status": status,
+                                
+                                # [NEW] 상세 정보 매핑 (과거 데이터)
+                                "machine_no": int(row.get("제직기번호", 0)) if pd.notna(row.get("제직기번호")) else None,
+                                "weaving_end_time": parse_date_val(row.get("제직완료일")),
+                                "real_stock": int(row.get("생산수량", 0)) if pd.notna(row.get("생산수량")) else 0,
+                                "prod_weight_kg": float(row.get("생산중량", 0)) if pd.notna(row.get("생산중량")) else 0.0,
+                                
+                                "dyeing_partner": str(row.get("염색업체", "")),
+                                "dyeing_in_date": parse_str_date(row.get("염색입고일")),
+                                
+                                "sewing_partner": str(row.get("봉제업체", "")),
+                                "sewing_end_date": parse_str_date(row.get("봉제완료일")),
+                                
+                                "shipping_date": parse_date_val(row.get("출고일")),
+                                "shipping_method": str(row.get("배송방법", "")),
+                                "shipping_carrier": str(row.get("배송업체", "")),
+                                "shipping_cost": int(row.get("운임비", 0)) if pd.notna(row.get("운임비")) else 0
                             }
+                            
+                            # nan 문자열 정리
+                            for k, v in doc_data.items():
+                                if isinstance(v, str) and v == "nan": doc_data[k] = ""
                             
                             db.collection("orders").add(doc_data)
                             success_count += 1
@@ -874,6 +925,10 @@ def render_order_status(db, sub_menu):
             if 'order_no' not in df.columns:
                 df['order_no'] = ""
             
+            # [NEW] order_type 컬럼 확인 및 초기화
+            if 'order_type' not in df.columns:
+                df['order_type'] = ""
+            
             # [NEW] 납품요청일 날짜 포맷팅 (YYYY-MM-DD)
             if 'delivery_req_date' in df.columns:
                 df['delivery_req_date'] = pd.to_datetime(df['delivery_req_date'], errors='coerce').dt.strftime('%Y-%m-%d').fillna('')
@@ -901,7 +956,7 @@ def render_order_status(db, sub_menu):
             
             # 컬럼명 한글 매핑
             col_map = {
-                "product_code": "제품코드", "order_no": "발주번호", "status": "상태", "date": "접수일", "customer": "발주처",
+                "product_code": "제품코드", "order_no": "발주번호", "status": "상태", "date": "접수일", "order_type": "구분", "customer": "발주처",
                 "name": "제품명", "product_type": "제품종류", "weaving_type": "제품종류(구)",
                 "yarn_type": "사종", "color": "색상", "weight": "중량",
                 "size": "사이즈", "stock": "수량",
@@ -911,7 +966,7 @@ def render_order_status(db, sub_menu):
             }
 
             # 컬럼 순서 변경 (발주번호 -> 상태 -> 접수일 ...)
-            display_cols = ["product_code", "order_no", "status", "date", "customer", "name", "stock", "product_type", "weaving_type", "yarn_type", "color", "weight", "size", "delivery_req_date", "delivery_to", "delivery_contact", "delivery_address", "note"]
+            display_cols = ["product_code", "order_no", "status", "date", "order_type", "customer", "name", "stock", "product_type", "weaving_type", "yarn_type", "color", "weight", "size", "delivery_req_date", "delivery_to", "delivery_contact", "delivery_address", "note"]
             final_cols = [c for c in display_cols if c in df.columns] # 실제 존재하는 컬럼만 선택
             
             # 화면 표시용 데이터프레임 (한글 컬럼 적용)
@@ -1287,9 +1342,14 @@ def render_order_status(db, sub_menu):
                         st.divider()
 
                         # 모든 필드 수정 가능하도록 배치
-                        ec1, ec2, ec4 = st.columns(3)
+                        ec1, ec2, ec3, ec4 = st.columns(4)
                         e_customer = ec1.selectbox("발주처", customer_list, index=customer_list.index(sel_row['customer']) if sel_row['customer'] in customer_list else 0)
-                        e_name = ec2.text_input("제품명", value=sel_row['name'])
+                        
+                        curr_type = sel_row.get('order_type', '')
+                        type_opts = ["신규제직", "추가제직"]
+                        e_order_type = ec2.selectbox("신규/추가 구분", type_opts, index=type_opts.index(curr_type) if curr_type in type_opts else 0)
+                        
+                        e_name = ec3.text_input("제품명", value=sel_row['name'])
                         e_stock = ec4.number_input("수량", value=int(sel_row['stock']), step=10)
 
                         ec5, ec6, ec7, ec8 = st.columns(4)
@@ -1323,6 +1383,7 @@ def render_order_status(db, sub_menu):
                             db.collection("orders").document(sel_id).update({
                                 "status": e_status, # 상태 변경 반영
                                 "customer": e_customer,
+                                "order_type": e_order_type,
                                 "name": e_name,
                                 "stock": e_stock,
                                 "product_type": e_product_type,

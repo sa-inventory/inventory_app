@@ -116,6 +116,7 @@ def render_order_entry(db, sub_menu):
             st.components.v1.html(
                 f"""
                 <script>
+                    // Force re-run: {js_uuid}
                     setTimeout(function() {{
                         function attemptScroll(count) {{
                             const anchor = window.parent.document.getElementById('order-entry-form');

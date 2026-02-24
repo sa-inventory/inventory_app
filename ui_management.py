@@ -1287,22 +1287,55 @@ def render_inventory_logic(db, allow_shipping=False):
         
         # [NEW] 조회 방식 선택 (요약 vs 전체 리스트)
         if is_partner:
-            view_mode = "전체 상세 내역 (리스트)"
+            view_mode = "제품명 보기(제품코드별 상세품목)"
         else:
-            view_mode = st.radio("조회 방식", ["제품별 요약 (제품코드)", "전체 상세 내역 (리스트)"], horizontal=True, key=f"inv_view_mode_{allow_shipping}")
+            # [수정] 버튼 토글 방식으로 변경 (사용자 요청 반영)
+            vm_key = f"view_mode_state_{allow_shipping}"
+            if vm_key not in st.session_state:
+                st.session_state[vm_key] = "제품코드 보기"
+
+            # 버튼 배치를 위한 컬럼 설정
+            c_vm1, c_vm2, c_dummy = st.columns([1.5, 1.5, 7])
+            
+            # 현재 상태 확인
+            current_mode = st.session_state[vm_key]
+            
+            # 제품코드 보기 버튼
+            with c_vm1:
+                if st.button("제품코드 보기", 
+                             type="primary" if current_mode == "제품코드 보기" else "secondary", 
+                             use_container_width=True, 
+                             key=f"btn_vm_code_{allow_shipping}"):
+                    st.session_state[vm_key] = "제품코드 보기"
+                    st.rerun()
+            
+            # 제품명 보기 버튼
+            with c_vm2:
+                if st.button("제품명 보기(상세)", 
+                             type="primary" if current_mode == "제품명 보기(제품코드별 상세품목)" else "secondary", 
+                             use_container_width=True, 
+                             help="제품코드별 상세 품목 리스트를 확인합니다.",
+                             key=f"btn_vm_name_{allow_shipping}"):
+                    st.session_state[vm_key] = "제품명 보기(제품코드별 상세품목)"
+                    st.rerun()
+            
+            view_mode = st.session_state[vm_key]
 
         # [NEW] 테이블 우측 상단에 '모든 품목 조회' 체크박스 배치
-        # [수정] 체크박스 공간 확보를 위해 비율 조정
-        c_h1, c_h2 = st.columns([5, 1.5])
-        if view_mode == "제품별 요약 (제품코드)":
-             c_h1.write("🔽 상세 내역을 확인할 제품을 선택하세요.")
-        else:
-             c_h1.write("🔽 전체 재고 내역입니다.")
+        # [수정] 라디오버튼을 우측 끝으로 붙이기 위해 비율 조정 (좌측 텍스트영역 확보, 우측 라디오버튼 영역 최소화)
+        c_h1, c_h2 = st.columns([7.5, 2.5])
+        with c_h1:
+            if view_mode == "제품코드 보기":
+                 st.write("🔽 상세 내역을 확인할 제품을 선택하세요.")
+            else:
+                 st.write("🔽 전체 재고 내역입니다.")
              
-        show_all_items = c_h2.checkbox("모든 품목 조회", value=False, help="체크하면 재고가 0인 품목도 표시됩니다.", key=f"inv_show_all_{allow_shipping}")
+        # [수정] 재고 필터: 라디오 버튼 (전체코드보기 / 재고있는 품목보기)
+        with c_h2:
+            stock_filter_opt = st.radio("조회 옵션", ["전체코드보기", "재고있는 품목보기"], index=0, horizontal=True, label_visibility="collapsed", key=f"inv_stock_filter_{allow_shipping}")
 
         # [NEW] 재고 필터 적용 (기본: 재고 > 0)
-        if not show_all_items:
+        if stock_filter_opt == "재고있는 품목보기":
             df = df[df['stock'] > 0]
 
         # [MOVED] 요약 데이터 계산 (필터링 후)
@@ -1360,7 +1393,7 @@ def render_inventory_logic(db, allow_shipping=False):
         # 관리자 권한 확인 (삭제 기능용)
         is_admin = st.session_state.get("role") == "admin"
 
-        if view_mode == "제품별 요약 (제품코드)":
+        if view_mode == "제품코드 보기":
             # [수정] 동적 높이 계산 (행당 약 35px, 최대 20행 700px)
             summary_height = min((len(summary) + 1) * 35 + 3, 700)
             
@@ -1667,7 +1700,7 @@ def render_inventory_logic(db, allow_shipping=False):
         st.divider()
         
         # 1. 인쇄 옵션 설정 (Expander)
-        with st.expander("🖨️ 인쇄 및 엑셀 내보내기 설정"):
+        with st.expander("인쇄 옵션 설정"):
             pe_c1, pe_c2, pe_c3 = st.columns(3)
             # [수정] 옵션명에 공백 추가하여 일관성 유지
             print_mode = pe_c1.radio("출력 모드", ["요약 목록", "제품별 상세내역(그룹)", "전체 상세내역 (리스트)"], key=f"inv_p_mode_{allow_shipping}")
@@ -1690,111 +1723,113 @@ def render_inventory_logic(db, allow_shipping=False):
             p_m_right = pe_m4.number_input("우측", value=15, step=1, key=f"inv_p_mr_{allow_shipping}")
 
         # 엑셀 다운로드 및 인쇄 버튼 (Expander 밖으로 이동)
-        c_exp1, c_exp2 = st.columns([1, 1])
+        c_btn_xls, c_btn_gap, c_btn_prt = st.columns([1.5, 5, 1.5])
         
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            if print_mode == "요약 목록":
-                summary[disp_cols].rename(columns=summary_cols).to_excel(writer, index=False, sheet_name="재고요약")
-            else:
-                # 상세 내역은 리스트 형태로 저장
-                df_detail_final.to_excel(writer, index=False, sheet_name="상세재고")
-        
-        c_exp1.download_button(
-            label="💾 엑셀 다운로드",
-            data=buffer.getvalue(),
-            file_name=f"재고현황_{datetime.date.today()}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        with c_btn_xls:
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                if print_mode == "요약 목록":
+                    summary[disp_cols].rename(columns=summary_cols).to_excel(writer, index=False, sheet_name="재고요약")
+                else:
+                    # 상세 내역은 리스트 형태로 저장
+                    df_detail_final.to_excel(writer, index=False, sheet_name="상세재고")
+            
+            st.download_button(
+                label="엑셀 다운로드",
+                data=buffer.getvalue(),
+                file_name=f"재고현황_{datetime.date.today()}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
 
         # 인쇄 버튼
-        if c_exp2.button("🖨️ 인쇄하기", key=f"inv_print_btn_{allow_shipping}"):
-            options = {
-                'ts': p_title_size, 'bs': p_font_size, 'pad': p_padding,
-                'dd': "block" if p_show_date else "none",
-                'mt': p_m_top, 'mb': p_m_bottom, 'ml': p_m_left, 'mr': p_m_right
-            }
-            
-            # 합계 텍스트 생성
-            def get_summary_text(count_text, total_qty):
-                if p_show_total:
-                    return f"{count_text} / 총 재고수량: {total_qty:,}"
-                return count_text
+        with c_btn_prt:
+            if st.button("인쇄하기", key=f"inv_print_btn_{allow_shipping}", use_container_width=True):
+                options = {
+                    'ts': p_title_size, 'bs': p_font_size, 'pad': p_padding,
+                    'dd': "block" if p_show_date else "none",
+                    'mt': p_m_top, 'mb': p_m_bottom, 'ml': p_m_left, 'mr': p_m_right
+                }
+                
+                # 합계 텍스트 생성
+                def get_summary_text(count_text, total_qty):
+                    if p_show_total:
+                        return f"{count_text} / 총 재고수량: {total_qty:,}"
+                    return count_text
 
-            if print_mode == "요약 목록":
-                df_print = summary[disp_cols].rename(columns=summary_cols)
-                total_q = summary['stock'].sum()
-                html = generate_report_html(p_title, df_print, get_summary_text(f"총 {len(df_print)}개 품목", total_q), options)
-                st.components.v1.html(html, height=0, width=0)
-                
-            elif print_mode == "전체 상세내역 (리스트)":
-                # 제품코드, 제품명 순으로 정렬
-                if "제품코드" in df_detail_final.columns:
-                    df_detail_final = df_detail_final.sort_values(by=["제품코드", "제품명"])
-                # [FIX] 컬럼명 변경 반영 (stock -> 재고수량)
-                total_q = df_detail_final['재고수량'].sum()
-                html = generate_report_html(p_title, df_detail_final, get_summary_text(f"총 {len(df_detail_final)}건", total_q), options)
-                st.components.v1.html(html, height=0, width=0)
-                
-            elif print_mode == "제품별 상세내역(그룹)":
-                # 커스텀 HTML 생성 (제품별 그룹핑)
-                print_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-                date_display = "block" if p_show_date else "none"
-                
-                html_content = f"""
-                <html>
-                <head>
-                    <title>{p_title}</title>
-                    <style>
-                        @page {{ margin: {p_m_top}mm {p_m_right}mm {p_m_bottom}mm {p_m_left}mm; }}
-                        body {{ font-family: 'Malgun Gothic', sans-serif; padding: 0; margin: 0; }}
-                        h2 {{ text-align: center; margin-bottom: 5px; font-size: {p_title_size}px; }}
-                        .info {{ text-align: right; font-size: 12px; margin-bottom: 10px; color: #555; display: {date_display}; }}
-                        table {{ width: 100%; border-collapse: collapse; font-size: {p_font_size}px; margin-bottom: 20px; }}
-                        th, td {{ border: 1px solid #444; padding: {p_padding}px; text-align: center; }}
-                        th {{ background-color: #f0f0f0; }}
-                        .group-header {{ background-color: #e6f3ff; font-weight: bold; text-align: left; padding: 8px; border: 1px solid #444; margin-top: 10px; }}
-                        .no-data {{ text-align: center; padding: 10px; color: #888; }}
-                        .grand-total {{ text-align: right; font-weight: bold; font-size: {p_font_size + 2}px; margin-top: 20px; border-top: 2px solid #333; padding-top: 10px; }}
-                        @media screen {{ body {{ display: none; }} }}
-                    </style>
-                </head>
-                <body onload="window.print()">
-                    <h2>{p_title}</h2>
-                    <div class="info">출력일시: {print_now}</div>
-                """
-                
-                grand_total_stock = 0
-                # 요약 목록 순서대로 반복
-                for _, row in summary.iterrows():
-                    p_code = row['product_code']
-                    p_name = row.get('name', '')
-                    p_type = row.get('product_type', '')
-                    p_stock = int(row.get('stock', 0))
+                if print_mode == "요약 목록":
+                    df_print = summary[disp_cols].rename(columns=summary_cols)
+                    total_q = summary['stock'].sum()
+                    html = generate_report_html(p_title, df_print, get_summary_text(f"총 {len(df_print)}개 품목", total_q), options)
+                    st.components.v1.html(html, height=0, width=0)
                     
-                    # 해당 제품의 상세 내역 필터링
-                    sub_df = df_detail_final[df_detail_final['제품코드'] == p_code]
-                    grand_total_stock += p_stock
+                elif print_mode == "전체 상세내역 (리스트)":
+                    # 제품코드, 제품명 순으로 정렬
+                    if "제품코드" in df_detail_final.columns:
+                        df_detail_final = df_detail_final.sort_values(by=["제품코드", "제품명"])
+                    # [FIX] 컬럼명 변경 반영 (stock -> 재고수량)
+                    total_q = df_detail_final['재고수량'].sum()
+                    html = generate_report_html(p_title, df_detail_final, get_summary_text(f"총 {len(df_detail_final)}건", total_q), options)
+                    st.components.v1.html(html, height=0, width=0)
                     
-                    # 그룹 헤더
-                    html_content += f"""
-                    <div class="group-header">
-                        📦 [{p_code}] {p_type} / {p_name} (총 재고: {p_stock:,})
-                    </div>
+                elif print_mode == "제품별 상세내역(그룹)":
+                    # 커스텀 HTML 생성 (제품별 그룹핑)
+                    print_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                    date_display = "block" if p_show_date else "none"
+                    
+                    html_content = f"""
+                    <html>
+                    <head>
+                        <title>{p_title}</title>
+                        <style>
+                            @page {{ margin: {p_m_top}mm {p_m_right}mm {p_m_bottom}mm {p_m_left}mm; }}
+                            body {{ font-family: 'Malgun Gothic', sans-serif; padding: 0; margin: 0; }}
+                            h2 {{ text-align: center; margin-bottom: 5px; font-size: {p_title_size}px; }}
+                            .info {{ text-align: right; font-size: 12px; margin-bottom: 10px; color: #555; display: {date_display}; }}
+                            table {{ width: 100%; border-collapse: collapse; font-size: {p_font_size}px; margin-bottom: 20px; }}
+                            th, td {{ border: 1px solid #444; padding: {p_padding}px; text-align: center; }}
+                            th {{ background-color: #f0f0f0; }}
+                            .group-header {{ background-color: #e6f3ff; font-weight: bold; text-align: left; padding: 8px; border: 1px solid #444; margin-top: 10px; }}
+                            .no-data {{ text-align: center; padding: 10px; color: #888; }}
+                            .grand-total {{ text-align: right; font-weight: bold; font-size: {p_font_size + 2}px; margin-top: 20px; border-top: 2px solid #333; padding-top: 10px; }}
+                            @media screen {{ body {{ display: none; }} }}
+                        </style>
+                    </head>
+                    <body onload="window.print()">
+                        <h2>{p_title}</h2>
+                        <div class="info">출력일시: {print_now}</div>
                     """
                     
-                    if not sub_df.empty:
-                        # 상세 테이블 (제품코드, 제품명 컬럼은 중복되므로 제외하고 출력 가능하지만, 요청대로 모든 컬럼 포함)
-                        # 가독성을 위해 주요 컬럼 위주로 재정렬하거나 그대로 출력
-                        html_content += sub_df.to_html(index=False, border=1)
-                    else:
-                        html_content += "<div class='no-data'>상세 내역 없음</div>"
+                    grand_total_stock = 0
+                    # 요약 목록 순서대로 반복
+                    for _, row in summary.iterrows():
+                        p_code = row['product_code']
+                        p_name = row.get('name', '')
+                        p_type = row.get('product_type', '')
+                        p_stock = int(row.get('stock', 0))
                         
-                if p_show_total:
-                    html_content += f"<div class='grand-total'>총 재고수량 합계: {grand_total_stock:,}</div>"
+                        # 해당 제품의 상세 내역 필터링
+                        sub_df = df_detail_final[df_detail_final['제품코드'] == p_code]
+                        grand_total_stock += p_stock
+                        
+                        # 그룹 헤더
+                        html_content += f"""
+                        <div class="group-header">
+                            📦 [{p_code}] {p_type} / {p_name} (총 재고: {p_stock:,})
+                        </div>
+                        """
+                        
+                        if not sub_df.empty:
+                            # 상세 테이블
+                            html_content += sub_df.to_html(index=False, border=1)
+                        else:
+                            html_content += "<div class='no-data'>상세 내역 없음</div>"
+                            
+                    if p_show_total:
+                        html_content += f"<div class='grand-total'>총 재고수량 합계: {grand_total_stock:,}</div>"
 
-                html_content += "</body></html>"
-                st.components.v1.html(html_content, height=0, width=0)
+                    html_content += "</body></html>"
+                    st.components.v1.html(html_content, height=0, width=0)
 
         # [MOVED] 출고 처리 로직 (공통)
         if allow_shipping and selected_rows_for_shipping is not None and not selected_rows_for_shipping.empty:
@@ -3374,6 +3409,25 @@ def render_company_settings(db, sub_menu):
         bank_name = c9.text_input("거래은행", value=data.get("bank_name", ""))
         bank_account = c10.text_input("계좌번호", value=data.get("bank_account", ""))
         
+        # [NEW] 주소 검색 API 키 입력
+        juso_api_key = st.text_input("도로명주소 API 승인키", value=data.get("juso_api_key", ""), type="password", help="행정안전부 개발자센터에서 발급받은 '주소검색 API' 승인키를 입력하세요.")
+        
+        app_title = st.text_input("시스템 제목 (브라우저 탭)", value=data.get("app_title", "타올 생산 현황 관리"), help="웹브라우저 탭에 표시될 제목입니다.")
+        
+        note = st.text_area("비고 / 하단 문구", value=data.get("note", ""), help="명세서 하단에 들어갈 안내 문구 등을 입력하세요.")
+        
+        if st.button("저장", type="primary"):
+            new_data = {
+                "name": name, "rep_name": rep_name, "biz_num": biz_num, 
+                "address": address, "address_detail": addr_detail, # 상세주소 별도 저장 또는 합쳐서 저장 가능 (여기선 분리 저장 예시)
+                "phone": phone, "fax": fax, "biz_type": biz_type, "biz_item": biz_item,
+                "email": email, "bank_name": bank_name, "bank_account": bank_account, "note": note,
+                "juso_api_key": juso_api_key,
+                "app_title": app_title
+            }
+            doc_ref.set(new_data)
+            st.success("회사 정보가 저장되었습니다.")
+            st.rerun()
         # [NEW] 주소 검색 API 키 입력
         juso_api_key = st.text_input("도로명주소 API 승인키", value=data.get("juso_api_key", ""), type="password", help="행정안전부 개발자센터에서 발급받은 '주소검색 API' 승인키를 입력하세요.")
         

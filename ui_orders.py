@@ -1135,21 +1135,8 @@ def render_order_status(db, sub_menu):
                                 </div>
                             </a>
                         """, unsafe_allow_html=True)
-            
-            # 버튼 영역 (엑셀 다운로드 + 인쇄)
-            btn_c1, btn_c2 = st.columns([1, 1])
-            
-            # 엑셀 다운로드 (xlsx)
-            buffer = io.BytesIO()
-            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                df_display.to_excel(writer, index=False)
-                
-            btn_c1.download_button(
-                label="💾 엑셀(.xlsx) 다운로드",
-                data=buffer.getvalue(),
-                file_name='발주현황.xlsx',
-                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            )
+
+            st.divider()
 
             # 인쇄 옵션 설정
             with st.expander("인쇄 옵션 설정"):
@@ -1253,60 +1240,76 @@ def render_order_status(db, sub_menu):
                 
                 p_nowrap = st.checkbox("텍스트 줄바꿈 방지 (한 줄 표시)", key="os_p_nowrap")
 
-            # 인쇄 버튼 (HTML 생성 후 새 창 열기 방식 흉내)
-            if btn_c2.button("🖨️ 바로 인쇄하기"):
-                print_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-                date_align = p_date_pos.lower()
-                date_display = "block" if p_show_date else "none"
+            # 엑셀 다운로드 및 인쇄 버튼
+            c_btn_xls, c_btn_gap, c_btn_prt = st.columns([1.5, 5, 1.5])
 
-                # [수정] 인쇄 로직에 사용할 변수 추출
-                p_selected_cols = st.session_state.get("os_p_selected_cols", [])
-                p_widths = st.session_state.get("os_p_widths", {})
+            with c_btn_xls:
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    df_display.to_excel(writer, index=False)
                 
-                # 인쇄용 데이터프레임 준비
-                if p_selected_cols:
-                    valid_cols = [c for c in p_selected_cols if c in df_display.columns]
-                    print_df = df_display[valid_cols]
-                else:
-                    print_df = df_display
+                st.download_button(
+                    label="엑셀 다운로드",
+                    data=buffer.getvalue(),
+                    file_name='발주현황.xlsx',
+                    mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    use_container_width=True
+                )
 
-                # CSS 생성 (줄바꿈 방지 및 너비 지정)
-                custom_css = ""
-                if p_nowrap:
-                    custom_css += "td { white-space: nowrap; }\n"
-                
-                for i, col in enumerate(p_selected_cols):
-                    w = p_widths.get(col, 0)
-                    if w > 0:
-                        # nth-child는 1부터 시작
-                        custom_css += f"table tr th:nth-child({i+1}), table tr td:nth-child({i+1}) {{ width: {w}px; min-width: {w}px; }}\n"
+            with c_btn_prt:
+                if st.button("인쇄하기", use_container_width=True):
+                    print_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                    date_align = p_date_pos.lower()
+                    date_display = "block" if p_show_date else "none"
 
-                # [수정] body에 onload를 추가하고, 화면에는 보이지 않도록 CSS 수정
-                print_html = f"""
-                    <html>
-                    <head>
-                        <title>{p_title}</title>
-                        <style>
-                            @page {{ margin: {p_m_top}mm {p_m_right}mm {p_m_bottom}mm {p_m_left}mm; }}
-                            body {{ font-family: 'Malgun Gothic', sans-serif; padding: 0; margin: 0; }}
-                            h2 {{ text-align: center; margin-bottom: 5px; font-size: {p_title_size}px; }}
-                            .info {{ text-align: {date_align}; font-size: {p_date_size}px; margin-bottom: 10px; color: #555; display: {date_display}; }}
-                            table {{ width: 100%; border-collapse: collapse; font-size: {p_body_size}px; }}
-                            th, td {{ border: 1px solid #444; padding: {p_padding}px 4px; text-align: center; }}
-                            th {{ background-color: #f0f0f0; font-weight: bold; }}
-                            @media screen {{ body {{ display: none; }} }}
-                            {custom_css}
-                        </style>
-                    </head>
-                    <body onload="window.print();">
-                        <h2>{p_title}</h2>
-                        <div class="info">출력일시: {print_date}</div>
-                        {print_df.to_html(index=False, border=1)}
-                    </body>
-                    </html>
-                """
-                # 보이지 않는 컴포넌트로 HTML을 렌더링하여 스크립트(window.print) 실행
-                st.components.v1.html(print_html, height=0, width=0)
+                    # [수정] 인쇄 로직에 사용할 변수 추출
+                    p_selected_cols = st.session_state.get("os_p_selected_cols", [])
+                    p_widths = st.session_state.get("os_p_widths", {})
+                    
+                    # 인쇄용 데이터프레임 준비
+                    if p_selected_cols:
+                        valid_cols = [c for c in p_selected_cols if c in df_display.columns]
+                        print_df = df_display[valid_cols]
+                    else:
+                        print_df = df_display
+
+                    # CSS 생성 (줄바꿈 방지 및 너비 지정)
+                    custom_css = ""
+                    if p_nowrap:
+                        custom_css += "td { white-space: nowrap; }\n"
+                    
+                    for i, col in enumerate(p_selected_cols):
+                        w = p_widths.get(col, 0)
+                        if w > 0:
+                            # nth-child는 1부터 시작
+                            custom_css += f"table tr th:nth-child({i+1}), table tr td:nth-child({i+1}) {{ width: {w}px; min-width: {w}px; }}\n"
+
+                    # [수정] body에 onload를 추가하고, 화면에는 보이지 않도록 CSS 수정
+                    print_html = f"""
+                        <html>
+                        <head>
+                            <title>{p_title}</title>
+                            <style>
+                                @page {{ margin: {p_m_top}mm {p_m_right}mm {p_m_bottom}mm {p_m_left}mm; }}
+                                body {{ font-family: 'Malgun Gothic', sans-serif; padding: 0; margin: 0; }}
+                                h2 {{ text-align: center; margin-bottom: 5px; font-size: {p_title_size}px; }}
+                                .info {{ text-align: {date_align}; font-size: {p_date_size}px; margin-bottom: 10px; color: #555; display: {date_display}; }}
+                                table {{ width: 100%; border-collapse: collapse; font-size: {p_body_size}px; }}
+                                th, td {{ border: 1px solid #444; padding: {p_padding}px 4px; text-align: center; }}
+                                th {{ background-color: #f0f0f0; font-weight: bold; }}
+                                @media screen {{ body {{ display: none; }} }}
+                                {custom_css}
+                            </style>
+                        </head>
+                        <body onload="window.print();">
+                            <h2>{p_title}</h2>
+                            <div class="info">출력일시: {print_date}</div>
+                            {print_df.to_html(index=False, border=1)}
+                        </body>
+                        </html>
+                    """
+                    # 보이지 않는 컴포넌트로 HTML을 렌더링하여 스크립트(window.print) 실행
+                    st.components.v1.html(print_html, height=0, width=0)
 
             # --- 상세 수정 (단일 선택 시에만) ---
             if len(selection.selection.rows) == 1:

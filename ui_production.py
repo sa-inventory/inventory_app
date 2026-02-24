@@ -580,51 +580,6 @@ def render_weaving(db, sub_menu=None, readonly=False):
             
             df_display = df[final_cols].rename(columns=col_map)
 
-            # 엑셀 및 인쇄 버튼
-            c_exp1, c_exp2 = st.columns([1, 5])
-            
-            buffer = io.BytesIO()
-            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                df_display.to_excel(writer, index=False)
-                
-            c_exp1.download_button(
-                label="💾 엑셀 다운로드",
-                data=buffer.getvalue(),
-                file_name=f"제직완료내역_{today}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-
-            # 인쇄 옵션 설정
-            with st.expander("🖨️ 인쇄 옵션 설정"):
-                po_c1, po_c2, po_c3, po_c4 = st.columns(4)
-                p_title = po_c1.text_input("제목", value="제직 완료 내역", key="wd_title")
-                p_title_size = po_c2.number_input("제목 크기(px)", value=24, step=1, key="wd_ts")
-                p_body_size = po_c3.number_input("본문 글자 크기(px)", value=11, step=1, key="wd_bs")
-                p_padding = po_c4.number_input("셀 여백(px)", value=6, step=1, key="wd_pad")
-                
-                po_c5, po_c6, po_c7 = st.columns(3)
-                p_show_date = po_c5.checkbox("출력일시 표시", value=True, key="wd_sd")
-                p_date_pos = po_c6.selectbox("일시 위치", ["Right", "Left", "Center"], index=0, key="wd_dp")
-                p_date_size = po_c7.number_input("일시 글자 크기(px)", value=12, step=1, key="wd_ds")
-                
-                st.caption("페이지 여백 (mm)")
-                po_c8, po_c9, po_c10, po_c11 = st.columns(4)
-                p_m_top = po_c8.number_input("상단", value=15, step=1, key="wd_mt")
-                p_m_bottom = po_c9.number_input("하단", value=15, step=1, key="wd_mb")
-                p_m_left = po_c10.number_input("좌측", value=15, step=1, key="wd_ml")
-                p_m_right = po_c11.number_input("우측", value=15, step=1, key="wd_mr")
-
-            # [수정] utils의 generate_report_html 함수 사용
-            if c_exp2.button("🖨️ 바로 인쇄하기", key="btn_print_wd"):
-                options = {
-                    'mt': p_m_top, 'mr': p_m_right, 'mb': p_m_bottom, 'ml': p_m_left,
-                    'ts': p_title_size, 'bs': p_body_size, 'pad': p_padding,
-                    'da': p_date_pos.lower(), 'ds': p_date_size, 'dd': "block" if p_show_date else "none"
-                }
-                summary_text = f"합계 - 생산수량: {total_stock:,}장 / 생산중량: {total_weight:,.1f}kg"
-                print_html = generate_report_html(p_title, df_display, summary_text, options)
-                st.components.v1.html(print_html, height=0, width=0)
-
             st.write("🔽 수정하거나 취소할 항목을 선택하세요.")
             selection = st.dataframe(
                 df_display, 
@@ -694,6 +649,55 @@ def render_weaving(db, sub_menu=None, readonly=False):
                             st.success("삭제되었습니다. 제직중 목록에서 다시 작업할 수 있습니다.")
                             st.session_state["key_weaving_done"] += 1
                             st.rerun()
+            
+            st.divider()
+
+            # 인쇄 옵션 설정
+            with st.expander("인쇄 옵션 설정"):
+                po_c1, po_c2, po_c3, po_c4 = st.columns(4)
+                p_title = po_c1.text_input("제목", value="제직 완료 내역", key="wd_title")
+                p_title_size = po_c2.number_input("제목 크기(px)", value=24, step=1, key="wd_ts")
+                p_body_size = po_c3.number_input("본문 글자 크기(px)", value=11, step=1, key="wd_bs")
+                p_padding = po_c4.number_input("셀 여백(px)", value=6, step=1, key="wd_pad")
+                
+                po_c5, po_c6, po_c7 = st.columns(3)
+                p_show_date = po_c5.checkbox("출력일시 표시", value=True, key="wd_sd")
+                p_date_pos = po_c6.selectbox("일시 위치", ["Right", "Left", "Center"], index=0, key="wd_dp")
+                p_date_size = po_c7.number_input("일시 글자 크기(px)", value=12, step=1, key="wd_ds")
+                
+                st.caption("페이지 여백 (mm)")
+                po_c8, po_c9, po_c10, po_c11 = st.columns(4)
+                p_m_top = po_c8.number_input("상단", value=15, step=1, key="wd_mt")
+                p_m_bottom = po_c9.number_input("하단", value=15, step=1, key="wd_mb")
+                p_m_left = po_c10.number_input("좌측", value=15, step=1, key="wd_ml")
+                p_m_right = po_c11.number_input("우측", value=15, step=1, key="wd_mr")
+
+            # [수정] 버튼 하단 배치 (좌측 끝: 엑셀, 우측 끝: 인쇄)
+            c_btn_xls, c_btn_gap, c_btn_prt = st.columns([1.5, 5, 1.5])
+            
+            with c_btn_xls:
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    df_display.to_excel(writer, index=False)
+                
+                st.download_button(
+                    label="엑셀 다운로드",
+                    data=buffer.getvalue(),
+                    file_name=f"제직완료내역_{today}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+
+            with c_btn_prt:
+                if st.button("인쇄하기", key="btn_print_wd", use_container_width=True):
+                    options = {
+                        'mt': p_m_top, 'mr': p_m_right, 'mb': p_m_bottom, 'ml': p_m_left,
+                        'ts': p_title_size, 'bs': p_body_size, 'pad': p_padding,
+                        'da': p_date_pos.lower(), 'ds': p_date_size, 'dd': "block" if p_show_date else "none"
+                    }
+                    summary_text = f"합계 - 생산수량: {total_stock:,}장 / 생산중량: {total_weight:,.1f}kg"
+                    print_html = generate_report_html(p_title, df_display, summary_text, options)
+                    st.components.v1.html(print_html, height=0, width=0)
         else:
             st.info("제직 완료된 내역이 없습니다.")
 
@@ -784,6 +788,7 @@ def render_weaving(db, sub_menu=None, readonly=False):
         
         c1, c2 = st.columns([1, 3])
         view_date = c1.selectbox("조회할 날짜 선택", sorted_dates if sorted_dates else [str(datetime.date.today())], key="worklog_view_date")
+        view_date = c1.selectbox("조회할 날짜 선택", sorted_dates if sorted_dates else [str(datetime.date.today())], key="worklog_view_date_selector")
         
         # 데이터 가져오기
         # Firestore 복합 인덱스 오류 방지를 위해 order_by 제거 후 Python에서 정렬
@@ -802,8 +807,50 @@ def render_weaving(db, sub_menu=None, readonly=False):
         
         notes_data = notes_doc.to_dict() if notes_doc.exists else {}
         
-        # 인쇄 옵션 설정
-        with st.expander("🖨️ 인쇄 옵션 설정"):
+        # 주간 섹션
+        st.markdown("#### 주간 작업")
+        if day_logs:
+            df_day = pd.DataFrame(day_logs)
+            df_day['log_time'] = df_day['log_time'].apply(lambda x: x.strftime('%H:%M') if hasattr(x, 'strftime') else str(x)[11:16])
+            # [수정] 컬럼명 변경 (호기 -> 제직기)
+            st.dataframe(
+                df_day[['log_time', 'machine_no', 'content', 'author']].rename(columns={'log_time':'시간','machine_no':'제직기','content':'내용','author':'작성자'}), 
+                hide_index=True, 
+                use_container_width=True,
+                column_config={"시간": st.column_config.TextColumn(width=60), "제직기": st.column_config.TextColumn(width=80), "내용": st.column_config.TextColumn(width="large"), "작성자": st.column_config.TextColumn(width=80)}
+            )
+        else:
+            st.info("기록 없음")
+            
+        st.markdown("##### 📝 야간근무자 전달사항")
+        d_note = notes_data.get('day_to_night_notes', '-')
+        st.warning(d_note)
+
+        st.divider()
+
+        # 야간 섹션
+        st.markdown("#### 야간 작업")
+        if night_logs:
+            df_night = pd.DataFrame(night_logs)
+            df_night['log_time'] = df_night['log_time'].apply(lambda x: x.strftime('%H:%M') if hasattr(x, 'strftime') else str(x)[11:16])
+            # [수정] 컬럼명 변경 (호기 -> 제직기)
+            st.dataframe(
+                df_night[['log_time', 'machine_no', 'content', 'author']].rename(columns={'log_time':'시간','machine_no':'제직기','content':'내용','author':'작성자'}), 
+                hide_index=True, 
+                use_container_width=True,
+                column_config={"시간": st.column_config.TextColumn(width=60), "제직기": st.column_config.TextColumn(width=80), "내용": st.column_config.TextColumn(width="large"), "작성자": st.column_config.TextColumn(width=80)}
+            )
+        else:
+            st.info("기록 없음")
+
+        st.markdown("##### 📝 주간근무자 전달사항")
+        n_note = notes_data.get('night_to_day_notes', '-')
+        st.warning(n_note)
+        
+        st.divider()
+
+        # 인쇄 옵션 설정 (하단으로 이동)
+        with st.expander("인쇄 옵션 설정"):
             po_c1, po_c2, po_c3, po_c4 = st.columns(4)
             p_title = po_c1.text_input("제목", value="작업 일지", key="wl_title")
             p_title_size = po_c2.number_input("제목 크기(px)", value=24, step=1, key="wl_ts")
@@ -822,7 +869,7 @@ def render_weaving(db, sub_menu=None, readonly=False):
             p_m_left = po_c10.number_input("좌측", value=15, step=1, key="wl_ml")
             p_m_right = po_c11.number_input("우측", value=15, step=1, key="wl_mr")
 
-        # 화면 표시 & 인쇄용 HTML 생성
+        # 인쇄용 HTML 생성 (옵션 설정 후)
         print_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         print_date_display = "block" if p_show_date else "none"
         work_date_display = "block" if p_show_work_date else "none"
@@ -855,63 +902,60 @@ def render_weaving(db, sub_menu=None, readonly=False):
         html_content += f"<div class='print-date'>출력일시: {print_now}</div>"
         html_content += f"<div class='header'><h2>{p_title}</h2></div>"
         html_content += f"<div class='work-date'>작성일자: {view_date}</div>"
-        
-        # 주간 섹션
-        st.markdown("#### 주간 작업")
+
+        # HTML 내용 추가 (주간)
         html_content += "<div class='section-title'>주간 작업</div>"
         if day_logs:
             df_day = pd.DataFrame(day_logs)
             df_day['log_time'] = df_day['log_time'].apply(lambda x: x.strftime('%H:%M') if hasattr(x, 'strftime') else str(x)[11:16])
-            # [수정] 컬럼명 변경 (호기 -> 제직기)
-            st.dataframe(
-                df_day[['log_time', 'machine_no', 'content', 'author']].rename(columns={'log_time':'시간','machine_no':'제직기','content':'내용','author':'작성자'}), 
-                hide_index=True, 
-                use_container_width=True,
-                column_config={"시간": st.column_config.TextColumn(width=60), "제직기": st.column_config.TextColumn(width=80), "내용": st.column_config.TextColumn(width="large"), "작성자": st.column_config.TextColumn(width=80)}
-            )
             html_content += df_day[['log_time', 'machine_no', 'content', 'author']].rename(columns={'log_time':'시간','machine_no':'제직기','content':'내용','author':'작성자'}).to_html(index=False, border=1)
         else:
-            st.info("기록 없음")
             html_content += "<p>기록 없음</p>"
-            st.info("작성내역 없음")
-            html_content += "<p>작성내역 없음</p>"
-            
-        st.markdown("##### 📝 야간근무자 전달사항")
-        d_note = notes_data.get('day_to_night_notes', '-')
-        st.warning(d_note)
         html_content += f"<div class='section-title'>📝 야간근무자 전달사항</div><div class='note-box'>{d_note}</div>"
 
-        st.divider()
-
-        # 야간 섹션
-        st.markdown("#### 야간 작업")
+        # HTML 내용 추가 (야간)
         html_content += "<div class='section-title'>야간 작업</div>"
         if night_logs:
             df_night = pd.DataFrame(night_logs)
             df_night['log_time'] = df_night['log_time'].apply(lambda x: x.strftime('%H:%M') if hasattr(x, 'strftime') else str(x)[11:16])
-            # [수정] 컬럼명 변경 (호기 -> 제직기)
-            st.dataframe(
-                df_night[['log_time', 'machine_no', 'content', 'author']].rename(columns={'log_time':'시간','machine_no':'제직기','content':'내용','author':'작성자'}), 
-                hide_index=True, 
-                use_container_width=True,
-                column_config={"시간": st.column_config.TextColumn(width=60), "제직기": st.column_config.TextColumn(width=80), "내용": st.column_config.TextColumn(width="large"), "작성자": st.column_config.TextColumn(width=80)}
-            )
             html_content += df_night[['log_time', 'machine_no', 'content', 'author']].rename(columns={'log_time':'시간','machine_no':'제직기','content':'내용','author':'작성자'}).to_html(index=False, border=1)
         else:
-            st.info("기록 없음")
             html_content += "<p>기록 없음</p>"
-            st.info("작성내역 없음")
-            html_content += "<p>작성내역 없음</p>"
-
-        st.markdown("##### 📝 주간근무자 전달사항")
-        n_note = notes_data.get('night_to_day_notes', '-')
-        st.warning(n_note)
         html_content += f"<div class='section-title'>📝 주간근무자 전달사항</div><div class='note-box'>{n_note}</div>"
         html_content += "</body></html>"
         
-        # [수정] '바로 인쇄하기' 로직으로 변경
-        with c2:
-            if st.button("🖨️ 작업일지 바로 인쇄하기"):
+        # [수정] 버튼 하단 배치 (좌측 끝: 엑셀, 우측 끝: 인쇄)
+        c_btn_xls, c_btn_gap, c_btn_prt = st.columns([1.5, 5, 1.5])
+        
+        with c_btn_xls:
+            # 작업일지 엑셀 데이터 생성
+            xls_data = []
+            for l in day_logs:
+                l_copy = l.copy()
+                l_copy['근무조'] = '주간'
+                xls_data.append(l_copy)
+            for l in night_logs:
+                l_copy = l.copy()
+                l_copy['근무조'] = '야간'
+                xls_data.append(l_copy)
+            
+            if xls_data:
+                df_xls = pd.DataFrame(xls_data)
+                # 시간 포맷팅 및 컬럼 정리
+                df_xls['log_time'] = df_xls['log_time'].apply(lambda x: x.strftime('%H:%M') if hasattr(x, 'strftime') else str(x)[11:16])
+                cols_map = {'log_date': '일자', 'shift': '근무조', 'log_time': '시간', 'machine_no': '제직기', 'content': '내용', 'author': '작성자'}
+                final_xls = df_xls[['log_date', 'shift', 'log_time', 'machine_no', 'content', 'author']].rename(columns=cols_map)
+                
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    final_xls.to_excel(writer, index=False)
+                
+                st.download_button(label="엑셀 다운로드", data=buffer.getvalue(), file_name=f"작업일지_{view_date}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+            else:
+                st.download_button("엑셀 다운로드", b"", disabled=True, use_container_width=True)
+
+        with c_btn_prt:
+            if st.button("인쇄하기", use_container_width=True):
                 final_print_html = html_content.replace(
                     "</head>",
                     """<style> @media screen { body { display: none; } } </style></head>"""
@@ -941,8 +985,7 @@ def render_weaving(db, sub_menu=None, readonly=False):
         
         sorted_prod_dates = sorted(list(prod_dates), reverse=True)
         
-        c1, c2 = st.columns([1, 3])
-        prod_date_str = c1.selectbox("조회일자 선택", sorted_prod_dates if sorted_prod_dates else [str(datetime.date.today())], key="prodlog_view_date")
+        prod_date_str = st.selectbox("조회일자 선택", sorted_prod_dates if sorted_prod_dates else [str(datetime.date.today())], key="prodlog_view_date")
         prod_date = datetime.datetime.strptime(prod_date_str, "%Y-%m-%d").date()
         
         start_dt = datetime.datetime.combine(prod_date, datetime.time.min)
@@ -966,7 +1009,6 @@ def render_weaving(db, sub_menu=None, readonly=False):
             display_cols = ["weaving_end_time", "machine_no", "order_no", "roll_no", "customer", "name", "real_stock", "real_weight", "prod_weight_kg", "avg_weight"]
             final_cols = [c for c in display_cols if c in df.columns]
             df_display = df[final_cols].rename(columns=col_map)
-            st.markdown(f"### 📄 {prod_date} 생산일지")
             st.markdown(f"### {prod_date} 생산일지")
             st.dataframe(df_display, hide_index=True, width="stretch")
             
@@ -976,7 +1018,7 @@ def render_weaving(db, sub_menu=None, readonly=False):
                 df_display.to_excel(writer, index=False)
                 
             # 인쇄 옵션 설정
-            with st.expander("🖨️ 인쇄 옵션 설정"):
+            with st.expander("인쇄 옵션 설정"):
                 po_c1, po_c2, po_c3, po_c4 = st.columns(4)
                 p_title = po_c1.text_input("제목", value=f"{prod_date} 생산일지", key="pl_title")
                 p_title_size = po_c2.number_input("제목 크기(px)", value=24, step=1, key="pl_ts")
@@ -1002,30 +1044,18 @@ def render_weaving(db, sub_menu=None, readonly=False):
                 'da': p_date_pos.lower(), 'ds': p_date_size, 'dd': "block" if p_show_date else "none"
             }
             print_html = generate_report_html(p_title, df_display, "", options)
-            print_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-            date_align = p_date_pos.lower()
-            date_display = "block" if p_show_date else "none"
-
-            print_html = f"""<html><head><title>{p_title}</title>
-            <style>
-                body {{ font-family: 'Malgun Gothic', sans-serif; padding: 20px; }}
-                @page {{ margin: {p_m_top}mm {p_m_right}mm {p_m_bottom}mm {p_m_left}mm; }}
-                body {{ font-family: 'Malgun Gothic', sans-serif; padding: 0; margin: 0; }}
-                h2 {{ text-align: center; margin-bottom: 5px; font-size: {p_title_size}px; }}
-                .info {{ text-align: {date_align}; font-size: {p_date_size}px; margin-bottom: 10px; color: #555; display: {date_display}; }}
-                table {{ width: 100%; border-collapse: collapse; font-size: {p_body_size}px; }}
-                th, td {{ border: 1px solid #444; padding: {p_padding}px 4px; text-align: center; }}
-                th {{ background-color: #f0f0f0; }}
-            </style></head><body>
-            <h2>{p_title}</h2>
-            <div class="info">출력일시: {print_now}</div>
-            {df_display.to_html(index=False)}</body></html>"""
             
-            with c2:
-                c2_1, c2_2 = st.columns(2)
-                
-                # [수정] '바로 인쇄하기' 로직으로 변경
-                if c2_1.button("🖨️ 바로 인쇄하기"):
+            # [수정] 버튼 하단 배치 (좌측 끝: 엑셀, 우측 끝: 인쇄)
+            c_btn_xls, c_btn_gap, c_btn_prt = st.columns([1.5, 5, 1.5])
+            
+            with c_btn_xls:
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    df_display.to_excel(writer, index=False)
+                st.download_button(label="엑셀 다운로드", data=buffer.getvalue(), file_name=f"생산일지_{prod_date}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+
+            with c_btn_prt:
+                if st.button("인쇄하기", use_container_width=True):
                     final_print_html = print_html.replace(
                         "</head>",
                         """<style> @media screen { body { display: none; } } </style></head>"""
@@ -1034,13 +1064,6 @@ def render_weaving(db, sub_menu=None, readonly=False):
                         '<body onload="window.print();">'
                     )
                     st.components.v1.html(final_print_html, height=0, width=0)
-
-                c2_2.download_button(
-                    label="💾 엑셀 다운로드",
-                    data=buffer.getvalue(),
-                    file_name=f"생산일지_{prod_date}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
         else:
             st.info(f"{prod_date}에 완료된 생산 내역이 없습니다.")
 

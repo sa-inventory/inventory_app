@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import datetime
 import io
+import uuid
 from firebase_admin import firestore
 from utils import get_partners, generate_report_html, get_common_codes, search_address_api
 
@@ -109,8 +110,36 @@ def render_order_entry(db, sub_menu):
             
             selected_product = df_filtered.iloc[idx].to_dict()
             
+            # [NEW] 자동 스크롤 앵커 및 스크립트
+            st.markdown('<div id="order-entry-form"></div>', unsafe_allow_html=True)
+            js_uuid = uuid.uuid4()
+            st.components.v1.html(
+                f"""
+                <script>
+                    setTimeout(function() {{
+                        function attemptScroll(count) {{
+                            const anchor = window.parent.document.getElementById('order-entry-form');
+                            if (anchor) {{
+                                anchor.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+                            }} else if (count > 0) {{
+                                setTimeout(() => attemptScroll(count - 1), 100);
+                            }}
+                        }}
+                        attemptScroll(10);
+                    }}, 200);
+                </script>
+                """, height=0
+            )
+
             st.divider()
-            st.success(f"선택된 제품: **{selected_product['product_code']}** ({selected_product.get('product_type', '')} / {selected_product.get('yarn_type', '')})")
+            c_info, c_close = st.columns([6, 1])
+            with c_info:
+                st.success(f"선택된 제품: **{selected_product['product_code']}** ({selected_product.get('product_type', '')} / {selected_product.get('yarn_type', '')})")
+            with c_close:
+                if st.button("닫기", key="close_order_detail", use_container_width=True):
+                    st.session_state["order_df_key"] += 1
+                    st.session_state["last_sel_product_idx"] = None
+                    st.rerun()
 
             # [NEW] 주소 검색 모달 (Dialog)
             if "show_order_addr_dialog" not in st.session_state:

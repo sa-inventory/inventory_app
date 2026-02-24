@@ -3,6 +3,7 @@ import pandas as pd
 import datetime
 import io
 import uuid
+import re
 from firebase_admin import firestore
 from utils import get_partners, generate_report_html, get_common_codes, search_address_api
 
@@ -133,7 +134,7 @@ def render_order_entry(db, sub_menu):
             )
 
             st.divider()
-            c_info, c_close = st.columns([6, 1])
+            c_info, c_close = st.columns([5.5, 1.5])
             with c_info:
                 st.success(f"선택된 제품: **{selected_product['product_code']}** ({selected_product.get('product_type', '')} / {selected_product.get('yarn_type', '')})")
             with c_close:
@@ -338,6 +339,10 @@ def render_order_entry(db, sub_menu):
 def render_partner_order_status(db):
     st.header("발주 현황 조회 (거래처용)")
     
+    # [NEW] 목록 갱신을 위한 키 초기화
+    if "partner_order_key" not in st.session_state:
+        st.session_state["partner_order_key"] = 0
+    
     partner_name = st.session_state.get("linked_partner")
     if not partner_name:
         st.error("연동된 거래처 정보가 없습니다. 관리자에게 문의하세요.")
@@ -361,7 +366,9 @@ def render_partner_order_status(db):
             search_criteria = c3.selectbox("검색 기준", criteria_options)
             search_keyword = c4.text_input("검색어 입력")
             
-            st.form_submit_button("조회")
+            c_b1, c_b2 = st.columns([1, 6])
+            with c_b1:
+                st.form_submit_button("조회", use_container_width=True)
 
     # 데이터 조회
     start_date = datetime.datetime.combine(date_range[0], datetime.time.min)
@@ -451,7 +458,7 @@ def render_partner_order_status(db):
             on_select="rerun",
             selection_mode="single-row",
             height=table_height,
-            key="partner_order_list"
+            key=f"partner_order_list_{st.session_state['partner_order_key']}"
         )
 
         if df_display.empty:
@@ -463,7 +470,13 @@ def render_partner_order_status(db):
             sel_row = df.iloc[idx]
             
             st.divider()
-            st.subheader(f"상세 이력 정보: {sel_row['name']} ({sel_row['order_no']})")
+            c_sub, c_close = st.columns([7.5, 1.5])
+            with c_sub:
+                st.subheader(f"상세 이력 정보: {sel_row['name']} ({sel_row['order_no']})")
+            with c_close:
+                if st.button("닫기", key="close_detail_view_partner", use_container_width=True):
+                    st.session_state["partner_order_key"] += 1
+                    st.rerun()
 
             # 제직기 명칭 매핑을 위한 데이터 가져오기 (필요 시)
             machine_map = {}
@@ -499,7 +512,7 @@ def render_partner_order_status(db):
             
             with c_p1:
                 st.markdown("##### 제직 공정")
-                if sel_row.get('weaving_start_time'):
+                if sel_row.get('weaving_start_time') or sel_row.get('weaving_end_time'):
                     m_no = sel_row.get('machine_no')
                     try: m_name = machine_map.get(int(m_no), str(m_no)) if pd.notna(m_no) else "-"
                     except: m_name = str(m_no)
@@ -516,7 +529,7 @@ def render_partner_order_status(db):
 
             with c_p2:
                 st.markdown("##### 염색 공정")
-                if sel_row.get('dyeing_out_date'):
+                if sel_row.get('dyeing_out_date') or sel_row.get('dyeing_in_date'):
                     st.caption("염색 출고 및 입고")
                     st.text(f"염색업체  : {sel_row.get('dyeing_partner')}")
                     st.text(f"출고일자  : {fmt_date(sel_row.get('dyeing_out_date'))}")
@@ -529,7 +542,7 @@ def render_partner_order_status(db):
 
             with c_p3:
                 st.markdown("##### 봉제 공정")
-                if sel_row.get('sewing_start_date'):
+                if sel_row.get('sewing_start_date') or sel_row.get('sewing_end_date'):
                     st.caption("봉제 작업 및 결과")
                     st.text(f"봉제업체  : {sel_row.get('sewing_partner')}")
                     st.text(f"작업구분  : {sel_row.get('sewing_type')}")
@@ -688,7 +701,53 @@ def render_order_status(db, sub_menu):
                     st.write("데이터 미리보기:")
                     st.dataframe(df_upload.head())
                     
+                    # [NEW] 중복 방지를 위한 초기화 옵션 및 삭제 제외 설정 (UI 변경)
+                    st.markdown("---")
+                    c_del_main, c_del_sub = st.columns([1.2, 3])
+                    
+                    with c_del_main:
+                        delete_existing = st.checkbox("⚠️ 기존 데이터 삭제 후 업로드", value=False, help="체크하면 현재 시스템에 등록된 모든 발주 내역을 삭제하고, 엑셀 파일의 내용으로 새로 등록합니다.")
+                    
+                    preserve_list = []
+                    with c_del_sub:
+                        st.caption("🛡️ 삭제 제외 상태 (체크한 상태의 데이터는 유지됩니다)")
+                        # 체크박스 나열
+                        pc1, pc2, pc3, pc4 = st.columns(4)
+                        is_disabled = not delete_existing
+                        
+                        if pc1.checkbox("제직완료", value=False, disabled=is_disabled): preserve_list.append("제직완료")
+                        if pc2.checkbox("염색완료", value=False, disabled=is_disabled): preserve_list.append("염색완료")
+                        if pc3.checkbox("봉제완료", value=False, disabled=is_disabled): preserve_list.append("봉제완료")
+                        if pc4.checkbox("출고완료", value=True, disabled=is_disabled): preserve_list.append("출고완료")
+
                     if st.button("일괄 등록 시작", type="primary"):
+                        # [NEW] 기존 데이터 삭제 로직
+                        if delete_existing:
+                            with st.spinner("기존 데이터를 삭제하고 있습니다..."):
+                                all_docs = db.collection("orders").stream()
+                                del_count = 0
+                                batch = db.batch()
+                                for doc in all_docs:
+                                    # [NEW] 선택된 상태 유지 옵션
+                                    doc_status = doc.to_dict().get('status')
+                                    
+                                    # 제직완료 선택 시 Master도 포함하여 유지
+                                    if "제직완료" in preserve_list and doc_status == "제직완료(Master)":
+                                        continue
+                                        
+                                    if doc_status in preserve_list:
+                                        continue
+                                        
+                                    batch.delete(doc.reference)
+                                    del_count += 1
+                                    if del_count % 400 == 0:
+                                        batch.commit()
+                                        batch = db.batch()
+                                batch.commit()
+                            
+                            excluded_msg = f"(제외된 상태: {', '.join(preserve_list)})" if preserve_list else ""
+                            st.warning(f"기존 데이터 {del_count}건을 삭제했습니다. {excluded_msg} 신규 등록을 시작합니다.")
+
                         # 제품 코드 매핑을 위한 딕셔너리 생성
                         product_map = {p['product_code']: p for p in products_data}
                         
@@ -875,7 +934,9 @@ def render_order_status(db, sub_menu):
             search_criteria = c3.selectbox("검색 기준", criteria_options, index=criteria_options.index(saved_criteria))
             search_keyword = c4.text_input("검색어 입력", value=st.session_state.get("search_keyword", ""))
             
-            search_btn = st.form_submit_button("조회")
+            c_b1, c_b2 = st.columns([1, 6])
+            with c_b1:
+                search_btn = st.form_submit_button("조회", use_container_width=True)
 
     # 검색 버튼 클릭 시 세션에 검색 조건 저장 (새로고침 되어도 유지되도록)
     if search_btn:
@@ -940,15 +1001,23 @@ def render_order_status(db, sub_menu):
             # [수정] 검색어 필터 (기준에 따라)
             if s_keyword:
                 s_keyword = s_keyword.lower()
-                if s_criteria == "전체":
-                    # 모든 컬럼 값을 문자열로 변환하여 검색
-                    mask = df.apply(lambda row: s_keyword in row.astype(str).str.lower().str.cat(sep=' '), axis=1)
-                    df = df[mask]
-                else:
-                    col_map_search = {"제품코드": "product_code", "발주처": "customer", "제품명": "name", "제품종류": "product_type", "사종": "yarn_type", "색상": "color", "중량": "weight"}
-                    target_col = col_map_search.get(s_criteria)
-                    if target_col and target_col in df.columns:
-                        df = df[df[target_col].astype(str).str.lower().str.contains(s_keyword, na=False)]
+                
+                # [NEW] 다중 검색어 처리 (공백/콤마 구분, OR 조건)
+                keywords = [k.strip() for k in re.split(r'[,\s]+', s_keyword) if k.strip()]
+                
+                if keywords:
+                    # 정규식 패턴 생성 (k1|k2|...)
+                    pattern = '|'.join([re.escape(k) for k in keywords])
+                    
+                    if s_criteria == "전체":
+                        # 모든 컬럼 값을 문자열로 변환하여 검색 (정규식 사용)
+                        mask = df.astype(str).apply(lambda x: ' '.join(x).lower(), axis=1).str.contains(pattern, regex=True, na=False)
+                        df = df[mask]
+                    else:
+                        col_map_search = {"제품코드": "product_code", "발주처": "customer", "제품명": "name", "제품종류": "product_type", "사종": "yarn_type", "색상": "color", "중량": "weight"}
+                        target_col = col_map_search.get(s_criteria)
+                        if target_col and target_col in df.columns:
+                            df = df[df[target_col].astype(str).str.lower().str.contains(pattern, regex=True, na=False)]
             
             if df.empty:
                 st.info("조건에 맞는 발주 내역이 없습니다.")
@@ -970,7 +1039,14 @@ def render_order_status(db, sub_menu):
             final_cols = [c for c in display_cols if c in df.columns] # 실제 존재하는 컬럼만 선택
             
             # 화면 표시용 데이터프레임 (한글 컬럼 적용)
-            df_display = df[final_cols].rename(columns=col_map)
+            # [수정] id 컬럼을 포함하여 생성 (화면에는 숨김 처리 예정)
+            cols_for_df = ['id'] + final_cols
+            df_display = df[cols_for_df].rename(columns=col_map)
+            
+            # [수정] id 컬럼을 포함하여 생성 (화면에는 숨김 처리 예정)
+            cols_for_df = ['id'] + final_cols
+            df_display = df[cols_for_df].rename(columns=col_map)
+            
             # [수정] NaN/NaT 및 문자열 "nan", "None" 등을 빈 문자열로 변환
             df_display = df_display.fillna("")
             df_display = df_display.replace(["nan", "None", "NaT"], "")
@@ -978,47 +1054,69 @@ def render_order_status(db, sub_menu):
             # [NEW] 테이블 위 작업 영역 (상태변경, 수정버튼 등)
             action_placeholder = st.container()
 
-            # --- 수정/삭제를 위한 테이블 선택 기능 ---
-            st.write("🔽 목록에서 수정하거나 제직대기로 보낼 행을 선택(체크)하세요. (다중 선택 가능)")
+            # [NEW] 모드 선택 (단일 선택 vs 다중 선택)
+            # 파트너 계정은 일괄 제직 지시 기능 숨김
+            if st.session_state.get("role") != "partner":
+                c_mode, c_dummy = st.columns([2.5, 7.5])
+                with c_mode:
+                    multi_select_mode = st.toggle("✅ 제직건 선택(발주접수건 보기)", key="order_multi_mode")
+            else:
+                multi_select_mode = False
+
+            # 모드에 따른 데이터 및 설정 조정
+            if multi_select_mode:
+                sel_mode = "multi-row"
+                # 발주접수 상태만 필터링 (컬럼명이 한글로 변경되었으므로 매핑된 이름 사용)
+                status_col = col_map.get("status", "상태")
+                if status_col in df_display.columns:
+                    df_display_view = df_display[df_display[status_col] == '발주접수']
+                else:
+                    df_display_view = df_display
+                st.info("💡 '발주접수' 상태인 항목만 표시됩니다. 체크하여 일괄로 '제직대기' 처리하세요.")
+            else:
+                sel_mode = "single-row"
+                df_display_view = df_display
+                st.write("🔽 목록에서 항목을 선택하면 하단에 상세 정보가 표시됩니다.")
             
             # [NEW] 동적 높이 계산 (행당 약 35px, 최대 20행 700px)
-            table_height = min((len(df_display) + 1) * 35 + 3, 700)
+            table_height = min((len(df_display_view) + 1) * 35 + 3, 700)
             
             selection = st.dataframe(
-                df_display, 
+                df_display_view, 
                 width="stretch", 
                 hide_index=True,  # 맨 왼쪽 순번(0,1,2..) 숨기기
+                column_config={"id": None}, # [NEW] id 컬럼 숨김
                 on_select="rerun", # 선택 시 리런
-                selection_mode="multi-row", # 다중 선택 가능으로 변경
+                selection_mode=sel_mode, # [수정] 모드에 따라 변경
                 height=table_height, # [수정] 목록 높이 동적 적용
-                key=f"order_status_list_{st.session_state['order_status_key']}" # [수정] 동적 키 적용
+                key=f"order_status_list_{st.session_state['order_status_key']}_{multi_select_mode}" # [수정] 동적 키 적용
             )
             
-            if df_display.empty:
+            if df_display_view.empty:
                 st.markdown("<br>", unsafe_allow_html=True)
 
             # [MOVED] 작업 영역 로직 (테이블 상단)
             if selection.selection.rows:
                 selected_indices = selection.selection.rows
-                selected_rows = df.iloc[selected_indices]
+                # [수정] 화면에 보이는 데이터프레임 기준 선택
+                selected_rows = df_display_view.iloc[selected_indices]
                 
-                with action_placeholder:
-                    # 1. 제직 지시 (발주접수 -> 제직대기)
-                    # 선택된 항목 중 '발주접수' 상태인 것만 필터링
-                    valid_to_weaving = selected_rows[selected_rows['status'] == '발주접수']
-                    
-                    if not valid_to_weaving.empty:
-                        with st.expander(f"제직 지시 ({len(valid_to_weaving)}건)", expanded=True):
-                            st.write(f"선택한 항목 중 **'발주접수' 상태인 {len(valid_to_weaving)}건**을 **'제직대기'**로 변경합니다.")
-                            if st.button("선택 항목 제직대기로 발송", type="primary", key="btn_batch_weaving"):
-                                for idx, row in valid_to_weaving.iterrows():
-                                    db.collection("orders").document(row['id']).update({"status": "제직대기"})
-                                st.success(f"{len(valid_to_weaving)}건이 제직대기 상태로 변경되었습니다.")
-                                st.session_state["order_status_key"] += 1
-                                st.rerun()
-                    
-                    # 2. 상세 수정 바로가기 (단일 선택 시)
-                    if len(selection.selection.rows) == 1:
+                # 1. 일괄 제직 지시 모드일 때
+                if multi_select_mode:
+                    with action_placeholder:
+                        if not selected_rows.empty:
+                            with st.expander(f"🚀 제직 지시 ({len(selected_rows)}건)", expanded=True):
+                                st.write(f"선택한 **{len(selected_rows)}건**을 **'제직대기'**로 변경합니다.")
+                                if st.button("선택 항목 제직대기로 발송", type="primary", key="btn_batch_weaving"):
+                                    for idx, row in selected_rows.iterrows():
+                                        db.collection("orders").document(row['id']).update({"status": "제직대기"})
+                                    st.success(f"{len(selected_rows)}건이 제직대기 상태로 변경되었습니다.")
+                                    st.session_state["order_status_key"] += 1
+                                    st.rerun()
+                
+                # 2. 상세 수정 바로가기 (단일 선택 시)
+                elif len(selection.selection.rows) == 1:
+                    with action_placeholder:
                         st.markdown("""
                             <a href="#edit_detail_section" style="text-decoration: none;">
                                 <div style="
@@ -1165,10 +1263,14 @@ def render_order_status(db, sub_menu):
                 p_selected_cols = st.session_state.get("os_p_selected_cols", [])
                 p_widths = st.session_state.get("os_p_widths", {})
                 
-                # [수정] 선택된 컬럼만 필터링
-                print_df = df_display[p_selected_cols]
-                
-                # [수정] CSS 생성 (줄바꿈 방지 및 너비 지정)
+                # 인쇄용 데이터프레임 준비
+                if p_selected_cols:
+                    valid_cols = [c for c in p_selected_cols if c in df_display.columns]
+                    print_df = df_display[valid_cols]
+                else:
+                    print_df = df_display
+
+                # CSS 생성 (줄바꿈 방지 및 너비 지정)
                 custom_css = ""
                 if p_nowrap:
                     custom_css += "td { white-space: nowrap; }\n"
@@ -1216,6 +1318,11 @@ def render_order_status(db, sub_menu):
                 # 선택된 행의 데이터 가져오기 (df는 필터링된 상태일 수 있으므로 iloc 사용)
                 sel_row = df.iloc[selected_idx]
                 sel_id = sel_row['id']
+                # [수정] 선택된 행의 ID를 이용해 원본 데이터(df)에서 행 찾기
+                # (df_display_view는 한글 컬럼명이고 필터링되어 인덱스가 다를 수 있음)
+                sel_id = selected_rows.iloc[0]['id']
+                # 원본 df에서 해당 id를 가진 행 추출
+                sel_row = df[df['id'] == sel_id].iloc[0]
                 
                 # 제직기 명칭 매핑을 위한 데이터 가져오기
                 machine_map = {}
@@ -1227,7 +1334,13 @@ def render_order_status(db, sub_menu):
                 except: pass
 
                 # [NEW] 상세 이력 뷰
-                st.subheader(f"상세 이력 정보: {sel_row['name']} ({sel_row['order_no']})")
+                c_sub, c_close = st.columns([7.5, 1.5])
+                with c_sub:
+                    st.subheader(f"상세 이력 정보: {sel_row['name']} ({sel_row['order_no']})")
+                with c_close:
+                    if st.button("닫기", key="close_detail_view_os", use_container_width=True):
+                        st.session_state["order_status_key"] += 1
+                        st.rerun()
                 
                 def fmt_dt(val):
                     if pd.isna(val) or val == "" or val is None: return "-"
@@ -1257,7 +1370,7 @@ def render_order_status(db, sub_menu):
                 
                 with c_p1:
                     st.markdown("##### 제직 공정")
-                    if sel_row.get('weaving_start_time'):
+                    if sel_row.get('weaving_start_time') or sel_row.get('weaving_end_time'):
                         m_no = sel_row.get('machine_no')
                         try:
                             m_no_int = int(m_no) if pd.notna(m_no) else None
@@ -1280,7 +1393,7 @@ def render_order_status(db, sub_menu):
 
                 with c_p2:
                     st.markdown("##### 염색 공정")
-                    if sel_row.get('dyeing_out_date'):
+                    if sel_row.get('dyeing_out_date') or sel_row.get('dyeing_in_date'):
                         st.caption("염색 출고 및 입고")
                         st.text(f"염색업체  : {sel_row.get('dyeing_partner')}")
                         st.text(f"출고일자  : {fmt_date(sel_row.get('dyeing_out_date'))}")
@@ -1297,7 +1410,7 @@ def render_order_status(db, sub_menu):
 
                 with c_p3:
                     st.markdown("##### 봉제 공정")
-                    if sel_row.get('sewing_start_date'):
+                    if sel_row.get('sewing_start_date') or sel_row.get('sewing_end_date'):
                         st.caption("봉제 작업 및 결과")
                         st.text(f"봉제업체  : {sel_row.get('sewing_partner')}")
                         st.text(f"작업구분  : {sel_row.get('sewing_type')}")
@@ -1418,9 +1531,9 @@ def render_order_status(db, sub_menu):
                         if col_conf2.button("❌ 취소", key="btn_del_no"):
                             st.session_state["delete_confirm_id"] = None
                             st.rerun()
-            elif len(selection.selection.rows) > 1:
+            elif len(selection.selection.rows) > 1 and not multi_select_mode:
                 st.info("ℹ️ 상세 수정은 한 번에 하나의 행만 선택했을 때 가능합니다. (상단 일괄 변경 기능 사용 가능)")
-            else:
+            elif not selection.selection.rows:
                 st.info("👆 위 목록에서 수정하거나 상태를 변경할 행을 선택해주세요.")
 
         else:

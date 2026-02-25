@@ -637,7 +637,18 @@ if st.session_state.get("logged_in"):
             }}
             
             function resetTimer() {{
-                // [FIX] 활동 감지 시 스토리지 시간 갱신
+                // [FIX] 절전모드 해제 시 즉시 로그아웃 되도록 수정
+                const now = Date.now();
+                const lastActivity = parseInt(localStorage.getItem(storageKey) || now);
+                const idleMs = now - lastActivity;
+
+                // 이미 타임아웃 시간을 초과했다면, 타이머를 리셋하지 않고 로그아웃을 진행시킴
+                if (idleMs >= timeoutMs) {{
+                    updateTimer(); // updateTimer가 로그아웃을 처리함
+                    return;
+                }}
+                
+                // 타임아웃 전이면 활동 시간 갱신
                 localStorage.setItem(storageKey, Date.now());
                 updateTimer();
             }}

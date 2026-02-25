@@ -3444,22 +3444,3 @@ def render_company_settings(db, sub_menu):
             doc_ref.set(new_data)
             st.success("회사 정보가 저장되었습니다.")
             st.rerun()
-        # [NEW] 주소 검색 API 키 입력
-        juso_api_key = st.text_input("도로명주소 API 승인키", value=data.get("juso_api_key", ""), type="password", help="행정안전부 개발자센터에서 발급받은 '주소검색 API' 승인키를 입력하세요.")
-        
-        app_title = st.text_input("시스템 제목 (브라우저 탭)", value=data.get("app_title", "타올 생산 현황 관리"), help="웹브라우저 탭에 표시될 제목입니다.")
-        
-        note = st.text_area("비고 / 하단 문구", value=data.get("note", ""), help="명세서 하단에 들어갈 안내 문구 등을 입력하세요.")
-        
-        if st.button("저장", type="primary"):
-            new_data = {
-                "name": name, "rep_name": rep_name, "biz_num": biz_num, 
-                "address": address, "address_detail": addr_detail, # 상세주소 별도 저장 또는 합쳐서 저장 가능 (여기선 분리 저장 예시)
-                "phone": phone, "fax": fax, "biz_type": biz_type, "biz_item": biz_item,
-                "email": email, "bank_name": bank_name, "bank_account": bank_account, "note": note,
-                "juso_api_key": juso_api_key,
-                "app_title": app_title
-            }
-            doc_ref.set(new_data)
-            st.success("회사 정보가 저장되었습니다.")
-            st.rerun()

@@ -3,6 +3,7 @@ import pandas as pd
 import datetime
 import io
 import uuid
+import base64
 from firebase_admin import firestore
 from utils import get_common_codes, get_partners, is_basic_code_used, manage_code, manage_code_with_code, get_db, generate_report_html, search_address_api, validate_password
 
@@ -531,6 +532,15 @@ def render_shipping_status(db, sub_menu):
                         p_show_sign = pc4.checkbox("인수자 서명란", value=True, key="p_show_sign")
                         p_show_approval = pc5.checkbox("결재란 표시", value=False, key="p_show_appr")
                         p_show_cust_info = pc6.checkbox("공급받는자 상세", value=False, key="p_show_cust_info")
+                        p_include_shipping = pc6.checkbox("운임비 포함", value=False, key="p_inc_ship")
+                        
+                        # [NEW] 도장/로고 설정
+                        st.caption("이미지 설정 (도장/로고)")
+                        img_c1, img_c2, img_c3, img_c4 = st.columns(4)
+                        p_stamp_width = img_c1.number_input("도장 너비(px)", value=40, step=5, key="p_stamp_w")
+                        p_stamp_top = img_c2.number_input("도장 상단위치(%)", value=50, step=5, help="50%가 수직 중앙입니다.", key="p_stamp_t")
+                        p_stamp_right = img_c3.number_input("도장 우측여백(px)", value=5, step=5, key="p_stamp_r")
+                        p_show_logo = img_c4.checkbox("회사 로고 표시", value=True, key="p_show_logo")
 
                         # [NEW] 결재란 상세 설정 (최대 5명)
                         approval_names = []
@@ -665,6 +675,22 @@ def render_shipping_status(db, sub_menu):
                             info_table_style = f"width:100%; height:100%; border-collapse:collapse; border:{bo}px solid #000; font-size:12px; table-layout:fixed;"
                             tr_style = "height: 25px;" # 행 높이 고정
 
+                            # [NEW] 직인 이미지 처리 (옵션 적용)
+                            stamp_html = ""
+                            if comp_info.get('stamp_img'):
+                                stamp_src = f"data:image/png;base64,{comp_info.get('stamp_img')}"
+                                s_w = options.get('stamp_width', 40)
+                                s_t = options.get('stamp_top', 50)
+                                s_r = options.get('stamp_right', 5)
+                                # 성명 칸 위에 겹치도록 스타일링 (우측 정렬)
+                                stamp_html = f'<img src="{stamp_src}" style="position:absolute; top:{s_t}%; right:{s_r}px; transform:translateY(-50%); width:{s_w}px; opacity:0.8; z-index:10;">'
+
+                            # [NEW] 로고 이미지 처리
+                            logo_html = ""
+                            if options.get('show_logo') and comp_info.get('logo_img'):
+                                logo_src = f"data:image/png;base64,{comp_info.get('logo_img')}"
+                                logo_html = f'<img src="{logo_src}" style="position:absolute; top:0; left:0; max-height:60px; max-width:180px;">'
+
                             # 공급자 정보 HTML
                             provider_html = f"""
                             <table style="{info_table_style}">
@@ -684,7 +710,10 @@ def render_shipping_status(db, sub_menu):
                                     <td style="border:{bi}px solid #000; padding:2px; background:#f0f0f0; text-align:center;">상호</td>
                                     <td style="border:{bi}px solid #000; padding:2px;">{comp_info.get('name', '')}</td>
                                     <td style="border:{bi}px solid #000; padding:2px; background:#f0f0f0; text-align:center;">성명</td>
-                                    <td style="border:{bi}px solid #000; padding:2px;">{comp_info.get('rep_name', '')}</td>
+                                    <td style="border:{bi}px solid #000; padding:2px; position:relative;">
+                                        {comp_info.get('rep_name', '')}
+                                        {stamp_html}
+                                    </td>
                                 </tr>
                                 <tr style="{tr_style}">
                                     <td style="border:{bi}px solid #000; padding:2px; background:#f0f0f0; text-align:center;">주소</td>
@@ -809,6 +838,26 @@ def render_shipping_status(db, sub_menu):
                                     'base_order_no': row.get('base_order_no', '')
                                 })
                             
+                            # [NEW] 운임비 행 추가 (옵션 활성화 시)
+                            if options.get('include_shipping'):
+                                # 배송방법별 운임비 합계 계산
+                                ship_agg = group_df.groupby('shipping_method')['shipping_cost'].sum()
+                                for method, cost in ship_agg.items():
+                                    if cost > 0:
+                                        disp_name = method if method else "운임비"
+                                        data_rows.append({
+                                            'date': print_date[5:],
+                                            'name': disp_name,
+                                            'size': '',
+                                            'qty': 1,
+                                            'price': int(cost),
+                                            'supply': int(cost),
+                                            'vat': 0,
+                                            'note': '운임비',
+                                            'base_order_no': 'SHIPPING' # 병합 방지용 키
+                                        })
+                                        grand_total_supply += int(cost)
+                            
                             # [NEW] 동일 품목 합산 로직
                             if options.get('merge_rows'):
                                 merged_data = {}
@@ -925,8 +974,9 @@ def render_shipping_status(db, sub_menu):
                                 
                                 page_html = f"""
                             <div class="page" style="page-break-after: always; padding: 0; border: none; margin: 0 auto; width: 100%; height: {page_h_mm}mm; box-sizing: border-box; position: relative;">
-                                <div class="content-wrap">
-                                <div style="text-align:left; font-size:10px; margin-bottom:2px;">[{page_type_str}]</div>
+                                <div class="content-wrap" style="position:relative;">
+                                {logo_html}
+                                <div style="text-align:right; font-size:10px; margin-bottom:2px;">[{page_type_str}]</div>
                                 <h1 style="text-align:center; letter-spacing:10px; margin-bottom:10px; margin-top:0;">{options.get('title_text')}</h1>
                                 {approval_html}
                                 <div style="display:flex; justify-content:space-between; margin-bottom:20px;">
@@ -983,9 +1033,14 @@ def render_shipping_status(db, sub_menu):
                             'show_approval': p_show_approval,
                             'approval_names': approval_names,
                             'show_cust_info': p_show_cust_info,
+                            'include_shipping': p_include_shipping, # [NEW] 운임비 옵션 전달
                             'merge_rows': p_merge_rows, # [NEW] 합산 옵션 전달
                             'bo': p_bo,
-                            'bi': p_bi
+                            'bi': p_bi,
+                            'stamp_width': p_stamp_width,
+                            'stamp_top': p_stamp_top,
+                            'stamp_right': p_stamp_right,
+                            'show_logo': p_show_logo
                         }
 
                         for customer, group in grouped:
@@ -3295,6 +3350,44 @@ def render_company_settings(db, sub_menu):
         
         note = st.text_area("비고 / 하단 문구", value=data.get("note", ""), help="명세서 하단에 들어갈 안내 문구 등을 입력하세요.")
         
+        # [NEW] 직인 이미지 업로드
+        st.markdown("---")
+        st.markdown("##### 🔴 직인(도장) 이미지")
+        st.caption("거래명세서의 '공급자 성명' 란에 표시될 도장 이미지입니다. (배경이 투명한 PNG 파일 권장)")
+        
+        c_stamp1, c_stamp2 = st.columns([1, 2])
+        current_stamp = data.get("stamp_img")
+        delete_stamp = False
+        
+        with c_stamp1:
+            if current_stamp:
+                st.image(base64.b64decode(current_stamp), width=80, caption="현재 등록된 직인")
+                delete_stamp = st.checkbox("직인 삭제", key="del_stamp_chk")
+            else:
+                st.info("등록된 직인이 없습니다.")
+                
+        with c_stamp2:
+            new_stamp_file = st.file_uploader("이미지 업로드", type=['png', 'jpg', 'jpeg'], key="stamp_uploader")
+
+        # [NEW] 회사 로고 이미지 업로드
+        st.markdown("---")
+        st.markdown("##### 🏢 회사 로고 이미지")
+        st.caption("거래명세서 좌측 상단에 표시될 로고 이미지입니다.")
+        
+        c_logo1, c_logo2 = st.columns([1, 2])
+        current_logo = data.get("logo_img")
+        delete_logo = False
+        
+        with c_logo1:
+            if current_logo:
+                st.image(base64.b64decode(current_logo), width=150, caption="현재 등록된 로고")
+                delete_logo = st.checkbox("로고 삭제", key="del_logo_chk")
+            else:
+                st.info("등록된 로고가 없습니다.")
+                
+        with c_logo2:
+            new_logo_file = st.file_uploader("로고 이미지 업로드", type=['png', 'jpg', 'jpeg'], key="logo_uploader")
+
         if st.button("저장", type="primary"):
             new_data = {
                 "name": name, "rep_name": rep_name, "biz_num": biz_num, 
@@ -3304,6 +3397,25 @@ def render_company_settings(db, sub_menu):
                 "juso_api_key": juso_api_key,
                 "app_title": app_title
             }
+            
+            # 직인 처리
+            if new_stamp_file:
+                stamp_bytes = new_stamp_file.read()
+                new_data["stamp_img"] = base64.b64encode(stamp_bytes).decode('utf-8')
+            elif current_stamp and not delete_stamp:
+                new_data["stamp_img"] = current_stamp
+            else:
+                new_data["stamp_img"] = None
+
+            # 로고 처리
+            if new_logo_file:
+                logo_bytes = new_logo_file.read()
+                new_data["logo_img"] = base64.b64encode(logo_bytes).decode('utf-8')
+            elif current_logo and not delete_logo:
+                new_data["logo_img"] = current_logo
+            else:
+                new_data["logo_img"] = None
+
             doc_ref.set(new_data)
             st.success("회사 정보가 저장되었습니다.")
             st.rerun()

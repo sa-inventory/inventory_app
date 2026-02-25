@@ -297,15 +297,26 @@ with st.sidebar:
     try:
         comp_info_ref = db.collection("settings").document("company_info").get()
         if comp_info_ref.exists:
-            company_name = comp_info_ref.to_dict().get("name", "세안타올")
+            comp_data = comp_info_ref.to_dict()
+            company_name = comp_data.get("name", "세안타올")
+            logo_img = comp_data.get("logo_img")
         else:
             company_name = "세안타올"
+            logo_img = None
     except:
         company_name = "세안타올"
+        logo_img = None
+
+    # 로고 이미지 처리
+    if logo_img:
+        title_html = f'<img src="data:image/png;base64,{logo_img}" style="max-height: 45px; margin-right: 10px;"> {company_name}'
+    else:
+        title_html = f"🏢 {company_name}"
+
     # [수정] 회사명 글씨 크기 확대 및 스타일 개선
     st.markdown(f"""
         <div style='text-align: center; margin-bottom: 20px;'>
-            <h1 style='margin:0; font-size: 2.2rem; font-weight: 700;'>🏢 {company_name}</h1>
+            <h1 style='margin:0; font-size: 2.2rem; font-weight: 700; display: flex; align-items: center; justify-content: center;'>{title_html}</h1>
             <h3 style='margin:0; font-size: 1.5rem; color: #333; font-weight: 600; margin-top: 5px;'>생산관리 시스템</h3>
         </div>
     """, unsafe_allow_html=True)

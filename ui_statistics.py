@@ -133,6 +133,10 @@ def render_statistics(db, sub_menu):
             p_m_bottom = po_c9.number_input("하단", value=15, step=1, key=f"p_mb_{file_name}")
             p_m_left = po_c10.number_input("좌측", value=15, step=1, key=f"p_ml_{file_name}")
             p_m_right = po_c11.number_input("우측", value=15, step=1, key=f"p_mr_{file_name}")
+            
+            po_c12, po_c13 = st.columns(2)
+            p_bo = po_c12.number_input("외곽선 굵기", value=1.0, step=0.1, format="%.1f", key=f"p_bo_{file_name}")
+            p_bi = po_c13.number_input("안쪽선 굵기", value=0.5, step=0.1, format="%.1f", key=f"p_bi_{file_name}")
 
         c_btn1, c_btn2 = st.columns([1, 1])
         
@@ -143,7 +147,7 @@ def render_statistics(db, sub_menu):
         c_btn1.download_button("💾 엑셀 다운로드", buffer.getvalue(), f"{file_name}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         
         # Print
-        if c_btn2.button("🖨️ 인쇄", key=f"print_{file_name}"):
+        if c_btn2.button("🖨️ 인쇄하기", key=f"print_{file_name}"):
             # [NEW] 인쇄 시 폰트 설정 함수 호출
             setup_matplotlib_font()
 
@@ -181,7 +185,8 @@ def render_statistics(db, sub_menu):
             options = {
                 'mt': p_m_top, 'mr': p_m_right, 'mb': p_m_bottom, 'ml': p_m_left,
                 'ts': p_title_size, 'bs': p_body_size, 'pad': p_padding,
-                'da': p_date_pos.lower(), 'ds': p_date_size, 'dd': "block" if p_show_date else "none"
+                'da': p_date_pos.lower(), 'ds': p_date_size, 'dd': "block" if p_show_date else "none",
+                'bo': p_bo, 'bi': p_bi
             }
             html = generate_report_html(p_title, df_data, "", options, chart_html)
             st.components.v1.html(html, height=0, width=0)

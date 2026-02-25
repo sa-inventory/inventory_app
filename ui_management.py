@@ -429,12 +429,15 @@ def render_shipping_status(db, sub_menu):
                     lp_body_size = lp_c3.number_input("본문 크기", value=10, step=1, key="lp_bs")
                     lp_padding = lp_c4.number_input("셀 여백", value=4, step=1, key="lp_pad")
                     
-                    lp_c5, lp_c6 = st.columns(2)
                     lp_c5, lp_c6, lp_c7, lp_c8 = st.columns(4)
                     lp_m_top = lp_c5.number_input("상단 여백", value=15, key="lp_mt")
                     lp_m_bottom = lp_c6.number_input("하단 여백", value=15, key="lp_mb")
                     lp_m_left = lp_c7.number_input("좌측 여백", value=15, key="lp_ml")
                     lp_m_right = lp_c8.number_input("우측 여백", value=15, key="lp_mr")
+                    
+                    lp_c9, lp_c10 = st.columns(2)
+                    lp_bo = lp_c9.number_input("외곽선 굵기", value=1.0, step=0.1, format="%.1f", key="lp_bo")
+                    lp_bi = lp_c10.number_input("안쪽선 굵기", value=0.5, step=0.1, format="%.1f", key="lp_bi")
 
                     lp_exclude_cols = st.multiselect("인쇄 제외 컬럼", list(col_map.values()), key="lp_exclude")
 
@@ -448,7 +451,7 @@ def render_shipping_status(db, sub_menu):
                 lc1.download_button("💾 엑셀 다운로드", buffer.getvalue(), f"출고목록_{today}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                 
                 # 목록 인쇄
-                if lc2.button("🖨️ 목록 인쇄"):
+                if lc2.button("🖨️ 인쇄하기"):
                     print_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
                     
                     # [수정] 선택된 항목이 있으면 해당 항목만, 없으면 전체 목록 인쇄
@@ -480,8 +483,8 @@ def render_shipping_status(db, sub_menu):
                             body {{ font-family: 'Malgun Gothic', sans-serif; padding: 0; margin: 0; }}
                             h2 {{ text-align: center; margin-bottom: 5px; font-size: {lp_title_size}px; }}
                             .info {{ text-align: right; font-size: 10px; margin-bottom: 10px; color: #555; }}
-                            table {{ width: 100%; border-collapse: collapse; font-size: {lp_body_size}px; margin-bottom: 10px; }}
-                            th, td {{ border: 1px solid #444; padding: {lp_padding}px; text-align: center; }}
+                            table {{ width: 100%; border-collapse: collapse; font-size: {lp_body_size}px; margin-bottom: 10px; border: {lp_bo}px solid #444; }}
+                            th, td {{ border: {lp_bi}px solid #444; padding: {lp_padding}px; text-align: center; }}
                             th {{ background-color: #f0f0f0; }}
                             .summary {{ text-align: right; font-weight: bold; font-size: {lp_body_size + 2}px; margin-top: 10px; border-top: 2px solid #444; padding-top: 5px; }}
                             @media screen {{ body {{ display: none; }} }}
@@ -548,6 +551,10 @@ def render_shipping_status(db, sub_menu):
                         p_m_bottom = po_c9.number_input("하단", value=15, step=1, key="p_mb")
                         p_m_left = po_c10.number_input("좌측", value=15, step=1, key="p_ml")
                         p_m_right = po_c11.number_input("우측", value=15, step=1, key="p_mr")
+                        
+                        po_c12, po_c13 = st.columns(2)
+                        p_bo = po_c12.number_input("외곽선 굵기", value=1.0, step=0.1, format="%.1f", key="p_bo")
+                        p_bi = po_c13.number_input("안쪽선 굵기", value=0.5, step=0.1, format="%.1f", key="p_bi")
 
                         # [NEW] 페이지당 행 수 설정 (자동/수동)
                         st.caption("레이아웃 조정")
@@ -651,9 +658,11 @@ def render_shipping_status(db, sub_menu):
                             # 날짜
                             issue_date = options.get('issue_date', datetime.date.today())
                             print_date = issue_date.strftime("%Y-%m-%d")
+                            bo = options.get('bo', 1.0)
+                            bi = options.get('bi', 0.5)
 
                             # [수정] 표 스타일 통일 (행 높이 고정)
-                            info_table_style = "width:100%; height:100%; border-collapse:collapse; border:1px solid #000; font-size:12px; table-layout:fixed;"
+                            info_table_style = f"width:100%; height:100%; border-collapse:collapse; border:{bo}px solid #000; font-size:12px; table-layout:fixed;"
                             tr_style = "height: 25px;" # 행 높이 고정
 
                             # 공급자 정보 HTML
@@ -667,25 +676,25 @@ def render_shipping_status(db, sub_menu):
                                     <col style="width: auto;">
                                 </colgroup>
                                 <tr style="{tr_style}">
-                                    <td rowspan="4" style="text-align:center; background:#f0f0f0; border:1px solid #000;">공<br>급<br>자</td>
-                                    <td style="border:1px solid #000; padding:2px; background:#f0f0f0; text-align:center;">등록번호</td>
-                                    <td colspan="3" style="border:1px solid #000; padding:2px; text-align:center;">{comp_info.get('biz_num', '')}</td>
+                                    <td rowspan="4" style="text-align:center; background:#f0f0f0; border:{bi}px solid #000;">공<br>급<br>자</td>
+                                    <td style="border:{bi}px solid #000; padding:2px; background:#f0f0f0; text-align:center;">등록번호</td>
+                                    <td colspan="3" style="border:{bi}px solid #000; padding:2px; text-align:center;">{comp_info.get('biz_num', '')}</td>
                                 </tr>
                                 <tr style="{tr_style}">
-                                    <td style="border:1px solid #000; padding:2px; background:#f0f0f0; text-align:center;">상호</td>
-                                    <td style="border:1px solid #000; padding:2px;">{comp_info.get('name', '')}</td>
-                                    <td style="border:1px solid #000; padding:2px; background:#f0f0f0; text-align:center;">성명</td>
-                                    <td style="border:1px solid #000; padding:2px;">{comp_info.get('rep_name', '')}</td>
+                                    <td style="border:{bi}px solid #000; padding:2px; background:#f0f0f0; text-align:center;">상호</td>
+                                    <td style="border:{bi}px solid #000; padding:2px;">{comp_info.get('name', '')}</td>
+                                    <td style="border:{bi}px solid #000; padding:2px; background:#f0f0f0; text-align:center;">성명</td>
+                                    <td style="border:{bi}px solid #000; padding:2px;">{comp_info.get('rep_name', '')}</td>
                                 </tr>
                                 <tr style="{tr_style}">
-                                    <td style="border:1px solid #000; padding:2px; background:#f0f0f0; text-align:center;">주소</td>
-                                    <td colspan="3" style="border:1px solid #000; padding:2px;">{comp_info.get('address', '')}</td>
+                                    <td style="border:{bi}px solid #000; padding:2px; background:#f0f0f0; text-align:center;">주소</td>
+                                    <td colspan="3" style="border:{bi}px solid #000; padding:2px;">{comp_info.get('address', '')}</td>
                                 </tr>
                                 <tr style="{tr_style}">
-                                    <td style="border:1px solid #000; padding:2px; background:#f0f0f0; text-align:center;">업태</td>
-                                    <td style="border:1px solid #000; padding:2px;">{comp_info.get('biz_type', '')}</td>
-                                    <td style="border:1px solid #000; padding:2px; background:#f0f0f0; text-align:center;">종목</td>
-                                    <td style="border:1px solid #000; padding:2px;">{comp_info.get('biz_item', '')}</td>
+                                    <td style="border:{bi}px solid #000; padding:2px; background:#f0f0f0; text-align:center;">업태</td>
+                                    <td style="border:{bi}px solid #000; padding:2px;">{comp_info.get('biz_type', '')}</td>
+                                    <td style="border:{bi}px solid #000; padding:2px; background:#f0f0f0; text-align:center;">종목</td>
+                                    <td style="border:{bi}px solid #000; padding:2px;">{comp_info.get('biz_item', '')}</td>
                                 </tr>
                             </table>
                             """
@@ -703,33 +712,33 @@ def render_shipping_status(db, sub_menu):
                                         <col style="width: auto;">
                                     </colgroup>
                                     <tr style="{tr_style}">
-                                        <td rowspan="4" style="text-align:center; background:#f0f0f0; border:1px solid #000;">공<br>급<br>받<br>는<br>자</td>
-                                        <td style="border:1px solid #000; padding:2px; background:#f0f0f0; text-align:center;">등록번호</td>
-                                        <td colspan="3" style="border:1px solid #000; padding:2px; text-align:center;">{cust_info.get('biz_num', '')}</td>
+                                        <td rowspan="4" style="text-align:center; background:#f0f0f0; border:{bi}px solid #000;">공<br>급<br>받<br>는<br>자</td>
+                                        <td style="border:{bi}px solid #000; padding:2px; background:#f0f0f0; text-align:center;">등록번호</td>
+                                        <td colspan="3" style="border:{bi}px solid #000; padding:2px; text-align:center;">{cust_info.get('biz_num', '')}</td>
                                     </tr>
                                     <tr style="{tr_style}">
-                                        <td style="border:1px solid #000; padding:2px; background:#f0f0f0; text-align:center;">상호</td>
-                                        <td style="border:1px solid #000; padding:2px;">{cust_info.get('name', customer)}</td>
-                                        <td style="border:1px solid #000; padding:2px; background:#f0f0f0; text-align:center;">성명</td>
-                                        <td style="border:1px solid #000; padding:2px;">{cust_info.get('rep_name', '')}</td>
+                                        <td style="border:{bi}px solid #000; padding:2px; background:#f0f0f0; text-align:center;">상호</td>
+                                        <td style="border:{bi}px solid #000; padding:2px;">{cust_info.get('name', customer)}</td>
+                                        <td style="border:{bi}px solid #000; padding:2px; background:#f0f0f0; text-align:center;">성명</td>
+                                        <td style="border:{bi}px solid #000; padding:2px;">{cust_info.get('rep_name', '')}</td>
                                     </tr>
                                     <tr style="{tr_style}">
-                                        <td style="border:1px solid #000; padding:2px; background:#f0f0f0; text-align:center;">주소</td>
-                                        <td colspan="3" style="border:1px solid #000; padding:2px;">{cust_info.get('address', '')}</td>
+                                        <td style="border:{bi}px solid #000; padding:2px; background:#f0f0f0; text-align:center;">주소</td>
+                                        <td colspan="3" style="border:{bi}px solid #000; padding:2px;">{cust_info.get('address', '')}</td>
                                     </tr>
                                     <tr style="{tr_style}">
-                                        <td style="border:1px solid #000; padding:2px; background:#f0f0f0; text-align:center;">업태</td>
-                                        <td style="border:1px solid #000; padding:2px;">{cust_info.get('item', '')}</td>
-                                        <td style="border:1px solid #000; padding:2px; background:#f0f0f0; text-align:center;">종목</td>
-                                        <td style="border:1px solid #000; padding:2px;"></td>
+                                        <td style="border:{bi}px solid #000; padding:2px; background:#f0f0f0; text-align:center;">업태</td>
+                                        <td style="border:{bi}px solid #000; padding:2px;">{cust_info.get('item', '')}</td>
+                                        <td style="border:{bi}px solid #000; padding:2px; background:#f0f0f0; text-align:center;">종목</td>
+                                        <td style="border:{bi}px solid #000; padding:2px;"></td>
                                     </tr>
                                 </table>
                                 """
                             else:
                                 customer_html = f"""
-                                <table style="width:100%; height:100%; border-collapse:collapse; border:1px solid #000;">
+                                <table style="width:100%; height:100%; border-collapse:collapse; border:{bo}px solid #000;">
                                     <tr>
-                                        <td style="border:1px solid #000; padding:10px; text-align:center;">
+                                        <td style="border:{bi}px solid #000; padding:10px; text-align:center;">
                                             <span style="font-size:1.2em; font-weight:bold;">{customer}</span> 귀하<br><br>
                                         </td>
                                     </tr>
@@ -741,13 +750,13 @@ def render_shipping_status(db, sub_menu):
                             approvers = options.get('approval_names', [])
                             if options.get('show_approval') and approvers:
                                 # 입력된 인원수만큼 셀 생성
-                                cells_header = "".join([f'<td style="border:1px solid #000; width:60px; padding:2px;">{name}</td>' for name in approvers])
-                                cells_body = "".join(['<td style="border:1px solid #000; height:40px;"></td>' for _ in approvers])
+                                cells_header = "".join([f'<td style="border:{bi}px solid #000; width:60px; padding:2px;">{name}</td>' for name in approvers])
+                                cells_body = "".join([f'<td style="border:{bi}px solid #000; height:40px;"></td>' for _ in approvers])
                                 
                                 approval_html = f"""
-                                <table style="border-collapse:collapse; border:1px solid #000; font-size:11px; text-align:center; margin-left:auto; margin-bottom:5px;">
+                                <table style="border-collapse:collapse; border:{bo}px solid #000; font-size:11px; text-align:center; margin-left:auto; margin-bottom:5px;">
                                     <tr>
-                                        <td rowspan="2" style="border:1px solid #000; background:#f0f0f0; width:20px; padding:2px; vertical-align:middle;">결<br>재</td>
+                                        <td rowspan="2" style="border:{bi}px solid #000; background:#f0f0f0; width:20px; padding:2px; vertical-align:middle;">결<br>재</td>
                                         {cells_header}
                                     </tr>
                                     <tr>
@@ -831,21 +840,21 @@ def render_shipping_status(db, sub_menu):
                                 """
 
                             header_html = f"""
-                                <th style="border:1px solid #000; padding:{cell_pad}px; width:8%;">월/일</th>
-                                <th style="border:1px solid #000; padding:{cell_pad}px; width:25%;">품목</th>
-                                <th style="border:1px solid #000; padding:{cell_pad}px; width:8%;">규격</th>
-                                <th style="border:1px solid #000; padding:{cell_pad}px; width:8%;">수량</th>
+                                <th style="border:{bi}px solid #000; padding:{cell_pad}px; width:8%;">월/일</th>
+                                <th style="border:{bi}px solid #000; padding:{cell_pad}px; width:25%;">품목</th>
+                                <th style="border:{bi}px solid #000; padding:{cell_pad}px; width:8%;">규격</th>
+                                <th style="border:{bi}px solid #000; padding:{cell_pad}px; width:8%;">수량</th>
                             """
                             if not hide_price:
-                                header_html += f'<th style="border:1px solid #000; padding:{cell_pad}px; width:10%;">단가</th>'
+                                header_html += f'<th style="border:{bi}px solid #000; padding:{cell_pad}px; width:10%;">단가</th>'
                                 if show_vat_col:
                                     header_html += f"""
-                                    <th style="border:1px solid #000; padding:{cell_pad}px; width:12%;">공급가액</th>
-                                    <th style="border:1px solid #000; padding:{cell_pad}px; width:12%;">세액</th>
+                                    <th style="border:{bi}px solid #000; padding:{cell_pad}px; width:12%;">공급가액</th>
+                                    <th style="border:{bi}px solid #000; padding:{cell_pad}px; width:12%;">세액</th>
                                     """
                                 else:
-                                    header_html += f'<th style="border:1px solid #000; padding:{cell_pad}px; width:15%;">금액</th>'
-                            header_html += f'<th style="border:1px solid #000; padding:{cell_pad}px; width:auto;">비고</th>'
+                                    header_html += f'<th style="border:{bi}px solid #000; padding:{cell_pad}px; width:15%;">금액</th>'
+                            header_html += f'<th style="border:{bi}px solid #000; padding:{cell_pad}px; width:auto;">비고</th>'
 
                             # 페이지별 HTML 생성
                             pages_output = ""
@@ -860,22 +869,22 @@ def render_shipping_status(db, sub_menu):
                                 for row in page_rows:
                                     items_html += f"""
                                 <tr>
-                                    <td style="border:1px solid #000; padding:{cell_pad}px; text-align:center;">{row['date']}</td>
-                                    <td style="border:1px solid #000; padding:{cell_pad}px;">{row['name']}</td>
-                                    <td style="border:1px solid #000; padding:{cell_pad}px; text-align:center;">{row['size']}</td>
-                                    <td style="border:1px solid #000; padding:{cell_pad}px; text-align:right;">{row['qty']:,}</td>
+                                    <td style="border:{bi}px solid #000; padding:{cell_pad}px; text-align:center;">{row['date']}</td>
+                                    <td style="border:{bi}px solid #000; padding:{cell_pad}px;">{row['name']}</td>
+                                    <td style="border:{bi}px solid #000; padding:{cell_pad}px; text-align:center;">{row['size']}</td>
+                                    <td style="border:{bi}px solid #000; padding:{cell_pad}px; text-align:right;">{row['qty']:,}</td>
                                 """
                                     if not hide_price:
-                                        items_html += f'<td style="border:1px solid #000; padding:{cell_pad}px; text-align:right;">{row["price"]:,}</td>'
+                                        items_html += f'<td style="border:{bi}px solid #000; padding:{cell_pad}px; text-align:right;">{row["price"]:,}</td>'
                                         if show_vat_col:
                                             items_html += f"""
-                                            <td style="border:1px solid #000; padding:{cell_pad}px; text-align:right;">{row["supply"]:,}</td>
-                                            <td style="border:1px solid #000; padding:{cell_pad}px; text-align:right;">{row["vat"]:,}</td>
+                                            <td style="border:{bi}px solid #000; padding:{cell_pad}px; text-align:right;">{row["supply"]:,}</td>
+                                            <td style="border:{bi}px solid #000; padding:{cell_pad}px; text-align:right;">{row["vat"]:,}</td>
                                             """
                                         else:
-                                            items_html += f'<td style="border:1px solid #000; padding:{cell_pad}px; text-align:right;">{row["supply"]+row["vat"]:,}</td>'
+                                            items_html += f'<td style="border:{bi}px solid #000; padding:{cell_pad}px; text-align:right;">{row["supply"]+row["vat"]:,}</td>'
                                     
-                                    items_html += f'<td style="border:1px solid #000; padding:{cell_pad}px;">{row["note"]}</td></tr>'
+                                    items_html += f'<td style="border:{bi}px solid #000; padding:{cell_pad}px;">{row["note"]}</td></tr>'
 
                                 # 빈 줄 채우기
                                 col_span = 4
@@ -885,7 +894,7 @@ def render_shipping_status(db, sub_menu):
                                     else: col_span += 1
                                 col_span += 1
                                 
-                                empty_td = f'<td style="border:1px solid #000; padding:{cell_pad}px;">&nbsp;</td>'
+                                empty_td = f'<td style="border:{bi}px solid #000; padding:{cell_pad}px;">&nbsp;</td>'
                                 empty_row = f'<tr>' + (empty_td * col_span) + '</tr>'
                                 
                                 for _ in range(rows_limit - len(page_rows)):
@@ -896,19 +905,19 @@ def render_shipping_status(db, sub_menu):
                                 if is_last_page:
                                     footer_html = f"""
                                         <tr style="font-weight:bold; background-color:#f9f9f9;">
-                                            <td colspan="3" style="border:1px solid #000; padding:{cell_pad}px;">합 계</td>
-                                            <td style="border:1px solid #000; padding:{cell_pad}px; text-align:right;">{grand_total_qty:,}</td>
+                                            <td colspan="3" style="border:{bi}px solid #000; padding:{cell_pad}px;">합 계</td>
+                                            <td style="border:{bi}px solid #000; padding:{cell_pad}px; text-align:right;">{grand_total_qty:,}</td>
                                     """
                                     if not hide_price:
-                                        footer_html += f'<td style="border:1px solid #000; padding:{cell_pad}px;"></td>'
+                                        footer_html += f'<td style="border:{bi}px solid #000; padding:{cell_pad}px;"></td>'
                                         if show_vat_col:
                                             footer_html += f"""
-                                            <td style="border:1px solid #000; padding:{cell_pad}px; text-align:right;">{grand_total_supply:,}</td>
-                                            <td style="border:1px solid #000; padding:{cell_pad}px; text-align:right;">{grand_total_vat:,}</td>
+                                            <td style="border:{bi}px solid #000; padding:{cell_pad}px; text-align:right;">{grand_total_supply:,}</td>
+                                            <td style="border:{bi}px solid #000; padding:{cell_pad}px; text-align:right;">{grand_total_vat:,}</td>
                                             """
                                         else:
-                                            footer_html += f'<td style="border:1px solid #000; padding:{cell_pad}px; text-align:right;">{grand_total_amount:,}</td>'
-                                    footer_html += f'<td style="border:1px solid #000; padding:{cell_pad}px;"></td></tr>'
+                                            footer_html += f'<td style="border:{bi}px solid #000; padding:{cell_pad}px; text-align:right;">{grand_total_amount:,}</td>'
+                                    footer_html += f'<td style="border:{bi}px solid #000; padding:{cell_pad}px;"></td></tr>'
 
                                 # 페이지 HTML 조립
                                 # [수정] 페이지 높이를 여백 제외한 크기로로
@@ -931,7 +940,7 @@ def render_shipping_status(db, sub_menu):
                                     </div>
                                 </div>
                                 
-                                <table style="width:100%; border-collapse:collapse; border:1px solid #000; font-size:{options.get('font_size')}px; text-align:center;">
+                                <table style="width:100%; border-collapse:collapse; border:{bo}px solid #000; font-size:{options.get('font_size')}px; text-align:center;">
                                     <tr style="background-color:#f0f0f0;">
                                         {header_html}
                                     </tr>
@@ -941,11 +950,11 @@ def render_shipping_status(db, sub_menu):
                                 </div>
                                 
                                 <div class="footer-wrap" style="position: absolute; bottom: 0; width: 100%;">
-                                    {f'''<div style="margin-top:5px; font-size:{options.get('font_size')}px; border: 1px solid #000; padding: 5px;">
+                                    {f'''<div style="margin-top:5px; font-size:{options.get('font_size')}px; border: {bo}px solid #000; padding: 5px;">
                                         <strong>합계금액 : {grand_total_amount:,} 원{ " (부가세포함)" if not show_vat_col else "" }</strong>
                                     </div>''' if not hide_price and is_last_page else ''}
 
-                                    <div style="margin-top:5px; font-size:{options.get('font_size')}px; border: 1px solid #000; min-height: 50px; position: relative; text-align: left;">
+                                    <div style="margin-top:5px; font-size:{options.get('font_size')}px; border: {bo}px solid #000; min-height: 50px; position: relative; text-align: left;">
                                         <span style="position: absolute; top: 5px; left: 5px; font-weight: bold;">[전체 비고]</span>
                                         <div style="padding: 25px 5px 5px 5px; white-space: pre-wrap;">{remarks_info}</div>
                                     </div>
@@ -974,7 +983,9 @@ def render_shipping_status(db, sub_menu):
                             'show_approval': p_show_approval,
                             'approval_names': approval_names,
                             'show_cust_info': p_show_cust_info,
-                            'merge_rows': p_merge_rows # [NEW] 합산 옵션 전달
+                            'merge_rows': p_merge_rows, # [NEW] 합산 옵션 전달
+                            'bo': p_bo,
+                            'bi': p_bi
                         }
 
                         for customer, group in grouped:
@@ -1721,6 +1732,10 @@ def render_inventory_logic(db, allow_shipping=False):
             p_m_bottom = pe_m2.number_input("하단", value=15, step=1, key=f"inv_p_mb_{allow_shipping}")
             p_m_left = pe_m3.number_input("좌측", value=15, step=1, key=f"inv_p_ml_{allow_shipping}")
             p_m_right = pe_m4.number_input("우측", value=15, step=1, key=f"inv_p_mr_{allow_shipping}")
+            
+            pe_m5, pe_m6 = st.columns(2)
+            p_bo = pe_m5.number_input("외곽선 굵기", value=1.0, step=0.1, format="%.1f", key=f"inv_p_bo_{allow_shipping}")
+            p_bi = pe_m6.number_input("안쪽선 굵기", value=0.5, step=0.1, format="%.1f", key=f"inv_p_bi_{allow_shipping}")
 
         # 엑셀 다운로드 및 인쇄 버튼 (Expander 밖으로 이동)
         c_btn_xls, c_btn_gap, c_btn_prt = st.columns([1.5, 5, 1.5])
@@ -1735,7 +1750,7 @@ def render_inventory_logic(db, allow_shipping=False):
                     df_detail_final.to_excel(writer, index=False, sheet_name="상세재고")
             
             st.download_button(
-                label="엑셀 다운로드",
+                label="💾 엑셀 다운로드",
                 data=buffer.getvalue(),
                 file_name=f"재고현황_{datetime.date.today()}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1744,11 +1759,12 @@ def render_inventory_logic(db, allow_shipping=False):
 
         # 인쇄 버튼
         with c_btn_prt:
-            if st.button("인쇄하기", key=f"inv_print_btn_{allow_shipping}", use_container_width=True):
+            if st.button("🖨️ 인쇄하기", key=f"inv_print_btn_{allow_shipping}", use_container_width=True):
                 options = {
                     'ts': p_title_size, 'bs': p_font_size, 'pad': p_padding,
                     'dd': "block" if p_show_date else "none",
-                    'mt': p_m_top, 'mb': p_m_bottom, 'ml': p_m_left, 'mr': p_m_right
+                    'mt': p_m_top, 'mb': p_m_bottom, 'ml': p_m_left, 'mr': p_m_right,
+                    'bo': p_bo, 'bi': p_bi
                 }
                 
                 # 합계 텍스트 생성
@@ -1786,8 +1802,8 @@ def render_inventory_logic(db, allow_shipping=False):
                             body {{ font-family: 'Malgun Gothic', sans-serif; padding: 0; margin: 0; }}
                             h2 {{ text-align: center; margin-bottom: 5px; font-size: {p_title_size}px; }}
                             .info {{ text-align: right; font-size: 12px; margin-bottom: 10px; color: #555; display: {date_display}; }}
-                            table {{ width: 100%; border-collapse: collapse; font-size: {p_font_size}px; margin-bottom: 20px; }}
-                            th, td {{ border: 1px solid #444; padding: {p_padding}px; text-align: center; }}
+                            table {{ width: 100%; border-collapse: collapse; font-size: {p_font_size}px; margin-bottom: 20px; border: {p_bo}px solid #444; }}
+                            th, td {{ border: {p_bi}px solid #444; padding: {p_padding}px; text-align: center; }}
                             th {{ background-color: #f0f0f0; }}
                             .group-header {{ background-color: #e6f3ff; font-weight: bold; text-align: left; padding: 8px; border: 1px solid #444; margin-top: 10px; }}
                             .no-data {{ text-align: center; padding: 10px; color: #888; }}

@@ -113,7 +113,7 @@ def render_weaving(db, sub_menu=None, readonly=False):
                                     <div class="wc-body">
                                         가동중<br>
                                         <span style="font-size:0.9em; font-weight:bold;">{item.get('name', '-')}</span><br>
-                                        <span style="font-size:0.8em;">({cur_roll}/{roll_cnt}롤)</span>
+                                        <span style="font-size:0.8em;">(전체 {roll_cnt}롤 중 {cur_roll}번째 롤)</span>
                                     </div>
                                     <div class="wc-tooltip">
                                         <strong>[{m_name}] 상세 정보</strong><hr style="margin:5px 0; border-color:#555;">
@@ -124,7 +124,7 @@ def render_weaving(db, sub_menu=None, readonly=False):
                                         <b>중량:</b> {item.get('weight', '-')}g<br>
                                         <b>수량:</b> {int(item.get('stock', 0)):,}장<br>
                                         <b>납품요청일:</b> {str(item.get('delivery_req_date', '-'))[:10]}<br>
-                                        <b>진행:</b> {roll_cnt}롤 중 {cur_roll}번째 롤
+                                        <b>진행:</b> 전체 {roll_cnt}롤 중 {cur_roll}번째 롤
                                     </div>
                                 </div>
                                 """
@@ -671,6 +671,10 @@ def render_weaving(db, sub_menu=None, readonly=False):
                 p_m_bottom = po_c9.number_input("하단", value=15, step=1, key="wd_mb")
                 p_m_left = po_c10.number_input("좌측", value=15, step=1, key="wd_ml")
                 p_m_right = po_c11.number_input("우측", value=15, step=1, key="wd_mr")
+                
+                po_c12, po_c13 = st.columns(2)
+                wd_bo = po_c12.number_input("외곽선 굵기", value=1.0, step=0.1, format="%.1f", key="wd_bo")
+                wd_bi = po_c13.number_input("안쪽선 굵기", value=0.5, step=0.1, format="%.1f", key="wd_bi")
 
             # [수정] 버튼 하단 배치 (좌측 끝: 엑셀, 우측 끝: 인쇄)
             c_btn_xls, c_btn_gap, c_btn_prt = st.columns([1.5, 5, 1.5])
@@ -681,7 +685,7 @@ def render_weaving(db, sub_menu=None, readonly=False):
                     df_display.to_excel(writer, index=False)
                 
                 st.download_button(
-                    label="엑셀 다운로드",
+                    label="💾 엑셀 다운로드",
                     data=buffer.getvalue(),
                     file_name=f"제직완료내역_{today}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -689,11 +693,12 @@ def render_weaving(db, sub_menu=None, readonly=False):
                 )
 
             with c_btn_prt:
-                if st.button("인쇄하기", key="btn_print_wd", use_container_width=True):
+                if st.button("🖨️ 인쇄하기", key="btn_print_wd", use_container_width=True):
                     options = {
                         'mt': p_m_top, 'mr': p_m_right, 'mb': p_m_bottom, 'ml': p_m_left,
                         'ts': p_title_size, 'bs': p_body_size, 'pad': p_padding,
-                        'da': p_date_pos.lower(), 'ds': p_date_size, 'dd': "block" if p_show_date else "none"
+                        'da': p_date_pos.lower(), 'ds': p_date_size, 'dd': "block" if p_show_date else "none",
+                        'bo': wd_bo, 'bi': wd_bi
                     }
                     summary_text = f"합계 - 생산수량: {total_stock:,}장 / 생산중량: {total_weight:,.1f}kg"
                     print_html = generate_report_html(p_title, df_display, summary_text, options)
@@ -868,6 +873,10 @@ def render_weaving(db, sub_menu=None, readonly=False):
             p_m_bottom = po_c9.number_input("하단", value=15, step=1, key="wl_mb")
             p_m_left = po_c10.number_input("좌측", value=15, step=1, key="wl_ml")
             p_m_right = po_c11.number_input("우측", value=15, step=1, key="wl_mr")
+            
+            po_c12, po_c13 = st.columns(2)
+            wl_bo = po_c12.number_input("외곽선 굵기", value=1.0, step=0.1, format="%.1f", key="wl_bo")
+            wl_bi = po_c13.number_input("안쪽선 굵기", value=0.5, step=0.1, format="%.1f", key="wl_bi")
 
         # 인쇄용 HTML 생성 (옵션 설정 후)
         print_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -877,10 +886,10 @@ def render_weaving(db, sub_menu=None, readonly=False):
         style = f"""<style>
             @page {{ margin: {p_m_top}mm {p_m_right}mm {p_m_bottom}mm {p_m_left}mm; }}
             body {{ font-family: 'Malgun Gothic', sans-serif; padding: 0; margin: 0; }}
-            table {{ width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: {p_body_size}px; }}
-            th, td {{ border: 1px solid #444; padding: {p_padding}px; text-align: left; }}
-            table {{ width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: {p_body_size}px; table-layout: fixed; }}
-            th, td {{ border: 1px solid #444; padding: {p_padding}px; text-align: left; word-wrap: break-word; }}
+            table {{ width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: {p_body_size}px; border: {wl_bo}px solid #444; }}
+            th, td {{ border: {wl_bi}px solid #444; padding: {p_padding}px; text-align: left; }}
+            table {{ width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: {p_body_size}px; table-layout: fixed; border: {wl_bo}px solid #444; }}
+            th, td {{ border: {wl_bi}px solid #444; padding: {p_padding}px; text-align: left; word-wrap: break-word; }}
             th {{ background-color: #f0f0f0; text-align: center; font-weight: bold; }}
             
             /* [수정] 컬럼 너비 조정 */
@@ -950,12 +959,12 @@ def render_weaving(db, sub_menu=None, readonly=False):
                 with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                     final_xls.to_excel(writer, index=False)
                 
-                st.download_button(label="엑셀 다운로드", data=buffer.getvalue(), file_name=f"작업일지_{view_date}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+                st.download_button(label="💾 엑셀 다운로드", data=buffer.getvalue(), file_name=f"작업일지_{view_date}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
             else:
-                st.download_button("엑셀 다운로드", b"", disabled=True, use_container_width=True)
+                st.download_button("💾 엑셀 다운로드", b"", disabled=True, use_container_width=True)
 
         with c_btn_prt:
-            if st.button("인쇄하기", use_container_width=True):
+            if st.button("🖨️ 인쇄하기", use_container_width=True):
                 final_print_html = html_content.replace(
                     "</head>",
                     """<style> @media screen { body { display: none; } } </style></head>"""
@@ -1036,12 +1045,17 @@ def render_weaving(db, sub_menu=None, readonly=False):
                 p_m_bottom = po_c9.number_input("하단", value=15, step=1, key="pl_mb")
                 p_m_left = po_c10.number_input("좌측", value=15, step=1, key="pl_ml")
                 p_m_right = po_c11.number_input("우측", value=15, step=1, key="pl_mr")
+                
+                po_c12, po_c13 = st.columns(2)
+                pl_bo = po_c12.number_input("외곽선 굵기", value=1.0, step=0.1, format="%.1f", key="pl_bo")
+                pl_bi = po_c13.number_input("안쪽선 굵기", value=0.5, step=0.1, format="%.1f", key="pl_bi")
 
             # [수정] utils의 generate_report_html 함수 사용
             options = {
                 'mt': p_m_top, 'mr': p_m_right, 'mb': p_m_bottom, 'ml': p_m_left,
                 'ts': p_title_size, 'bs': p_body_size, 'pad': p_padding,
-                'da': p_date_pos.lower(), 'ds': p_date_size, 'dd': "block" if p_show_date else "none"
+                'da': p_date_pos.lower(), 'ds': p_date_size, 'dd': "block" if p_show_date else "none",
+                'bo': pl_bo, 'bi': pl_bi
             }
             print_html = generate_report_html(p_title, df_display, "", options)
             
@@ -1052,10 +1066,10 @@ def render_weaving(db, sub_menu=None, readonly=False):
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                     df_display.to_excel(writer, index=False)
-                st.download_button(label="엑셀 다운로드", data=buffer.getvalue(), file_name=f"생산일지_{prod_date}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+                st.download_button(label="💾 엑셀 다운로드", data=buffer.getvalue(), file_name=f"생산일지_{prod_date}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
             with c_btn_prt:
-                if st.button("인쇄하기", use_container_width=True):
+                if st.button("🖨️ 인쇄하기", use_container_width=True):
                     final_print_html = print_html.replace(
                         "</head>",
                         """<style> @media screen { body { display: none; } } </style></head>"""
@@ -1167,6 +1181,10 @@ def render_dyeing(db, sub_menu):
                         p_m_bottom = po_c6.number_input("하단", value=15, step=1, key="dye_p_mb")
                         p_m_left = po_c7.number_input("좌측", value=15, step=1, key="dye_p_ml")
                         p_m_right = po_c8.number_input("우측", value=15, step=1, key="dye_p_mr")
+                        
+                        po_c9, po_c10 = st.columns(2)
+                        dye_p_bo = po_c9.number_input("외곽선 굵기", value=1.0, step=0.1, format="%.1f", key="dye_p_bo")
+                        dye_p_bi = po_c10.number_input("안쪽선 굵기", value=0.5, step=0.1, format="%.1f", key="dye_p_bi")
 
                     if st.button("🖨️ 작업 지시서 인쇄"):
                         # 그룹화 및 HTML 생성 로직
@@ -1182,8 +1200,8 @@ def render_dyeing(db, sub_menu):
                                 .partner-title {{ font-size: {p_body_size + 6}px; font-weight: bold; background-color: #eee; padding: 5px; margin-bottom: 10px; }}
                                 .pot-section {{ margin-left: 10px; margin-bottom: 15px; }}
                                 .pot-title {{ font-size: {p_body_size + 4}px; font-weight: bold; color: #0066cc; margin-bottom: 5px; border-bottom: 1px solid #ddd; }}
-                                table {{ width: 100%; border-collapse: collapse; font-size: {p_body_size}px; margin-bottom: 5px; }}
-                                th, td {{ border: 1px solid #ccc; padding: {p_padding}px; text-align: center; }}
+                                table {{ width: 100%; border-collapse: collapse; font-size: {p_body_size}px; margin-bottom: 5px; border: {dye_p_bo}px solid #ccc; }}
+                                th, td {{ border: {dye_p_bi}px solid #ccc; padding: {p_padding}px; text-align: center; }}
                                 th {{ background-color: #f8f9fa; }}
                                 .total-row {{ font-weight: bold; background-color: #fffbe6; }}
                                 @media screen {{ body {{ display: none; }} }}
@@ -1511,13 +1529,18 @@ def render_dyeing(db, sub_menu):
                 p_m_bottom = po_c9.number_input("하단", value=15, step=1, key="dd_mb")
                 p_m_left = po_c10.number_input("좌측", value=15, step=1, key="dd_ml")
                 p_m_right = po_c11.number_input("우측", value=15, step=1, key="dd_mr")
+                
+                po_c12, po_c13 = st.columns(2)
+                dd_bo = po_c12.number_input("외곽선 굵기", value=1.0, step=0.1, format="%.1f", key="dd_bo")
+                dd_bi = po_c13.number_input("안쪽선 굵기", value=0.5, step=0.1, format="%.1f", key="dd_bi")
 
             # [수정] utils의 generate_report_html 함수 사용 (오류 원천 차단)
-            if c_exp2.button("🖨️ 바로 인쇄하기", key="btn_print_dd"):
+            if c_exp2.button("🖨️ 인쇄하기", key="btn_print_dd"):
                 options = {
                     'mt': p_m_top, 'mr': p_m_right, 'mb': p_m_bottom, 'ml': p_m_left,
                     'ts': p_title_size, 'bs': p_body_size, 'pad': p_padding,
-                    'da': p_date_pos.lower(), 'ds': p_date_size, 'dd': "block" if p_show_date else "none"
+                    'da': p_date_pos.lower(), 'ds': p_date_size, 'dd': "block" if p_show_date else "none",
+                    'bo': dd_bo, 'bi': dd_bi
                 }
                 summary_text = f"합계 - 수량: {total_stock:,}장 / 중량: {total_weight:,.1f}kg / 금액: {total_amount:,}원"
                 print_html = generate_report_html(p_title, df_display, summary_text, options)
@@ -1639,6 +1662,10 @@ def render_sewing(db, sub_menu):
                 p_m_bottom = po_c9.number_input("하단", value=15, step=1, key="si_mb")
                 p_m_left = po_c10.number_input("좌측", value=15, step=1, key="si_ml")
                 p_m_right = po_c11.number_input("우측", value=15, step=1, key="si_mr")
+                
+                po_c12, po_c13 = st.columns(2)
+                si_bo = po_c12.number_input("외곽선 굵기", value=1.0, step=0.1, format="%.1f", key="si_bo")
+                si_bi = po_c13.number_input("안쪽선 굵기", value=0.5, step=0.1, format="%.1f", key="si_bi")
 
             # [수정] 버튼을 테이블 우측 상단으로 이동
             c_head, c_btn = st.columns([0.85, 0.15])
@@ -1677,7 +1704,8 @@ def render_sewing(db, sub_menu):
                     options = {
                         'mt': p_m_top, 'mr': p_m_right, 'mb': p_m_bottom, 'ml': p_m_left,
                         'ts': p_title_size, 'bs': p_body_size, 'pad': p_padding,
-                        'da': p_date_pos.lower(), 'ds': p_date_size, 'dd': "block" if p_show_date else "none"
+                        'da': p_date_pos.lower(), 'ds': p_date_size, 'dd': "block" if p_show_date else "none",
+                        'bo': si_bo, 'bi': si_bi
                     }
                     html = generate_report_html(p_title, df_print_view, f"총 {len(print_df)}건", options)
                     st.components.v1.html(html, height=0, width=0)
@@ -2007,13 +2035,18 @@ def render_sewing(db, sub_menu):
                 p_m_bottom = po_c9.number_input("하단", value=15, step=1, key="sd_mb")
                 p_m_left = po_c10.number_input("좌측", value=15, step=1, key="sd_ml")
                 p_m_right = po_c11.number_input("우측", value=15, step=1, key="sd_mr")
+                
+                po_c12, po_c13 = st.columns(2)
+                sd_bo = po_c12.number_input("외곽선 굵기", value=1.0, step=0.1, format="%.1f", key="sd_bo")
+                sd_bi = po_c13.number_input("안쪽선 굵기", value=0.5, step=0.1, format="%.1f", key="sd_bi")
 
             # [수정] utils의 generate_report_html 함수 사용
             if c_exp2.button("🖨️ 바로 인쇄하기", key="btn_print_sd"):
                 options = {
                     'mt': p_m_top, 'mr': p_m_right, 'mb': p_m_bottom, 'ml': p_m_left,
                     'ts': p_title_size, 'bs': p_body_size, 'pad': p_padding,
-                    'da': p_date_pos.lower(), 'ds': p_date_size, 'dd': "block" if p_show_date else "none"
+                    'da': p_date_pos.lower(), 'ds': p_date_size, 'dd': "block" if p_show_date else "none",
+                    'bo': sd_bo, 'bi': sd_bi
                 }
                 summary_text = f"합계 - 수량: {total_stock:,}장 / 금액: {total_amount:,}원"
                 print_html = generate_report_html(p_title, df_display, summary_text, options)

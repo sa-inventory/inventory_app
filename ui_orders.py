@@ -585,6 +585,10 @@ def render_partner_order_status(db):
             p_m_bottom = po_c9.number_input("하단", value=15, step=1, key="po_mb")
             p_m_left = po_c10.number_input("좌측", value=15, step=1, key="po_ml")
             p_m_right = po_c11.number_input("우측", value=15, step=1, key="po_mr")
+            
+            po_c12, po_c13 = st.columns(2)
+            po_bo = po_c12.number_input("외곽선 굵기", value=1.0, step=0.1, format="%.1f", key="po_bo")
+            po_bi = po_c13.number_input("안쪽선 굵기", value=0.5, step=0.1, format="%.1f", key="po_bi")
 
         # 엑셀 및 인쇄 버튼
         c1, c2 = st.columns([1, 1])
@@ -601,11 +605,12 @@ def render_partner_order_status(db):
         )
         
         # 인쇄 (옵션 적용)
-        if c2.button("🖨️ 바로 인쇄하기"):
+        if c2.button("🖨️ 인쇄하기"):
             options = {
                 'mt': p_m_top, 'mr': p_m_right, 'mb': p_m_bottom, 'ml': p_m_left,
                 'ts': p_title_size, 'bs': p_body_size, 'pad': p_padding,
-                'da': p_date_pos.lower(), 'ds': p_date_size, 'dd': "block" if p_show_date else "none"
+                'da': p_date_pos.lower(), 'ds': p_date_size, 'dd': "block" if p_show_date else "none",
+                'bo': po_bo, 'bi': po_bi
             }
             print_html = generate_report_html(p_title, df_display, "", options)
             st.components.v1.html(print_html, height=0, width=0)
@@ -1158,6 +1163,10 @@ def render_order_status(db, sub_menu):
                 p_m_left = po_c10.number_input("좌측", step=1, key="os_p_ml")
                 p_m_right = po_c11.number_input("우측", step=1, key="os_p_mr")
                 
+                po_c12, po_c13 = st.columns(2)
+                os_p_bo = po_c12.number_input("외곽선 굵기", value=1.0, step=0.1, format="%.1f", key="os_p_bo")
+                os_p_bi = po_c13.number_input("안쪽선 굵기", value=0.5, step=0.1, format="%.1f", key="os_p_bi")
+                
                 st.divider()
                 st.markdown("###### 컬럼 설정 (출력 여부, 순서, 너비)")
                 st.caption("💡 출력할 컬럼을 선택하고, 아래에서 순서와 너비를 조정하세요.")
@@ -1249,7 +1258,7 @@ def render_order_status(db, sub_menu):
                     df_display.to_excel(writer, index=False)
                 
                 st.download_button(
-                    label="엑셀 다운로드",
+                    label="💾 엑셀 다운로드",
                     data=buffer.getvalue(),
                     file_name='발주현황.xlsx',
                     mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -1257,7 +1266,7 @@ def render_order_status(db, sub_menu):
                 )
 
             with c_btn_prt:
-                if st.button("인쇄하기", use_container_width=True):
+                if st.button("🖨️ 인쇄하기", use_container_width=True):
                     print_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
                     date_align = p_date_pos.lower()
                     date_display = "block" if p_show_date else "none"
@@ -1294,8 +1303,8 @@ def render_order_status(db, sub_menu):
                                 body {{ font-family: 'Malgun Gothic', sans-serif; padding: 0; margin: 0; }}
                                 h2 {{ text-align: center; margin-bottom: 5px; font-size: {p_title_size}px; }}
                                 .info {{ text-align: {date_align}; font-size: {p_date_size}px; margin-bottom: 10px; color: #555; display: {date_display}; }}
-                                table {{ width: 100%; border-collapse: collapse; font-size: {p_body_size}px; }}
-                                th, td {{ border: 1px solid #444; padding: {p_padding}px 4px; text-align: center; }}
+                                table {{ width: 100%; border-collapse: collapse; font-size: {p_body_size}px; border: {os_p_bo}px solid #444; }}
+                                th, td {{ border: {os_p_bi}px solid #444; padding: {p_padding}px 4px; text-align: center; }}
                                 th {{ background-color: #f0f0f0; font-weight: bold; }}
                                 @media screen {{ body {{ display: none; }} }}
                                 {custom_css}

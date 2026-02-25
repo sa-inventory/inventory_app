@@ -97,6 +97,8 @@ def generate_report_html(title, df, summary_text, options, chart_html=""):
     da = options.get('da', 'right')
     ds = options.get('ds', 12)
     dd = options.get('dd', 'block')
+    bo = options.get('bo', 1.0)
+    bi = options.get('bi', 0.5)
     
     print_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     
@@ -106,12 +108,12 @@ def generate_report_html(title, df, summary_text, options, chart_html=""):
         body {{ font-family: 'Malgun Gothic', sans-serif; padding: 0; margin: 0; }}
         h2 {{ text-align: center; margin-bottom: 5px; font-size: {ts}px; }}
         .info {{ text-align: {da}; font-size: {ds}px; margin-bottom: 10px; color: #555; display: {dd}; }}
-        table {{ width: 100%; border-collapse: collapse; font-size: {bs}px; }}
-        th, td {{ border: 1px solid #444; padding: {pad}px 4px; text-align: center; }}
+        table {{ width: 100%; border-collapse: collapse; font-size: {bs}px; border: {bo}px solid #444; }}
+        th, td {{ border: {bi}px solid #444; padding: {pad}px 4px; text-align: center; }}
         th {{ background-color: #f0f0f0; }}
         .summary {{ text-align: right; margin-top: 10px; font-weight: bold; font-size: {bs}px; }}
         @media screen {{ body {{ display: none; }} }}
-    """.format(mt=mt, mr=mr, mb=mb, ml=ml, ts=ts, da=da, ds=ds, dd=dd, bs=bs, pad=pad)
+    """.format(mt=mt, mr=mr, mb=mb, ml=ml, ts=ts, da=da, ds=ds, dd=dd, bs=bs, pad=pad, bo=bo, bi=bi)
     
     html = f"""<html><head><title>{title}</title>
     <style>{css}</style></head><body onload="window.print()">

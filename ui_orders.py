@@ -5,7 +5,7 @@ import io
 import uuid
 import re
 from firebase_admin import firestore
-from utils import get_partners, generate_report_html, get_common_codes, search_address_api
+from utils import get_partners, generate_report_html, get_common_codes, search_address_api, get_products_list
 
 def render_order_entry(db, sub_menu):
     st.header("발주서 접수")
@@ -34,13 +34,13 @@ def render_order_entry(db, sub_menu):
         del st.session_state["trigger_order_reset"]
 
     # 제품 목록 미리 가져오기 (공통 사용)
-    product_docs = list(db.collection("products").order_by("product_code").stream())
-    if not product_docs:
+    # [최적화] 캐싱된 함수 사용
+    products_data = get_products_list()
+    if not products_data:
         st.warning("등록된 제품이 없습니다. [기초정보관리 > 제품 관리] 메뉴에서 먼저 제품을 등록해주세요.")
         st.stop()
     
     # 데이터프레임 변환 (개별 접수용)
-    products_data = [doc.to_dict() for doc in product_docs]
     df_products = pd.DataFrame(products_data)
     
     # 구버전 데이터 호환
@@ -88,28 +88,93 @@ def render_order_entry(db, sub_menu):
         if s_size != "전체":
             df_filtered = df_filtered[df_filtered['size'].astype(str) == s_size]
 
-        st.write("🔽 발주할 제품을 목록에서 선택(클릭)하세요.")
-        selection = st.dataframe(
-            df_filtered[final_cols].rename(columns=col_map),
-            width="stretch",
-            hide_index=True,
-            on_select="rerun",
-            selection_mode="single-row",
-            key=f"order_product_select_{st.session_state['order_df_key']}"
-        )
+        # [NEW] 콤보박스 제품 선택 (재고 임의등록과 동일한 방식)
+        st.write("🔽 발주할 제품을 선택하세요.")
+        
+        # 옵션 생성: 코드 : 종류 / 사종 / 중량 / 사이즈
+        product_opts = ["선택하세요"] + [f"{row['product_code']} : {row.get('product_type', '')} / {row.get('yarn_type', '')} / {row.get('weight', '')}g / {row.get('size', '')}" for _, row in df_filtered.iterrows()]
+        
+        # [NEW] 선택박스 초기화 (세션 상태가 없으면 기본값 설정)
+        if "order_prod_selectbox" not in st.session_state:
+            st.session_state["order_prod_selectbox"] = "선택하세요"
 
-        if not selection.selection.rows:
+        # [FIX] 동기화 로직을 위젯 렌더링 이전으로 이동 (StreamlitAPIException 방지)
+        last_code = st.session_state.get("last_sel_product_code")
+        
+        # 1. Dataframe 선택 상태 확인
+        df_key = f"order_product_select_{st.session_state['order_df_key']}"
+        df_state = st.session_state.get(df_key)
+        df_selected_code = None
+        if df_state and df_state.get("selection") and df_state["selection"].get("rows"):
+            idx = df_state["selection"]["rows"][0]
+            if idx < len(df_filtered):
+                df_selected_code = df_filtered.iloc[idx]['product_code']
+        
+        # 2. Selectbox 선택 상태 확인
+        sb_val = st.session_state.get("order_prod_selectbox")
+        sb_selected_code = None
+        if sb_val and sb_val != "선택하세요":
+            sb_selected_code = sb_val.split(" : ")[0]
+            
+        # 3. 변경 감지 및 동기화 (우선순위 결정)
+        current_code = last_code
+        
+        # Case A: 목록에서 다른 행을 선택함
+        if df_selected_code and df_selected_code != last_code:
+            current_code = df_selected_code
+            # 콤보박스 업데이트
+            match_opt = next((opt for opt in product_opts if opt.startswith(f"{current_code} :")), "선택하세요")
+            st.session_state["order_prod_selectbox"] = match_opt
+            
+        # Case B: 콤보박스에서 다른 제품을 선택함
+        elif sb_selected_code and sb_selected_code != last_code:
+            current_code = sb_selected_code
+            # 목록 선택 해제 (키 변경)
+            if df_selected_code != current_code:
+                 st.session_state["order_df_key"] += 1
+        
+        # Case C: 목록 선택 해제 (사용자가 선택된 행을 다시 클릭)
+        elif last_code and not df_selected_code and sb_selected_code == last_code:
+             current_code = None
+             st.session_state["order_prod_selectbox"] = "선택하세요"
+
+        # 상태 업데이트
+        if current_code != last_code:
+            st.session_state["last_sel_product_code"] = current_code
+
+        # --- 위젯 렌더링 ---
+        sel_prod_str = st.selectbox("제품 선택 (검색 가능)", product_opts, key="order_prod_selectbox")
+
+        with st.expander("제품 목록", expanded=True):
+            st.caption("목록에서 행을 클릭하여 선택할 수도 있습니다.")
+            selection = st.dataframe(
+                df_filtered[final_cols].rename(columns=col_map),
+                width="stretch",
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                key=f"order_product_select_{st.session_state['order_df_key']}"
+            )
+
+        # 선택된 제품 정보 가져오기
+        selected_product = None
+        if current_code:
+            found = df_filtered[df_filtered['product_code'] == current_code]
+            if not found.empty:
+                selected_product = found.iloc[0].to_dict()
+
+        if not selected_product:
             st.info("👆 위 목록에서 제품을 선택하면 발주 입력 폼이 나타납니다.")
-            st.session_state["last_sel_product_idx"] = None
+            # 선택이 없으면 상태 초기화
+            if st.session_state.get("last_sel_product_code") is not None:
+                st.session_state["last_sel_product_code"] = None
         else:
-            idx = selection.selection.rows[0]
-            
             # [FIX] 제품 선택 변경 시 주소 검색 팝업 상태 초기화 (자동 팝업 방지)
-            if st.session_state.get("last_sel_product_idx") != idx:
+            # 인덱스 대신 제품 코드로 변경 감지
+            # current_code는 위에서 이미 할당됨
+            if st.session_state.get("last_sel_product_code") != current_code:
                 st.session_state["show_order_addr_dialog"] = False
-                st.session_state["last_sel_product_idx"] = idx
-            
-            selected_product = df_filtered.iloc[idx].to_dict()
+                st.session_state["last_sel_product_code"] = current_code
             
             # [NEW] 자동 스크롤 앵커 및 스크립트
             st.markdown('<div id="order-entry-form"></div>', unsafe_allow_html=True)
@@ -117,8 +182,8 @@ def render_order_entry(db, sub_menu):
             st.components.v1.html(
                 f"""
                 <script>
-                    // Force re-run: {js_uuid}
                     setTimeout(function() {{
+                        // Force re-run: {js_uuid}
                         function attemptScroll(count) {{
                             const anchor = window.parent.document.getElementById('order-entry-form');
                             if (anchor) {{
@@ -136,11 +201,11 @@ def render_order_entry(db, sub_menu):
             st.divider()
             c_info, c_close = st.columns([5.5, 1.5])
             with c_info:
-                st.success(f"선택된 제품: **{selected_product['product_code']}** ({selected_product.get('product_type', '')} / {selected_product.get('yarn_type', '')})")
+                st.success(f"선택된 제품: **{selected_product['product_code']}**\n\n제품종류: {selected_product.get('product_type', '')} | 사종: {selected_product.get('yarn_type', '')} | 중량: {selected_product.get('weight', '')}g | 사이즈: {selected_product.get('size', '')}")
             with c_close:
                 if st.button("닫기", key="close_order_detail", use_container_width=True):
                     st.session_state["order_df_key"] += 1
-                    st.session_state["last_sel_product_idx"] = None
+                    st.session_state["last_sel_product_code"] = None
                     st.rerun()
 
             # [NEW] 주소 검색 모달 (Dialog)

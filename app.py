@@ -15,8 +15,13 @@ import streamlit.components.v1 as components
 # [NEW] 분리한 utils 파일에서 공통 함수 임포트
 from utils import get_db, firestore, validate_password
 from ui_orders import render_order_entry, render_order_status, render_partner_order_status
-from ui_production import render_weaving, render_dyeing, render_sewing
-from ui_management import render_shipping_operations, render_shipping_status, render_inventory, render_product_master, render_partners, render_machines, render_codes, render_users, render_my_profile, render_company_settings
+from ui_production_weaving import render_weaving
+from ui_production_dyeing import render_dyeing
+from ui_production_sewing import render_sewing
+from ui_shipping import render_shipping_operations, render_shipping_status
+from ui_inventory import render_inventory
+from ui_basic_info import render_product_master, render_partners, render_machines, render_codes
+from ui_system import render_users, render_my_profile, render_company_settings
 from ui_statistics import render_statistics
 from ui_board import render_notice_board, render_schedule
 
@@ -50,16 +55,18 @@ base_css = """
 if st.session_state.get("role") != "admin":
     base_css += """
         /* [NEW] 보안 및 깔끔한 화면을 위해 Streamlit 기본 메뉴 숨기기 */
-        #MainMenu {visibility: hidden;} /* 우측 상단 햄버거 메뉴 숨김 */
-        footer {visibility: hidden;}    /* 하단 'Made with Streamlit' 숨김 */
-        header {visibility: hidden;}    /* 상단 헤더(Deploy 버튼 등) 숨김 */
-        [data-testid="stDecoration"] {visibility: hidden;} /* 상단 데코레이션(고양이 등) 숨김 */
+        #MainMenu {visibility: hidden; display: none !important;} /* 우측 상단 햄버거 메뉴 숨김 */
+        footer {visibility: hidden; display: none !important;}    /* 하단 'Made with Streamlit' 숨김 */
+        /* header {visibility: hidden;} */ /* [수정] 모바일 사이드바 토글 버튼 유지를 위해 헤더 전체 숨김 제거 */
+        [data-testid="stDecoration"] {visibility: hidden; display: none !important;} /* 상단 데코레이션(고양이 등) 숨김 */
+        .stDeployButton {display: none !important;} /* 배포 버튼 숨김 */
     """
 
 base_css += "</style>"
 st.markdown(base_css, unsafe_allow_html=True)
 
-db = get_db()
+with st.spinner("시스템 초기화 및 DB 연결 중..."):
+    db = get_db()
 
 # [NEW] 브라우저 탭 제목 동적 변경 (사용자 설정 반영)
 try:
@@ -102,24 +109,28 @@ if not st.session_state["logged_in"]:
     session_id = st.query_params.get("session_id")
     if session_id:
         # DB에서 세션 정보 확인
-        session_doc = db.collection("sessions").document(session_id).get()
-        if session_doc.exists:
-            s_data = session_doc.to_dict()
-            user_id = s_data.get("user_id")
-            
-            # 사용자 정보 로드 및 로그인 상태 복원
-            user_doc = db.collection("users").document(user_id).get()
-            if user_doc.exists:
-                user_data = user_doc.to_dict()
-                st.session_state["logged_in"] = True
-                st.session_state["role"] = user_data.get("role", "user")
-                st.session_state["user_name"] = user_data.get("name", user_id)
-                st.session_state["user_id"] = user_id
-                st.session_state["department"] = user_data.get("department", "")
-                st.session_state["linked_partner"] = user_data.get("linked_partner", "")
-                st.session_state["permissions"] = user_data.get("permissions", [])
-                st.session_state["auto_logout_minutes"] = user_data.get("auto_logout_minutes", 60)
-                st.session_state["login_time"] = s_data.get("created_at", datetime.datetime.now())
+        try:
+            session_doc = db.collection("sessions").document(session_id).get()
+            if session_doc.exists:
+                s_data = session_doc.to_dict()
+                user_id = s_data.get("user_id")
+                
+                # 사용자 정보 로드 및 로그인 상태 복원
+                user_doc = db.collection("users").document(user_id).get()
+                if user_doc.exists:
+                    user_data = user_doc.to_dict()
+                    st.session_state["logged_in"] = True
+                    st.session_state["role"] = user_data.get("role", "user")
+                    st.session_state["user_name"] = user_data.get("name", user_id)
+                    st.session_state["user_id"] = user_id
+                    st.session_state["department"] = user_data.get("department", "")
+                    st.session_state["linked_partner"] = user_data.get("linked_partner", "")
+                    st.session_state["permissions"] = user_data.get("permissions", [])
+                    st.session_state["auto_logout_minutes"] = user_data.get("auto_logout_minutes", 60)
+                    st.session_state["login_time"] = s_data.get("created_at", datetime.datetime.now())
+        except Exception:
+            # 사용량 초과 등으로 DB 접속 실패 시 자동 로그인 건너뜀 (로그인 화면 표시)
+            pass
 
 # 로그인 화면 처리
 if not st.session_state["logged_in"]:
@@ -164,7 +175,13 @@ if not st.session_state["logged_in"]:
                     if not login_id:
                         st.error("아이디를 입력해주세요.")
                         st.stop()
-                    user_doc = db.collection("users").document(login_id).get()
+                    
+                    try:
+                        user_doc = db.collection("users").document(login_id).get()
+                    except Exception:
+                        st.error("⚠️ 현재 시스템 접속량이 많아(일일 사용량 초과) 로그인이 제한됩니다. 내일 오전 9시 이후 다시 시도해주세요.")
+                        st.stop()
+
                     if user_doc.exists:
                         user_data = user_doc.to_dict()
                         if user_data.get("password") == login_pw:
@@ -231,7 +248,13 @@ if not st.session_state["logged_in"]:
                     if not p_id:
                         st.error("아이디를 입력해주세요.")
                         st.stop()
-                    user_doc = db.collection("users").document(p_id).get()
+                    
+                    try:
+                        user_doc = db.collection("users").document(p_id).get()
+                    except Exception:
+                        st.error("⚠️ 현재 시스템 접속량이 많아(일일 사용량 초과) 로그인이 제한됩니다. 내일 오전 9시 이후 다시 시도해주세요.")
+                        st.stop()
+
                     if user_doc.exists:
                         user_data = user_doc.to_dict()
                         # 거래처 계정인지 확인
@@ -598,21 +621,33 @@ if st.session_state.get("logged_in"):
                 localStorage.setItem(storageKey, Date.now());
             }}
             
-            function updateTimer() {{
+            // [NEW] 로그아웃 체크 함수 분리
+            function checkLogout() {{
                 const now = Date.now();
-                // [FIX] 저장소에서 최신 활동 시간 가져오기 (절전모드 복귀 시에도 유지됨)
+                const lastActivity = parseInt(localStorage.getItem(storageKey) || now);
+                const idleMs = now - lastActivity;
+                
+                if (idleMs > timeoutMs) {{
+                    // 로그아웃 처리: 스토리지 클리어 및 이동
+                    localStorage.removeItem(storageKey);
+                    // 무한 루프 방지: 이미 logout 파라미터가 있으면 이동 안함
+                    if (!window.parent.location.href.includes('logout=true')) {{
+                        window.parent.location.href = window.parent.location.href.split('?')[0] + '?logout=true';
+                    }}
+                    return true;
+                }}
+                return false;
+            }}
+
+            function updateTimer() {{
+                // [FIX] 타이머 갱신 시마다 로그아웃 조건 체크
+                if (checkLogout()) return;
+
+                const now = Date.now();
                 let lastActivity = parseInt(localStorage.getItem(storageKey) || now);
                 
                 const idleMs = now - lastActivity;
                 const remainingMs = timeoutMs - idleMs;
-                
-                if (remainingMs <= 0) {{
-                    // 로그아웃 처리 전 스토리지 클리어
-                    localStorage.removeItem(storageKey);
-                    // Trigger logout
-                    window.parent.location.href = window.parent.location.href.split('?')[0] + '?logout=true';
-                    return;
-                }}
                 
                 // Format time (1분 이상이면 분 단위, 미만이면 초 단위)
                 let timeStr = "";
@@ -649,15 +684,8 @@ if st.session_state.get("logged_in"):
             
             function resetTimer() {{
                 // [FIX] 절전모드 해제 시 즉시 로그아웃 되도록 수정
-                const now = Date.now();
-                const lastActivity = parseInt(localStorage.getItem(storageKey) || now);
-                const idleMs = now - lastActivity;
-
-                // 이미 타임아웃 시간을 초과했다면, 타이머를 리셋하지 않고 로그아웃을 진행시킴
-                if (idleMs >= timeoutMs) {{
-                    updateTimer(); // updateTimer가 로그아웃을 처리함
-                    return;
-                }}
+                // 이벤트 발생 시 먼저 로그아웃 조건인지 확인 (시간 갱신 방지)
+                if (checkLogout()) return;
                 
                 // 타임아웃 전이면 활동 시간 갱신
                 localStorage.setItem(storageKey, Date.now());
@@ -671,12 +699,21 @@ if st.session_state.get("logged_in"):
             doc.addEventListener('click', resetTimer);
             doc.addEventListener('scroll', resetTimer);
             
+            // [NEW] 탭 활성화/비활성화 감지 (절전모드 복귀 시 체크 강화)
+            doc.addEventListener('visibilitychange', function() {{
+                if (!doc.hidden) {{
+                    checkLogout();
+                    updateTimer();
+                }}
+            }});
+            
             // Interval
             if (!window.logoutInterval) {{
                 window.logoutInterval = setInterval(updateTimer, 1000);
             }}
             
             // 초기 1회 실행
+            checkLogout();
             updateTimer();
         }})();
     </script>

@@ -78,32 +78,22 @@ def render_statistics(db, sub_menu):
         chart_type_opt = c4.radio("그래프 형태", ["막대형", "선형(점)"], horizontal=True)
         include_chart_print = c4.checkbox("인쇄 시 그래프 포함", value=True)
 
-    # --- 데이터 로드 ---
-    # 데이터 양이 많아지면 쿼리 최적화 필요
+    # [최적화] 공통 데이터 로드 함수 (기간 필터 적용)
     @st.cache_data(ttl=60)
-    def load_all_orders():
-        docs = db.collection("orders").stream()
+    def load_orders_by_query(field_name, s_dt, e_dt):
+        # 선택된 기간의 데이터만 쿼리 (읽기 비용 절감)
+        docs = db.collection("orders").where(field_name, ">=", s_dt).where(field_name, "<=", e_dt).stream()
         data = []
         for doc in docs:
             d = doc.to_dict()
             d['id'] = doc.id
-            # 날짜 필드들 datetime 변환
-            for date_col in ['date', 'weaving_end_time', 'dyeing_in_date', 'sewing_end_date', 'shipping_date']:
-                if d.get(date_col):
-                    if isinstance(d[date_col], str):
-                        try: d[date_col] = pd.to_datetime(d[date_col])
-                        except: d[date_col] = None
-                    elif hasattr(d[date_col], 'tzinfo'):
-                        d[date_col] = d[date_col].replace(tzinfo=None)
+            # 날짜 필드 변환 (해당 필드만)
+            if d.get(field_name):
+                if hasattr(d[field_name], 'tzinfo'):
+                    d[field_name] = d[field_name].replace(tzinfo=None)
             data.append(d)
         return pd.DataFrame(data)
-
-    df = load_all_orders()
     
-    if df.empty:
-        st.warning("데이터가 없습니다.")
-        return
-
     # 공통 그룹화 키 생성 함수
     def get_group_key(row, date_col):
         if pd.isna(row.get(date_col)): return None
@@ -194,10 +184,12 @@ def render_statistics(db, sub_menu):
     # --- 1. 발주내역 ---
     if sub_menu == "발주내역":
         st.subheader("발주 수량 및 건수 통계")
-        df_order = df.copy()
-        if start_dt and end_dt:
-            df_order = df_order[(df_order['date'] >= start_dt) & (df_order['date'] <= end_dt)]
         
+        # [최적화] 'date' 필드 기준으로 필요한 기간만 조회
+        if start_dt and end_dt:
+            df_order = load_orders_by_query('date', start_dt, end_dt)
+        else: df_order = pd.DataFrame()
+
         if filter_partners:
             df_order = df_order[df_order['customer'].isin(filter_partners)]
 
@@ -274,10 +266,12 @@ def render_statistics(db, sub_menu):
     # --- 2. 제직내역 ---
     elif sub_menu == "제직내역":
         st.subheader("제직 생산량 통계")
-        df_weav = df.dropna(subset=['weaving_end_time']).copy()
-        if start_dt and end_dt:
-            df_weav = df_weav[(df_weav['weaving_end_time'] >= start_dt) & (df_weav['weaving_end_time'] <= end_dt)]
         
+        # [최적화] 'weaving_end_time' 필드 기준으로 필요한 기간만 조회
+        if start_dt and end_dt:
+            df_weav = load_orders_by_query('weaving_end_time', start_dt, end_dt)
+        else: df_weav = pd.DataFrame()
+
         if filter_partners:
             df_weav = df_weav[df_weav['customer'].isin(filter_partners)]
 
@@ -353,10 +347,12 @@ def render_statistics(db, sub_menu):
     # --- 3. 염색내역 ---
     elif sub_menu == "염색내역":
         st.subheader("염색 입고 및 비용 통계")
-        df_dye = df.dropna(subset=['dyeing_in_date']).copy()
-        if start_dt and end_dt:
-            df_dye = df_dye[(df_dye['dyeing_in_date'] >= start_dt) & (df_dye['dyeing_in_date'] <= end_dt)]
         
+        # [최적화] 'dyeing_in_date' 필드 기준으로 필요한 기간만 조회
+        if start_dt and end_dt:
+            df_dye = load_orders_by_query('dyeing_in_date', start_dt, end_dt)
+        else: df_dye = pd.DataFrame()
+
         if filter_partners:
             df_dye = df_dye[df_dye['dyeing_partner'].isin(filter_partners) | df_dye['customer'].isin(filter_partners)]
 
@@ -429,10 +425,12 @@ def render_statistics(db, sub_menu):
     # --- 4. 봉제내역 ---
     elif sub_menu == "봉제내역":
         st.subheader("봉제 생산 및 비용 통계")
-        df_sew = df.dropna(subset=['sewing_end_date']).copy()
-        if start_dt and end_dt:
-            df_sew = df_sew[(df_sew['sewing_end_date'] >= start_dt) & (df_sew['sewing_end_date'] <= end_dt)]
         
+        # [최적화] 'sewing_end_date' 필드 기준으로 필요한 기간만 조회
+        if start_dt and end_dt:
+            df_sew = load_orders_by_query('sewing_end_date', start_dt, end_dt)
+        else: df_sew = pd.DataFrame()
+
         if filter_partners:
             df_sew = df_sew[df_sew['sewing_partner'].isin(filter_partners) | df_sew['customer'].isin(filter_partners)]
 
@@ -507,10 +505,12 @@ def render_statistics(db, sub_menu):
     # --- 5. 출고/운임내역 ---
     elif sub_menu == "출고/운임내역":
         st.subheader("출고 실적 및 운임비 통계")
-        df_ship = df.dropna(subset=['shipping_date']).copy()
-        if start_dt and end_dt:
-            df_ship = df_ship[(df_ship['shipping_date'] >= start_dt) & (df_ship['shipping_date'] <= end_dt)]
         
+        # [최적화] 'shipping_date' 필드 기준으로 필요한 기간만 조회
+        if start_dt and end_dt:
+            df_ship = load_orders_by_query('shipping_date', start_dt, end_dt)
+        else: df_ship = pd.DataFrame()
+
         if filter_partners:
             # 배송업체 또는 발주처 검색
             df_ship = df_ship[

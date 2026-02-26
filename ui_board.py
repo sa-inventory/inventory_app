@@ -6,7 +6,7 @@ import calendar
 import streamlit.components.v1 as components
 import uuid
 from firebase_admin import firestore
-
+from utils import get_users_list
 # [FIX] holidays 라이브러리를 선택적으로 임포트하여 Pylance 경고 해결
 try:
     import holidays # type: ignore
@@ -100,7 +100,8 @@ def render_notice_board(db):
             st.rerun()
 
     # 공지사항 목록 조회 (검색을 위해 전체 조회 후 필터링)
-    posts_ref = db.collection("posts").order_by("created_at", direction=firestore.Query.DESCENDING)
+    # [최적화] 최근 50개만 조회하여 읽기 비용 절감
+    posts_ref = db.collection("posts").order_by("created_at", direction=firestore.Query.DESCENDING).limit(50)
     all_docs = list(posts_ref.stream())
     
     if all_docs:
@@ -269,8 +270,9 @@ def render_notice_board(db):
                 
                 # [NEW] 공지 대상 선택 (통합형)
                 # 사용자 목록 가져오기
-                users_ref = db.collection("users").stream()
-                users_opts = [f"{u.to_dict().get('username')} ({u.to_dict().get('name')})" for u in users_ref]
+                # [최적화] 캐싱된 함수 사용
+                users_list = get_users_list()
+                users_opts = [f"{u.get('username')} ({u.get('name')})" for u in users_list]
                 
                 # '전체 공지'를 옵션의 첫 번째에 추가
                 target_options = ["전체 공지"] + users_opts
@@ -393,8 +395,8 @@ def render_notice_board(db):
                         c1, c2 = st.columns(2)
                         
                         # 사용자 목록 다시 로드
-                        users_ref = db.collection("users").stream()
-                        users_opts = [f"{u.to_dict().get('username')} ({u.to_dict().get('name')})" for u in users_ref]
+                        users_list = get_users_list()
+                        users_opts = [f"{u.get('username')} ({u.get('name')})" for u in users_list]
                         target_options = ["전체 공지"] + users_opts
                         
                         # 기존 값 복원

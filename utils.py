@@ -9,7 +9,6 @@ import urllib.request
 import urllib.parse
 
 # 2. 데이터베이스 연결
-@st.cache_resource
 def get_db():
     if not firebase_admin._apps:
         cred = None
@@ -37,10 +36,10 @@ def get_db():
         firebase_admin.initialize_app(cred)
     return firestore.client()
 
-db = get_db()
-
 # --- 공통 함수: 기초 코드 가져오기 ---
+@st.cache_data(ttl=300) # 5분 캐싱
 def get_common_codes(code_key, default_values):
+    db = get_db()
     doc_ref = db.collection("settings").document("codes")
     doc = doc_ref.get()
     if doc.exists:
@@ -49,7 +48,9 @@ def get_common_codes(code_key, default_values):
     return default_values
 
 # --- 공통 함수: 거래처 목록 가져오기 ---
+@st.cache_data(ttl=300) # 5분 캐싱
 def get_partners(partner_type=None):
+    db = get_db()
     query = db.collection("partners")
     if partner_type:
         query = query.where("type", "==", partner_type)
@@ -60,9 +61,38 @@ def get_partners(partner_type=None):
         partners.append(p.get("name"))
     return partners
 
+# --- 공통 함수: 거래처 정보 Map 가져오기 (상세 정보 포함) ---
+@st.cache_data(ttl=300) # 5분 캐싱
+def get_partners_map():
+    db = get_db()
+    docs = db.collection("partners").stream()
+    return {doc.to_dict().get('name'): doc.to_dict() for doc in docs}
+
+# [NEW] 공통 함수: 제품 목록 가져오기 (캐싱)
+@st.cache_data(ttl=300)
+def get_products_list():
+    db = get_db()
+    docs = db.collection("products").order_by("product_code").stream()
+    return [doc.to_dict() for doc in docs]
+
+# [NEW] 공통 함수: 제직기 목록 가져오기 (캐싱)
+@st.cache_data(ttl=300)
+def get_machines_list():
+    db = get_db()
+    docs = db.collection("machines").order_by("machine_no").stream()
+    return [doc.to_dict() for doc in docs]
+
+# [NEW] 공통 함수: 사용자 목록 가져오기 (캐싱)
+@st.cache_data(ttl=300)
+def get_users_list():
+    db = get_db()
+    docs = db.collection("users").stream()
+    return [doc.to_dict() for doc in docs]
+
 # --- 공통 함수: 기초 코드가 제품에 사용되었는지 확인 ---
 @st.cache_data(ttl=60) # 1분 동안 결과 캐싱
 def is_basic_code_used(code_key, name, code):
+    db = get_db()
     """지정된 기초 코드가 'products' 컬렉션에서 사용되었는지 확인합니다."""
     query = None
     if code_key == "product_types":
@@ -130,6 +160,7 @@ def generate_report_html(title, df, summary_text, options, chart_html=""):
 
 # 이름-코드 쌍 관리 함수
 def manage_code_with_code(code_key, default_list, label):
+    db = get_db()
     current_list = get_common_codes(code_key, default_list)
 
     st.markdown(f"##### 현재 등록된 {label}")
@@ -222,6 +253,7 @@ def manage_code_with_code(code_key, default_list, label):
 
 # 단순 리스트 관리 함수
 def manage_code(code_key, default_list, label):
+    db = get_db()
     current_list = get_common_codes(code_key, default_list)
     st.markdown(f"##### 현재 등록된 {label}")
     if current_list: st.dataframe(pd.DataFrame(current_list, columns=["명칭"]), width="stretch", hide_index=True)
@@ -245,6 +277,7 @@ def manage_code(code_key, default_list, label):
 
 # --- 공통 함수: 주소 검색 API 호출 ---
 def search_address_api(keyword, page=1):
+    db = get_db()
     """
     행정안전부 도로명주소 검색 API를 호출하여 결과를 반환합니다.
     """
@@ -276,31 +309,6 @@ def search_address_api(keyword, page=1):
             
     except Exception as e:
         return None, None, f"검색 중 오류 발생: {str(e)}"
-
-# --- 공통 함수: 비밀번호 유효성 검사 ---
-def validate_password(password):
-    """
-    비밀번호 정책 검사:
-    1. 4자리 이상 12자리 이하
-    2. 영문과 숫자만 허용 (특수문자 불가)
-    3. 동일한 문자/숫자 4번 연속 금지 (예: 1111, aaaa)
-    4. 연속된 문자/숫자 4자리 이상 금지 (예: 1234, abcd)
-    """
-    if not (4 <= len(password) <= 12):
-        return False, "비밀번호는 4자리 이상 12자리 이하여야 합니다."
-    
-    if not password.isalnum():
-        return False, "비밀번호는 영문과 숫자만 사용할 수 있습니다."
-    
-    for i in range(len(password) - 3):
-        # 동일 문자 4번 연속
-        if password[i] == password[i+1] == password[i+2] == password[i+3]:
-            return False, "동일한 문자를 4번 이상 연속해서 사용할 수 없습니다."
-        # 연속된 문자 (ASCII 코드 기준)
-        if ord(password[i+1]) == ord(password[i]) + 1 and ord(password[i+2]) == ord(password[i]) + 2 and ord(password[i+3]) == ord(password[i]) + 3:
-            return False, "연속된 문자나 숫자를 4자리 이상 사용할 수 없습니다."
-            
-    return True, ""
 
 # --- 공통 함수: 비밀번호 유효성 검사 ---
 def validate_password(password):

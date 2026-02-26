@@ -500,7 +500,7 @@ def render_partner_order_status(db):
             date_range = c1.date_input("조회 기간 (접수일)", [today - datetime.timedelta(days=90), today])
             
             # 상태 필터
-            status_options = ["전체", "발주접수", "제직대기", "제직중", "제직완료", "염색중", "염색완료", "봉제중", "봉제완료", "출고완료"]
+            status_options = ["전체", "미출고(출고완료 제외)", "발주접수", "제직대기", "제직중", "제직완료", "염색중", "염색완료", "봉제중", "봉제완료", "출고완료"]
             filter_status = c2.selectbox("진행 상태", status_options)
             
             # [NEW] 검색 기준 및 키워드 (거래처용)
@@ -533,7 +533,10 @@ def render_partner_order_status(db):
             continue
             
         # 2. 상태 필터링 (메모리)
-        if filter_status != "전체" and d.get('status') != filter_status:
+        if filter_status == "미출고(출고완료 제외)":
+            if d.get('status') == '출고완료':
+                continue
+        elif filter_status != "전체" and d.get('status') != filter_status:
             continue
             
         # [NEW] 3. 검색어 필터 (메모리)
@@ -649,91 +652,79 @@ def render_partner_order_status(db):
             def fmt_float(val, unit=""):
                 try: return f"{float(val):,.1f}{unit}"
                 except: return "-"
+
+            # [NEW] 공정별 개별 테이블 표시
             
-            # [NEW] 통합 테이블 데이터 생성
-            history_data = []
-            
-            # 1. 제직
-            w_status = "대기"
-            w_date = "-"
-            w_partner = "-"
-            w_perf = "-"
-            w_note = "-"
-            
-            if sel_row.get('weaving_end_time'):
-                w_status = "완료"
-                w_date = f"{fmt_dt(sel_row.get('weaving_start_time'))} ~ {fmt_dt(sel_row.get('weaving_end_time'))}"
-            elif sel_row.get('weaving_start_time'):
+            # --- 1. 제직 공정 ---
+            st.markdown("##### 제직 공정")
+            weaving_data = []
+            if sel_row.get('weaving_start_time'):
                 w_status = "진행중"
-                w_date = fmt_dt(sel_row.get('weaving_start_time'))
+                if sel_row.get('weaving_end_time'):
+                    w_status = "완료"
+                
+                weaving_data.append({
+                    "상태": w_status,
+                    "시작일시": fmt_dt(sel_row.get('weaving_start_time')),
+                    "완료일시": fmt_dt(sel_row.get('weaving_end_time')),
+                })
             
-            if sel_row.get('machine_no'):
-                m_no = sel_row.get('machine_no')
-                try: m_name = machine_map.get(int(m_no), str(m_no)) if pd.notna(m_no) else "-"
-                except: m_name = str(m_no)
-                w_partner = f"{m_name} (제직기)"
-            
-            if w_status == "완료":
-                w_perf = f"생산: {fmt_num(sel_row.get('real_stock'), '장')} / {fmt_float(sel_row.get('prod_weight_kg'), 'kg')}"
-                w_note = f"중량: {fmt_num(sel_row.get('real_weight'), 'g')}"
-            elif w_status == "진행중":
-                w_perf = f"목표: {fmt_num(sel_row.get('weaving_roll_count'), '롤')}"
+            if weaving_data:
+                st.dataframe(pd.DataFrame(weaving_data), hide_index=True, use_container_width=True)
+            else:
+                st.info("제직 공정 대기 중입니다.")
 
-            history_data.append({"공정": "제직", "상태": w_status, "날짜(기간)": w_date, "작업처": w_partner, "실적/내용": w_perf, "비고": w_note})
-
-            # 2. 염색
-            d_status = "대기"
-            d_date = "-"
-            d_partner = sel_row.get('dyeing_partner', '-')
-            d_perf = "-"
-            # [FIX] SyntaxError 해결: 중첩 f-string 따옴표 충돌 방지
-            cc = sel_row.get('dyeing_color_code')
-            d_note = f"{sel_row.get('dyeing_color_name', '')} {f'({cc})' if cc else ''}".strip()
-
-            if sel_row.get('dyeing_in_date'):
-                d_status = "완료"
-                d_date = f"{fmt_date(sel_row.get('dyeing_out_date'))} ~ {fmt_date(sel_row.get('dyeing_in_date'))}"
-                d_perf = f"입고: {fmt_float(sel_row.get('dyeing_in_weight'), 'kg')}"
-            elif sel_row.get('dyeing_out_date'):
+            # --- 2. 염색 공정 ---
+            st.markdown("##### 염색 공정")
+            dyeing_data = []
+            if sel_row.get('dyeing_out_date'):
                 d_status = "진행중"
-                d_date = fmt_date(sel_row.get('dyeing_out_date'))
-                d_perf = f"출고: {fmt_float(sel_row.get('dyeing_out_weight'), 'kg')}"
-            
-            history_data.append({"공정": "염색", "상태": d_status, "날짜(기간)": d_date, "작업처": d_partner, "실적/내용": d_perf, "비고": d_note})
+                if sel_row.get('dyeing_in_date'):
+                    d_status = "완료"
+                
+                dyeing_data.append({
+                    "상태": d_status,
+                    "시작일": fmt_date(sel_row.get('dyeing_out_date')),
+                    "완료일": fmt_date(sel_row.get('dyeing_in_date')),
+                })
 
-            # 3. 봉제
-            s_status = "대기"
-            s_date = "-"
-            s_partner = f"{sel_row.get('sewing_partner', '-')} ({sel_row.get('sewing_type', '-')})"
-            s_perf = "-"
-            s_note = "-"
+            if dyeing_data:
+                st.dataframe(pd.DataFrame(dyeing_data), hide_index=True, use_container_width=True)
+            else:
+                st.info("염색 공정 대기 중입니다.")
 
-            if sel_row.get('sewing_end_date'):
-                s_status = "완료"
-                s_date = f"{fmt_date(sel_row.get('sewing_start_date'))} ~ {fmt_date(sel_row.get('sewing_end_date'))}"
-                s_perf = f"완료: {fmt_num(sel_row.get('stock'), '장')}"
-                if sel_row.get('sewing_defect_qty'):
-                    s_perf += f" (불량 {fmt_num(sel_row.get('sewing_defect_qty'))})"
-            elif sel_row.get('sewing_start_date'):
+            # --- 3. 봉제 공정 ---
+            st.markdown("##### 봉제 공정")
+            sewing_data = []
+            if sel_row.get('sewing_start_date'):
                 s_status = "진행중"
-                s_date = fmt_date(sel_row.get('sewing_start_date'))
+                if sel_row.get('sewing_end_date'):
+                    s_status = "완료"
+                
+                sewing_data.append({
+                    "상태": s_status,
+                    "시작일": fmt_date(sel_row.get('sewing_start_date')),
+                    "완료일": fmt_date(sel_row.get('sewing_end_date')),
+                })
             
-            history_data.append({"공정": "봉제", "상태": s_status, "날짜(기간)": s_date, "작업처": s_partner, "실적/내용": s_perf, "비고": s_note})
+            if sewing_data:
+                st.dataframe(pd.DataFrame(sewing_data), hide_index=True, use_container_width=True)
+            else:
+                st.info("봉제 공정 대기 중입니다.")
 
-            # 4. 출고
-            sh_status = "대기"
-            sh_date = "-"
-            sh_partner = sel_row.get('delivery_to', '-')
-            sh_perf = f"{sel_row.get('shipping_method', '-')} / {sel_row.get('shipping_carrier', '-')}"
-            sh_note = sel_row.get('delivery_address', '-')
-
+            # --- 4. 출고 공정 ---
+            st.markdown("##### 출고/배송")
+            shipping_data = []
             if sel_row.get('shipping_date'):
-                sh_status = "완료"
-                sh_date = fmt_dt(sel_row.get('shipping_date'))
-            
-            history_data.append({"공정": "출고", "상태": sh_status, "날짜(기간)": sh_date, "작업처": sh_partner, "실적/내용": sh_perf, "비고": sh_note})
+                shipping_data.append({
+                    "상태": "완료",
+                    "출고일시": fmt_dt(sel_row.get('shipping_date')),
+                })
 
-            st.dataframe(pd.DataFrame(history_data), hide_index=True, use_container_width=True)
+            if shipping_data:
+                st.dataframe(pd.DataFrame(shipping_data), hide_index=True, use_container_width=True)
+            else:
+                st.info("출고 대기 중입니다.")
 
         st.divider()
         
@@ -1096,6 +1087,7 @@ def render_order_status(db, sub_menu):
             date_range = c1.date_input("조회 기간", st.session_state.get("search_date_range"), format="YYYY-MM-DD")
             # 상세 공정 상태 목록 추가
             status_options = ["전체", "발주접수", "제직대기", "제직중", "제직완료", "염색중", "염색완료", "봉제중", "봉제완료", "출고완료"]
+            status_options = ["전체", "미출고(출고완료 제외)", "발주접수", "제직대기", "제직중", "제직완료", "염색중", "염색완료", "봉제중", "봉제완료", "출고완료"]
             
             # [수정] 상태 필터: 멀티셀렉트 -> 콤보박스(Selectbox)
             saved_status = st.session_state.get("search_filter_status_single", "전체")
@@ -1103,7 +1095,7 @@ def render_order_status(db, sub_menu):
             filter_status = c2.selectbox("진행 상태", status_options, index=status_options.index(saved_status))
             
             # [수정] 검색 조건: 콤보박스 + 텍스트 입력
-            criteria_options = ["전체", "제품코드", "발주처", "제품명", "제품종류", "사종", "색상", "중량"]
+            criteria_options = ["전체", "발주번호", "제품코드", "발주처", "제품명", "제품종류", "사종", "색상", "중량"]
             saved_criteria = st.session_state.get("search_criteria", "전체")
             if saved_criteria not in criteria_options: saved_criteria = "전체"
             
@@ -1171,7 +1163,9 @@ def render_order_status(db, sub_menu):
                 df['delivery_req_date'] = pd.to_datetime(df['delivery_req_date'], errors='coerce').dt.strftime('%Y-%m-%d').fillna('')
             
             # [수정] 상태 필터 (단일 선택)
-            if s_filter_status != "전체":
+            if s_filter_status == "미출고(출고완료 제외)":
+                df = df[df['status'] != '출고완료']
+            elif s_filter_status != "전체":
                 df = df[df['status'] == s_filter_status]
             
             # [수정] 검색어 필터 (기준에 따라)
@@ -1190,7 +1184,7 @@ def render_order_status(db, sub_menu):
                         mask = df.astype(str).apply(lambda x: ' '.join(x).lower(), axis=1).str.contains(pattern, regex=True, na=False)
                         df = df[mask]
                     else:
-                        col_map_search = {"제품코드": "product_code", "발주처": "customer", "제품명": "name", "제품종류": "product_type", "사종": "yarn_type", "색상": "color", "중량": "weight"}
+                        col_map_search = {"발주번호": "order_no", "제품코드": "product_code", "발주처": "customer", "제품명": "name", "제품종류": "product_type", "사종": "yarn_type", "색상": "color", "중량": "weight"}
                         target_col = col_map_search.get(s_criteria)
                         if target_col and target_col in df.columns:
                             df = df[df[target_col].astype(str).str.lower().str.contains(pattern, regex=True, na=False)]
@@ -1548,114 +1542,104 @@ def render_order_status(db, sub_menu):
                 def fmt_money(val):
                     try: return f"{int(val):,}원"
                     except: return "-"
+
+                # [NEW] 공정별 개별 테이블 표시
                 
-                # [NEW] 통합 테이블 데이터 생성
-                history_data = []
-                
-                # 1. 제직
-                w_status = "대기"
-                w_date = "-"
-                w_partner = "-"
-                w_perf = "-"
-                w_note = "-"
-                
-                if sel_row.get('weaving_end_time'):
-                    w_status = "완료"
-                    w_date = f"{fmt_dt(sel_row.get('weaving_start_time'))} ~ {fmt_dt(sel_row.get('weaving_end_time'))}"
-                elif sel_row.get('weaving_start_time'):
-                    w_status = "진행중"
-                    w_date = fmt_dt(sel_row.get('weaving_start_time'))
-                
-                if sel_row.get('machine_no'):
+                # --- 1. 제직 공정 ---
+                st.markdown("##### 제직 공정")
+                weaving_data = []
+                if sel_row.get('weaving_start_time'):
                     m_no = sel_row.get('machine_no')
                     try:
                         m_no_int = int(m_no) if pd.notna(m_no) else None
                         m_name = machine_map.get(m_no_int, f"{m_no_int}호기" if m_no_int is not None else "-")
                     except:
                         m_name = str(m_no)
-                    w_partner = f"{m_name} (제직기)"
+
+                    w_status = "진행중"
+                    if sel_row.get('weaving_end_time'):
+                        w_status = "완료"
+                    
+                    weaving_data.append({
+                        "상태": w_status,
+                        "제직기": m_name,
+                        "시작일시": fmt_dt(sel_row.get('weaving_start_time')),
+                        "제직롤": fmt_num(sel_row.get('weaving_roll_count'), '롤'),
+                        "완료일시": fmt_dt(sel_row.get('weaving_end_time')),
+                        "생산매수": fmt_num(sel_row.get('real_stock'), '장'),
+                        "생산중량": fmt_float(sel_row.get('prod_weight_kg'), 'kg'),
+                        "평균중량": fmt_float(sel_row.get('avg_weight'), 'g')
+                    })
                 
-                if w_status == "완료":
-                    w_perf = f"생산: {fmt_num(sel_row.get('real_stock'), '장')} / {fmt_float(sel_row.get('prod_weight_kg'), 'kg')}"
-                    w_note = f"평균중량: {fmt_float(sel_row.get('avg_weight'), 'g')}"
-                elif w_status == "진행중":
-                    w_perf = f"목표: {fmt_num(sel_row.get('weaving_roll_count'), '롤')}"
+                if weaving_data:
+                    st.dataframe(pd.DataFrame(weaving_data), hide_index=True, use_container_width=True)
+                else:
+                    st.info("제직 공정 대기 중입니다.")
 
-                history_data.append({"공정": "제직", "상태": w_status, "날짜(기간)": w_date, "작업처": w_partner, "실적/내용": w_perf, "비고": w_note})
-
-                # 2. 염색
-                d_status = "대기"
-                d_date = "-"
-                d_partner = sel_row.get('dyeing_partner', '-')
-                d_perf = "-"
-                # [FIX] SyntaxError 해결: 중첩 f-string 따옴표 충돌 방지
-                cc = sel_row.get('dyeing_color_code')
-                d_note = f"{sel_row.get('dyeing_color_name', '')} {f'({cc})' if cc else ''}".strip()
-                
-                # 비용 정보 추가
-                if sel_row.get('dyeing_amount'):
-                    d_note += f" / 비용: {fmt_money(sel_row.get('dyeing_amount'))}"
-
-                if sel_row.get('dyeing_in_date'):
-                    d_status = "완료"
-                    d_date = f"{fmt_date(sel_row.get('dyeing_out_date'))} ~ {fmt_date(sel_row.get('dyeing_in_date'))}"
-                    d_perf = f"입고: {fmt_float(sel_row.get('dyeing_in_weight'), 'kg')}"
-                elif sel_row.get('dyeing_out_date'):
+                # --- 2. 염색 공정 ---
+                st.markdown("##### 염색 공정")
+                dyeing_data = []
+                if sel_row.get('dyeing_out_date'):
                     d_status = "진행중"
-                    d_date = fmt_date(sel_row.get('dyeing_out_date'))
-                    d_perf = f"출고: {fmt_float(sel_row.get('dyeing_out_weight'), 'kg')}"
-                
-                history_data.append({"공정": "염색", "상태": d_status, "날짜(기간)": d_date, "작업처": d_partner, "실적/내용": d_perf, "비고": d_note})
+                    if sel_row.get('dyeing_in_date'):
+                        d_status = "완료"
+                    
+                    cc = sel_row.get('dyeing_color_code')
+                    color_info = f"{sel_row.get('dyeing_color_name', '')} {f'({cc})' if cc else ''}".strip()
 
-                # 3. 봉제
-                s_status = "대기"
-                s_date = "-"
-                s_partner = f"{sel_row.get('sewing_partner', '-')} ({sel_row.get('sewing_type', '-')})"
-                s_perf = "-"
-                s_note = "-"
-                
-                # 비용 정보 추가
-                if sel_row.get('sewing_amount'):
-                    s_note = f"비용: {fmt_money(sel_row.get('sewing_amount'))}"
+                    dyeing_data.append({
+                        "상태": d_status,
+                        "염색업체": sel_row.get('dyeing_partner', '-'),
+                        "출고일": fmt_date(sel_row.get('dyeing_out_date')),
+                        "출고중량(kg)": fmt_float(sel_row.get('dyeing_out_weight')),
+                        "입고일": fmt_date(sel_row.get('dyeing_in_date')),
+                        "입고중량(kg)": fmt_float(sel_row.get('dyeing_in_weight')),
+                        "색상": color_info,
+                        "염색비용": fmt_money(sel_row.get('dyeing_amount'))
+                    })
 
-                if sel_row.get('sewing_end_date'):
-                    s_status = "완료"
-                    s_date = f"{fmt_date(sel_row.get('sewing_start_date'))} ~ {fmt_date(sel_row.get('sewing_end_date'))}"
-                    s_perf = f"완료: {fmt_num(sel_row.get('stock'), '장')}"
-                    if sel_row.get('sewing_defect_qty'):
-                        s_perf += f" (불량 {fmt_num(sel_row.get('sewing_defect_qty'))})"
-                elif sel_row.get('sewing_start_date'):
+                if dyeing_data:
+                    st.dataframe(pd.DataFrame(dyeing_data), hide_index=True, use_container_width=True)
+                else:
+                    st.info("염색 공정 대기 중입니다.")
+
+                # --- 3. 봉제 공정 ---
+                st.markdown("##### 봉제 공정")
+                sewing_data = []
+                if sel_row.get('sewing_start_date'):
                     s_status = "진행중"
-                    s_date = fmt_date(sel_row.get('sewing_start_date'))
+                    if sel_row.get('sewing_end_date'):
+                        s_status = "완료"
+                    
+                    sewing_data.append({
+                        "상태": s_status,
+                        "봉제업체": sel_row.get('sewing_partner', '-'),
+                        "작업구분": sel_row.get('sewing_type', '-'),
+                        "시작일": fmt_date(sel_row.get('sewing_start_date')),
+                        "완료일": fmt_date(sel_row.get('sewing_end_date')),
+                        "완료수량": fmt_num(sel_row.get('stock'), '장'),
+                        "불량수량": fmt_num(sel_row.get('sewing_defect_qty'), '장'),
+                        "봉제비용": fmt_money(sel_row.get('sewing_amount'))
+                    })
                 
-                history_data.append({"공정": "봉제", "상태": s_status, "날짜(기간)": s_date, "작업처": s_partner, "실적/내용": s_perf, "비고": s_note})
+                if sewing_data:
+                    st.dataframe(pd.DataFrame(sewing_data), hide_index=True, use_container_width=True)
+                else:
+                    st.info("봉제 공정 대기 중입니다.")
 
-                # 4. 출고
-                sh_status = "대기"
-                sh_date = "-"
-                sh_partner = sel_row.get('delivery_to', '-')
-                sh_perf = f"{sel_row.get('shipping_method', '-')} / {sel_row.get('shipping_carrier', '-')}"
-                sh_note = sel_row.get('delivery_address', '-')
-
+                # --- 4. 출고 공정 ---
+                st.markdown("##### 출고/배송")
+                shipping_data = []
                 if sel_row.get('shipping_date'):
-                    sh_status = "완료"
-                    sh_date = fmt_dt(sel_row.get('shipping_date'))
-                
-                history_data.append({"공정": "출고", "상태": sh_status, "날짜(기간)": sh_date, "작업처": sh_partner, "실적/내용": sh_perf, "비고": sh_note})
+                    shipping_data.append({
+                        "상태": "완료",
+                        "출고일시": fmt_dt(sel_row.get('shipping_date')),
+                    })
 
-                st.dataframe(
-                    pd.DataFrame(history_data),
-                    column_config={
-                        "공정": st.column_config.TextColumn("공정", width="small"),
-                        "상태": st.column_config.TextColumn("상태", width="small"),
-                        "날짜(기간)": st.column_config.TextColumn("날짜(기간)", width="medium"),
-                        "작업처": st.column_config.TextColumn("작업처/기계", width="medium"),
-                        "실적/내용": st.column_config.TextColumn("실적/내용", width="medium"),
-                        "비고": st.column_config.TextColumn("비고", width="large"),
-                    },
-                    hide_index=True,
-                    use_container_width=True
-                )
+                if shipping_data:
+                    st.dataframe(pd.DataFrame(shipping_data), hide_index=True, use_container_width=True)
+                else:
+                    st.info("출고 대기 중입니다.")
                 
                 st.divider()
                 

@@ -110,7 +110,7 @@ if not st.session_state["logged_in"]:
 
 # 로그인 화면 처리
 if not st.session_state["logged_in"]:
-    st.markdown("<h1 style='text-align: center;'>🔒 세안타올 생산 관리</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center;'>세안타올 생산 관리</h1>", unsafe_allow_html=True)
     
     # [NEW] 아이디 입력 후 엔터 시 비밀번호 필드로 포커스 이동 (JS 주입)
     components.html("""

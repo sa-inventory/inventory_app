@@ -649,62 +649,91 @@ def render_partner_order_status(db):
             def fmt_float(val, unit=""):
                 try: return f"{float(val):,.1f}{unit}"
                 except: return "-"
-
-            c_p1, c_p2, c_p3, c_p4 = st.columns(4)
             
-            with c_p1:
-                st.markdown("##### 제직 공정")
-                if sel_row.get('weaving_start_time') or sel_row.get('weaving_end_time'):
-                    m_no = sel_row.get('machine_no')
-                    try: m_name = machine_map.get(int(m_no), str(m_no)) if pd.notna(m_no) else "-"
-                    except: m_name = str(m_no)
-                    st.caption("제직 설정 및 결과")
-                    st.text(f"제직기    : {m_name}")
-                    st.text(f"시작일시  : {fmt_dt(sel_row.get('weaving_start_time'))}")
-                    st.text(f"제직롤수  : {fmt_num(sel_row.get('weaving_roll_count'), '롤')}")
-                    st.markdown("---")
-                    st.text(f"완료일시  : {fmt_dt(sel_row.get('weaving_end_time'))}")
-                    st.text(f"생산매수  : {fmt_num(sel_row.get('real_stock'), '장')}")
-                    st.text(f"중량(g)   : {fmt_num(sel_row.get('real_weight'), 'g')}")
-                    st.text(f"생산중량  : {fmt_float(sel_row.get('prod_weight_kg'), 'kg')}")
-                else: st.info("대기 중")
+            # [NEW] 통합 테이블 데이터 생성
+            history_data = []
+            
+            # 1. 제직
+            w_status = "대기"
+            w_date = "-"
+            w_partner = "-"
+            w_perf = "-"
+            w_note = "-"
+            
+            if sel_row.get('weaving_end_time'):
+                w_status = "완료"
+                w_date = f"{fmt_dt(sel_row.get('weaving_start_time'))} ~ {fmt_dt(sel_row.get('weaving_end_time'))}"
+            elif sel_row.get('weaving_start_time'):
+                w_status = "진행중"
+                w_date = fmt_dt(sel_row.get('weaving_start_time'))
+            
+            if sel_row.get('machine_no'):
+                m_no = sel_row.get('machine_no')
+                try: m_name = machine_map.get(int(m_no), str(m_no)) if pd.notna(m_no) else "-"
+                except: m_name = str(m_no)
+                w_partner = f"{m_name} (제직기)"
+            
+            if w_status == "완료":
+                w_perf = f"생산: {fmt_num(sel_row.get('real_stock'), '장')} / {fmt_float(sel_row.get('prod_weight_kg'), 'kg')}"
+                w_note = f"중량: {fmt_num(sel_row.get('real_weight'), 'g')}"
+            elif w_status == "진행중":
+                w_perf = f"목표: {fmt_num(sel_row.get('weaving_roll_count'), '롤')}"
 
-            with c_p2:
-                st.markdown("##### 염색 공정")
-                if sel_row.get('dyeing_out_date') or sel_row.get('dyeing_in_date'):
-                    st.caption("염색 출고 및 입고")
-                    st.text(f"염색업체  : {sel_row.get('dyeing_partner')}")
-                    st.text(f"출고일자  : {fmt_date(sel_row.get('dyeing_out_date'))}")
-                    st.text(f"출고중량  : {fmt_float(sel_row.get('dyeing_out_weight'), 'kg')}")
-                    st.text(f"색상정보  : {sel_row.get('dyeing_color_name')} ({sel_row.get('dyeing_color_code')})")
-                    st.markdown("---")
-                    st.text(f"입고일자  : {fmt_date(sel_row.get('dyeing_in_date'))}")
-                    st.text(f"입고중량  : {fmt_float(sel_row.get('dyeing_in_weight'), 'kg')}")
-                else: st.info("대기 중")
+            history_data.append({"공정": "제직", "상태": w_status, "날짜(기간)": w_date, "작업처": w_partner, "실적/내용": w_perf, "비고": w_note})
 
-            with c_p3:
-                st.markdown("##### 봉제 공정")
-                if sel_row.get('sewing_start_date') or sel_row.get('sewing_end_date'):
-                    st.caption("봉제 작업 및 결과")
-                    st.text(f"봉제업체  : {sel_row.get('sewing_partner')}")
-                    st.text(f"작업구분  : {sel_row.get('sewing_type')}")
-                    st.text(f"시작일자  : {fmt_date(sel_row.get('sewing_start_date'))}")
-                    st.markdown("---")
-                    st.text(f"완료일자  : {fmt_date(sel_row.get('sewing_end_date'))}")
-                    st.text(f"완료수량  : {fmt_num(sel_row.get('stock'), '장')}")
-                    st.text(f"불량수량  : {fmt_num(sel_row.get('sewing_defect_qty'), '장')}")
-                else: st.info("대기 중")
+            # 2. 염색
+            d_status = "대기"
+            d_date = "-"
+            d_partner = sel_row.get('dyeing_partner', '-')
+            d_perf = "-"
+            # [FIX] SyntaxError 해결: 중첩 f-string 따옴표 충돌 방지
+            cc = sel_row.get('dyeing_color_code')
+            d_note = f"{sel_row.get('dyeing_color_name', '')} {f'({cc})' if cc else ''}".strip()
 
-            with c_p4:
-                st.markdown("##### 출고/배송")
-                if sel_row.get('shipping_date'):
-                    st.caption("출고 정보")
-                    st.text(f"출고일시  : {fmt_dt(sel_row.get('shipping_date'))}")
-                    st.text(f"출고방법  : {sel_row.get('shipping_method')}")
-                    st.text(f"납품처    : {sel_row.get('delivery_to')}")
-                    st.text(f"연락처    : {sel_row.get('delivery_contact')}")
-                    st.text(f"주소      : {sel_row.get('delivery_address')}")
-                else: st.info("미출고")
+            if sel_row.get('dyeing_in_date'):
+                d_status = "완료"
+                d_date = f"{fmt_date(sel_row.get('dyeing_out_date'))} ~ {fmt_date(sel_row.get('dyeing_in_date'))}"
+                d_perf = f"입고: {fmt_float(sel_row.get('dyeing_in_weight'), 'kg')}"
+            elif sel_row.get('dyeing_out_date'):
+                d_status = "진행중"
+                d_date = fmt_date(sel_row.get('dyeing_out_date'))
+                d_perf = f"출고: {fmt_float(sel_row.get('dyeing_out_weight'), 'kg')}"
+            
+            history_data.append({"공정": "염색", "상태": d_status, "날짜(기간)": d_date, "작업처": d_partner, "실적/내용": d_perf, "비고": d_note})
+
+            # 3. 봉제
+            s_status = "대기"
+            s_date = "-"
+            s_partner = f"{sel_row.get('sewing_partner', '-')} ({sel_row.get('sewing_type', '-')})"
+            s_perf = "-"
+            s_note = "-"
+
+            if sel_row.get('sewing_end_date'):
+                s_status = "완료"
+                s_date = f"{fmt_date(sel_row.get('sewing_start_date'))} ~ {fmt_date(sel_row.get('sewing_end_date'))}"
+                s_perf = f"완료: {fmt_num(sel_row.get('stock'), '장')}"
+                if sel_row.get('sewing_defect_qty'):
+                    s_perf += f" (불량 {fmt_num(sel_row.get('sewing_defect_qty'))})"
+            elif sel_row.get('sewing_start_date'):
+                s_status = "진행중"
+                s_date = fmt_date(sel_row.get('sewing_start_date'))
+            
+            history_data.append({"공정": "봉제", "상태": s_status, "날짜(기간)": s_date, "작업처": s_partner, "실적/내용": s_perf, "비고": s_note})
+
+            # 4. 출고
+            sh_status = "대기"
+            sh_date = "-"
+            sh_partner = sel_row.get('delivery_to', '-')
+            sh_perf = f"{sel_row.get('shipping_method', '-')} / {sel_row.get('shipping_carrier', '-')}"
+            sh_note = sel_row.get('delivery_address', '-')
+
+            if sel_row.get('shipping_date'):
+                sh_status = "완료"
+                sh_date = fmt_dt(sel_row.get('shipping_date'))
+            
+            history_data.append({"공정": "출고", "상태": sh_status, "날짜(기간)": sh_date, "작업처": sh_partner, "실적/내용": sh_perf, "비고": sh_note})
+
+            st.dataframe(pd.DataFrame(history_data), hide_index=True, use_container_width=True)
 
         st.divider()
         
@@ -1519,77 +1548,114 @@ def render_order_status(db, sub_menu):
                 def fmt_money(val):
                     try: return f"{int(val):,}원"
                     except: return "-"
-
-                c_p1, c_p2, c_p3, c_p4 = st.columns(4)
                 
-                with c_p1:
-                    st.markdown("##### 제직 공정")
-                    if sel_row.get('weaving_start_time') or sel_row.get('weaving_end_time'):
-                        m_no = sel_row.get('machine_no')
-                        try:
-                            m_no_int = int(m_no) if pd.notna(m_no) else None
-                            m_name = machine_map.get(m_no_int, f"{m_no_int}호기" if m_no_int is not None else "-")
-                        except:
-                            m_name = str(m_no)
-                            
-                        st.caption("제직 설정 및 결과")
-                        st.text(f"제직기    : {m_name}")
-                        st.text(f"시작일시  : {fmt_dt(sel_row.get('weaving_start_time'))}")
-                        st.text(f"제직롤수  : {fmt_num(sel_row.get('weaving_roll_count'), '롤')}")
-                        st.markdown("---")
-                        st.text(f"완료일시  : {fmt_dt(sel_row.get('weaving_end_time'))}")
-                        st.text(f"생산매수  : {fmt_num(sel_row.get('real_stock'), '장')}")
-                        st.text(f"중량(g)   : {fmt_num(sel_row.get('real_weight'), 'g')}")
-                        st.text(f"생산중량  : {fmt_float(sel_row.get('prod_weight_kg'), 'kg')}")
-                        st.text(f"평균중량  : {fmt_float(sel_row.get('avg_weight'), 'g')}")
-                    else:
-                        st.info("대기 중")
+                # [NEW] 통합 테이블 데이터 생성
+                history_data = []
+                
+                # 1. 제직
+                w_status = "대기"
+                w_date = "-"
+                w_partner = "-"
+                w_perf = "-"
+                w_note = "-"
+                
+                if sel_row.get('weaving_end_time'):
+                    w_status = "완료"
+                    w_date = f"{fmt_dt(sel_row.get('weaving_start_time'))} ~ {fmt_dt(sel_row.get('weaving_end_time'))}"
+                elif sel_row.get('weaving_start_time'):
+                    w_status = "진행중"
+                    w_date = fmt_dt(sel_row.get('weaving_start_time'))
+                
+                if sel_row.get('machine_no'):
+                    m_no = sel_row.get('machine_no')
+                    try:
+                        m_no_int = int(m_no) if pd.notna(m_no) else None
+                        m_name = machine_map.get(m_no_int, f"{m_no_int}호기" if m_no_int is not None else "-")
+                    except:
+                        m_name = str(m_no)
+                    w_partner = f"{m_name} (제직기)"
+                
+                if w_status == "완료":
+                    w_perf = f"생산: {fmt_num(sel_row.get('real_stock'), '장')} / {fmt_float(sel_row.get('prod_weight_kg'), 'kg')}"
+                    w_note = f"평균중량: {fmt_float(sel_row.get('avg_weight'), 'g')}"
+                elif w_status == "진행중":
+                    w_perf = f"목표: {fmt_num(sel_row.get('weaving_roll_count'), '롤')}"
 
-                with c_p2:
-                    st.markdown("##### 염색 공정")
-                    if sel_row.get('dyeing_out_date') or sel_row.get('dyeing_in_date'):
-                        st.caption("염색 출고 및 입고")
-                        st.text(f"염색업체  : {sel_row.get('dyeing_partner')}")
-                        st.text(f"출고일자  : {fmt_date(sel_row.get('dyeing_out_date'))}")
-                        st.text(f"출고중량  : {fmt_float(sel_row.get('dyeing_out_weight'), 'kg')}")
-                        st.text(f"색상정보  : {sel_row.get('dyeing_color_name')} ({sel_row.get('dyeing_color_code')})")
-                        st.text(f"비고      : {sel_row.get('dyeing_note')}")
-                        st.markdown("---")
-                        st.text(f"입고일자  : {fmt_date(sel_row.get('dyeing_in_date'))}")
-                        st.text(f"입고중량  : {fmt_float(sel_row.get('dyeing_in_weight'), 'kg')}")
-                        st.text(f"염색단가  : {fmt_money(sel_row.get('dyeing_unit_price'))}")
-                        st.text(f"염색금액  : {fmt_money(sel_row.get('dyeing_amount'))}")
-                    else:
-                        st.info("대기 중")
+                history_data.append({"공정": "제직", "상태": w_status, "날짜(기간)": w_date, "작업처": w_partner, "실적/내용": w_perf, "비고": w_note})
 
-                with c_p3:
-                    st.markdown("##### 봉제 공정")
-                    if sel_row.get('sewing_start_date') or sel_row.get('sewing_end_date'):
-                        st.caption("봉제 작업 및 결과")
-                        st.text(f"봉제업체  : {sel_row.get('sewing_partner')}")
-                        st.text(f"작업구분  : {sel_row.get('sewing_type')}")
-                        st.text(f"시작일자  : {fmt_date(sel_row.get('sewing_start_date'))}")
-                        st.markdown("---")
-                        st.text(f"완료일자  : {fmt_date(sel_row.get('sewing_end_date'))}")
-                        st.text(f"완료수량  : {fmt_num(sel_row.get('stock'), '장')}")
-                        st.text(f"불량수량  : {fmt_num(sel_row.get('sewing_defect_qty'), '장')}")
-                        if sel_row.get('sewing_type') == "외주봉제":
-                            st.text(f"봉제단가  : {fmt_money(sel_row.get('sewing_unit_price'))}")
-                            st.text(f"봉제금액  : {fmt_money(sel_row.get('sewing_amount'))}")
-                    else:
-                        st.info("대기 중")
+                # 2. 염색
+                d_status = "대기"
+                d_date = "-"
+                d_partner = sel_row.get('dyeing_partner', '-')
+                d_perf = "-"
+                # [FIX] SyntaxError 해결: 중첩 f-string 따옴표 충돌 방지
+                cc = sel_row.get('dyeing_color_code')
+                d_note = f"{sel_row.get('dyeing_color_name', '')} {f'({cc})' if cc else ''}".strip()
+                
+                # 비용 정보 추가
+                if sel_row.get('dyeing_amount'):
+                    d_note += f" / 비용: {fmt_money(sel_row.get('dyeing_amount'))}"
 
-                with c_p4:
-                    st.markdown("##### 출고/배송")
-                    if sel_row.get('shipping_date'):
-                        st.caption("출고 정보")
-                        st.text(f"출고일시  : {fmt_dt(sel_row.get('shipping_date'))}")
-                        st.text(f"출고방법  : {sel_row.get('shipping_method')}")
-                        st.text(f"납품처    : {sel_row.get('delivery_to')}")
-                        st.text(f"연락처    : {sel_row.get('delivery_contact')}")
-                        st.text(f"주소      : {sel_row.get('delivery_address')}")
-                    else:
-                        st.info("미출고")
+                if sel_row.get('dyeing_in_date'):
+                    d_status = "완료"
+                    d_date = f"{fmt_date(sel_row.get('dyeing_out_date'))} ~ {fmt_date(sel_row.get('dyeing_in_date'))}"
+                    d_perf = f"입고: {fmt_float(sel_row.get('dyeing_in_weight'), 'kg')}"
+                elif sel_row.get('dyeing_out_date'):
+                    d_status = "진행중"
+                    d_date = fmt_date(sel_row.get('dyeing_out_date'))
+                    d_perf = f"출고: {fmt_float(sel_row.get('dyeing_out_weight'), 'kg')}"
+                
+                history_data.append({"공정": "염색", "상태": d_status, "날짜(기간)": d_date, "작업처": d_partner, "실적/내용": d_perf, "비고": d_note})
+
+                # 3. 봉제
+                s_status = "대기"
+                s_date = "-"
+                s_partner = f"{sel_row.get('sewing_partner', '-')} ({sel_row.get('sewing_type', '-')})"
+                s_perf = "-"
+                s_note = "-"
+                
+                # 비용 정보 추가
+                if sel_row.get('sewing_amount'):
+                    s_note = f"비용: {fmt_money(sel_row.get('sewing_amount'))}"
+
+                if sel_row.get('sewing_end_date'):
+                    s_status = "완료"
+                    s_date = f"{fmt_date(sel_row.get('sewing_start_date'))} ~ {fmt_date(sel_row.get('sewing_end_date'))}"
+                    s_perf = f"완료: {fmt_num(sel_row.get('stock'), '장')}"
+                    if sel_row.get('sewing_defect_qty'):
+                        s_perf += f" (불량 {fmt_num(sel_row.get('sewing_defect_qty'))})"
+                elif sel_row.get('sewing_start_date'):
+                    s_status = "진행중"
+                    s_date = fmt_date(sel_row.get('sewing_start_date'))
+                
+                history_data.append({"공정": "봉제", "상태": s_status, "날짜(기간)": s_date, "작업처": s_partner, "실적/내용": s_perf, "비고": s_note})
+
+                # 4. 출고
+                sh_status = "대기"
+                sh_date = "-"
+                sh_partner = sel_row.get('delivery_to', '-')
+                sh_perf = f"{sel_row.get('shipping_method', '-')} / {sel_row.get('shipping_carrier', '-')}"
+                sh_note = sel_row.get('delivery_address', '-')
+
+                if sel_row.get('shipping_date'):
+                    sh_status = "완료"
+                    sh_date = fmt_dt(sel_row.get('shipping_date'))
+                
+                history_data.append({"공정": "출고", "상태": sh_status, "날짜(기간)": sh_date, "작업처": sh_partner, "실적/내용": sh_perf, "비고": sh_note})
+
+                st.dataframe(
+                    pd.DataFrame(history_data),
+                    column_config={
+                        "공정": st.column_config.TextColumn("공정", width="small"),
+                        "상태": st.column_config.TextColumn("상태", width="small"),
+                        "날짜(기간)": st.column_config.TextColumn("날짜(기간)", width="medium"),
+                        "작업처": st.column_config.TextColumn("작업처/기계", width="medium"),
+                        "실적/내용": st.column_config.TextColumn("실적/내용", width="medium"),
+                        "비고": st.column_config.TextColumn("비고", width="large"),
+                    },
+                    hide_index=True,
+                    use_container_width=True
+                )
                 
                 st.divider()
                 

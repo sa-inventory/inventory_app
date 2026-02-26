@@ -68,30 +68,6 @@ st.markdown(base_css, unsafe_allow_html=True)
 with st.spinner("시스템 초기화 및 DB 연결 중..."):
     db = get_db()
 
-# [NEW] 브라우저 탭 제목 동적 변경 (사용자 설정 반영)
-try:
-    c_doc = db.collection("settings").document("company_info").get()
-    if c_doc.exists:
-        app_title = c_doc.to_dict().get("app_title", "타올 생산 현황 관리")
-    else:
-        app_title = "타올 생산 현황 관리"
-except:
-    app_title = "타올 생산 현황 관리"
-
-components.html(f"""
-    <script>
-        const title = "{app_title}";
-        window.parent.document.title = title;
-        
-        // Title Observer to prevent "- Streamlit" suffix
-        new MutationObserver(function(mutations) {{
-            if (window.parent.document.title !== title) {{
-                window.parent.document.title = title;
-            }}
-        }}).observe(window.parent.document.querySelector('title'), {{ childList: true }});
-    </script>
-""", height=0)
-
 # --- 로그인 기능 추가 ---
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
@@ -308,6 +284,30 @@ if not st.session_state["logged_in"]:
                     else:
                         st.error("등록되지 않은 아이디입니다.")
     st.stop()
+
+# [NEW] 브라우저 탭 제목 동적 변경 (사용자 설정 반영)
+try:
+    c_doc = db.collection("settings").document("company_info").get()
+    if c_doc.exists:
+        app_title = c_doc.to_dict().get("app_title", "타올 생산 현황 관리")
+    else:
+        app_title = "타올 생산 현황 관리"
+except:
+    app_title = "타올 생산 현황 관리"
+
+components.html(f"""
+    <script>
+        const title = "{app_title}";
+        window.parent.document.title = title;
+        
+        // Title Observer to prevent "- Streamlit" suffix
+        new MutationObserver(function(mutations) {{
+            if (window.parent.document.title !== title) {{
+                window.parent.document.title = title;
+            }}
+        }}).observe(window.parent.document.querySelector('title'), {{ childList: true }});
+    </script>
+""", height=0)
 
 # 3. [왼쪽 사이드바] 상품 등록 기능
 with st.sidebar:

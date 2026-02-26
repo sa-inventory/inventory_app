@@ -412,6 +412,28 @@ def load_shipping_orders(start_dt, end_dt):
 def render_shipping_status(db, sub_menu):
     st.header("출고 현황")
     st.info("출고된 내역을 조회하고 거래명세서를 발행합니다.")
+
+    # [NEW] 거래명세서 설정을 위한 세션 상태 초기화
+    if "stmt_settings" not in st.session_state:
+        # 회사 정보 먼저 로드
+        comp_doc = db.collection("settings").document("company_info").get()
+        comp_info = comp_doc.to_dict() if comp_doc.exists else {}
+        
+        st.session_state["stmt_settings"] = {
+            "opt_type": "공급받는자용", "opt_merge": True, "opt_inc_ship": True,
+            "opt_show_sign": True, "opt_hide_price": False, "opt_show_logo": True,
+            "opt_logo_height": 50, "opt_show_stamp": True, "opt_sw": 50, "opt_st": -10, "opt_sr": 0,
+            "opt_show_appr": False, "opt_ac": 3,
+            "opt_at_0": "담당", "opt_at_1": "검토", "opt_at_2": "승인", "opt_at_3": "이사", "opt_at_4": "사장",
+            "bo": 1.0, "bi": 0.5, "tb": 1.0,
+            "mt": 10, "mb": 10, "ml": 10, "mr": 10,
+            "title": "거 래 명 세 서", "ts": 24, "fs": 12, "pad": 5,
+            "rows": 18,
+            "w_date": 5, "w_item": 25, "w_spec": 15, "w_qty": 8,
+            "w_price": 10, "w_supply": 12, "w_tax": 10, "w_note": 15,
+            "opt_bank": True, "opt_vat_chk": False,
+            "opt_note": comp_info.get('note', '')
+        }
     
     shipping_partners = get_partners("배송업체")
     
@@ -629,13 +651,14 @@ def render_shipping_status(db, sub_menu):
             
             st.divider()
             
-            # [NEW] 기능 선택 (버튼식)
-            # [FIX] 작업 모드 변경 시 기존 인쇄 미리보기 상태 초기화
+            # [NEW] 인쇄 미리보기 초기화 함수 (전역)
             def clear_all_print_views():
                 keys_to_del = [k for k in st.session_state.keys() if k.startswith("print_view_")]
                 for k in keys_to_del:
                     del st.session_state[k]
 
+            # [NEW] 기능 선택 (버튼식)
+            # [FIX] 작업 모드 변경 시 기존 인쇄 미리보기 상태 초기화
             action_mode = st.radio("작업 선택", ["목록 인쇄/엑셀", "거래명세서 발행", "출고 취소"], horizontal=True, label_visibility="collapsed", on_change=clear_all_print_views, key="ship_action_mode")
             st.markdown("<div style='margin-bottom: 15px;'></div>", unsafe_allow_html=True)
             
@@ -725,6 +748,113 @@ def render_shipping_status(db, sub_menu):
 
             # 2. 거래명세서 발행 (기존 로직 이동)
             elif action_mode == "거래명세서 발행":
+                # [NEW] 설정 업데이트 콜백
+                def update_stmt_setting(key):
+                    st.session_state["stmt_settings"][key] = st.session_state[f"w_stmt_{key}"]
+                    clear_all_print_views()
+
+                # [NEW] 거래명세서 상세 설정 (루프 밖으로 이동하여 전역 설정으로 변경)
+                with st.expander("⚙️ 거래명세서 상세 설정", expanded=False):
+                    st.info("인쇄 모양과 내용을 설정합니다. (모든 거래처에 공통 적용)")
+                    s = st.session_state["stmt_settings"]
+                    
+                    t_c1, t_c2, t_c3 = st.columns(3)
+                    opt_type_options = ["공급받는자용", "공급자용", "모두 인쇄(2장)", "표시 없음"]
+                    t_c1.radio("인쇄 종류", opt_type_options, index=opt_type_options.index(s['opt_type']), key="w_stmt_opt_type", on_change=update_stmt_setting, args=('opt_type',))
+                    t_c2.checkbox("동일 품목 합산 발행", value=s['opt_merge'], help="제품명, 규격, 단가가 같은 항목을 한 줄로 합쳐서 표시합니다.", key="w_stmt_opt_merge", on_change=update_stmt_setting, args=('opt_merge',))
+                    t_c3.checkbox("운임비 포함하여 발행", value=s['opt_inc_ship'], key="w_stmt_opt_inc_ship", on_change=update_stmt_setting, args=('opt_inc_ship',))
+                    
+                    st.markdown("---")
+                    st.markdown("###### 표시 설정")
+                    r1_c1, r1_c2, r1_c3, r1_c4 = st.columns([1.5, 2.0, 1.5, 1.5])
+                    r1_c1.checkbox("인수자 서명란", value=s['opt_show_sign'], key="w_stmt_opt_show_sign", on_change=update_stmt_setting, args=('opt_show_sign',))
+                    r1_c2.checkbox("단가/금액 숨기기", value=s['opt_hide_price'], key="w_stmt_opt_hide_price", on_change=update_stmt_setting, args=('opt_hide_price',))
+                    r1_c3.checkbox("회사 로고 표시", value=s['opt_show_logo'], key="w_stmt_opt_show_logo", on_change=update_stmt_setting, args=('opt_show_logo',))
+                    
+                    if s['opt_show_logo']:
+                        r1_c4.number_input("로고 높이(px)", value=s['opt_logo_height'], min_value=20, max_value=150, step=5, key="w_stmt_opt_logo_height", on_change=update_stmt_setting, args=('opt_logo_height',))
+                    
+                    r2_c1, r2_c2, r2_c3, r2_c4 = st.columns([1.5, 1.5, 1.5, 1.5])
+                    r2_c1.checkbox("직인(도장) 표시", value=s['opt_show_stamp'], key="w_stmt_opt_show_stamp", on_change=update_stmt_setting, args=('opt_show_stamp',))
+                    
+                    if s['opt_show_stamp']:
+                        r2_c2.number_input("직인 너비(px)", value=s['opt_sw'], step=5, key="w_stmt_opt_sw", on_change=update_stmt_setting, args=('opt_sw',))
+                        r2_c3.number_input("상단 위치(px)", value=s['opt_st'], step=5, help="음수면 위로, 양수면 아래로 이동", key="w_stmt_opt_st", on_change=update_stmt_setting, args=('opt_st',))
+                        r2_c4.number_input("우측 위치(px)", value=s['opt_sr'], step=5, help="양수면 왼쪽으로 이동", key="w_stmt_opt_sr", on_change=update_stmt_setting, args=('opt_sr',))
+
+                    st.checkbox("결재란 표시", value=s['opt_show_appr'], key="w_stmt_opt_show_appr", on_change=update_stmt_setting, args=('opt_show_appr',))
+                    
+                    if s['opt_show_appr']:
+                        st.caption("결재란 설정")
+                        c_a1, c_a2 = st.columns([1, 3])
+                        c_a1.number_input("결재 인원", min_value=1, max_value=5, value=s['opt_ac'], key="w_stmt_opt_ac", on_change=update_stmt_setting, args=('opt_ac',))
+                        
+                        c_titles = st.columns(s['opt_ac'])
+                        for j in range(s['opt_ac']):
+                            c_titles[j].text_input(f"직책 {j+1}", value=s.get(f"opt_at_{j}", ""), key=f"w_stmt_opt_at_{j}", on_change=update_stmt_setting, args=(f'opt_at_{j}',))
+
+                    st.markdown("---")
+                    st.markdown("###### 테두리 및 스타일")
+                    b_c1, b_c2, b_c3 = st.columns(3)
+                    b_c1.number_input("외곽선 굵기(px)", value=s['bo'], step=0.5, key="w_stmt_bo", on_change=update_stmt_setting, args=('bo',))
+                    b_c2.number_input("내부선 굵기(px)", value=s['bi'], step=0.5, key="w_stmt_bi", on_change=update_stmt_setting, args=('bi',))
+                    b_c3.number_input("상단박스 선굵기(px)", value=s['tb'], step=0.5, key="w_stmt_tb", on_change=update_stmt_setting, args=('tb',))
+                    
+                    m_c1, m_c2, m_c3, m_c4 = st.columns(4)
+                    m_c1.number_input("상단 여백(mm)", value=s['mt'], key="w_stmt_mt", on_change=update_stmt_setting, args=('mt',))
+                    m_c2.number_input("하단 여백(mm)", value=s['mb'], key="w_stmt_mb", on_change=update_stmt_setting, args=('mb',))
+                    m_c3.number_input("좌측 여백(mm)", value=s['ml'], key="w_stmt_ml", on_change=update_stmt_setting, args=('ml',))
+                    m_c4.number_input("우측 여백(mm)", value=s['mr'], key="w_stmt_mr", on_change=update_stmt_setting, args=('mr',))
+                    
+                    s_c1, s_c2, s_c3, s_c4 = st.columns(4)
+                    s_c1.text_input("문서 제목", value=s['title'], key="w_stmt_title", on_change=update_stmt_setting, args=('title',))
+                    s_c2.number_input("제목 크기(px)", value=s['ts'], key="w_stmt_ts", on_change=update_stmt_setting, args=('ts',))
+                    s_c3.number_input("본문 글자 크기(px)", value=s['fs'], key="w_stmt_fs", on_change=update_stmt_setting, args=('fs',))
+                    s_c4.number_input("셀 여백(px)", value=s['pad'], key="w_stmt_pad", on_change=update_stmt_setting, args=('pad',))
+                    
+                    st.number_input("목록 최소 줄 수 (A4 맞춤용)", min_value=5, max_value=50, value=s['rows'], help="용지 여백에 따라 줄 수를 조절하여 A4 한 페이지에 맞추세요.", key="w_stmt_rows", on_change=update_stmt_setting, args=('rows',))
+                    
+                    st.markdown("---")
+                    st.markdown("###### 컬럼 너비 설정 (%)")
+                    wc1, wc2, wc3, wc4 = st.columns(4)
+                    wc1.number_input("월일", value=s['w_date'], step=1, key="w_stmt_w_date", on_change=update_stmt_setting, args=('w_date',))
+                    wc2.number_input("품목", value=s['w_item'], step=1, key="w_stmt_w_item", on_change=update_stmt_setting, args=('w_item',))
+                    wc3.number_input("규격", value=s['w_spec'], step=1, key="w_stmt_w_spec", on_change=update_stmt_setting, args=('w_spec',))
+                    wc4.number_input("수량", value=s['w_qty'], step=1, key="w_stmt_w_qty", on_change=update_stmt_setting, args=('w_qty',))
+                    
+                    wc5, wc6, wc7, wc8 = st.columns(4)
+                    wc5.number_input("단가", value=s['w_price'], step=1, key="w_stmt_w_price", on_change=update_stmt_setting, args=('w_price',))
+                    wc6.number_input("공급가액", value=s['w_supply'], step=1, key="w_stmt_w_supply", on_change=update_stmt_setting, args=('w_supply',))
+                    wc7.number_input("세액", value=s['w_tax'], step=1, key="w_stmt_w_tax", on_change=update_stmt_setting, args=('w_tax',))
+                    wc8.number_input("비고", value=s['w_note'], step=1, key="w_stmt_w_note", on_change=update_stmt_setting, args=('w_note',))
+                    
+                    # [NEW] 너비 합계 검증 및 안내
+                    current_total_width = s['w_date'] + s['w_item'] + s['w_spec'] + s['w_qty'] + s['w_note']
+                    if not s['opt_hide_price']:
+                        current_total_width += s['w_price'] + s['w_supply'] + s['w_tax']
+                    
+                    if current_total_width != 100:
+                        diff = 100 - current_total_width
+                        msg = "부족합니다" if diff > 0 else "초과했습니다"
+                        st.warning(f"⚠️ 현재 너비 합계: {current_total_width}% ({abs(diff)}% {msg})")
+                    else:
+                        st.success("✅ 너비 합계: 100%")
+
+                    st.markdown("---")
+                    st.markdown("###### 하단 문구")
+                    st.checkbox("입금계좌 표시", value=s['opt_bank'], key="w_stmt_opt_bank", on_change=update_stmt_setting, args=('opt_bank',))
+                    
+                    def on_vat_note_change():
+                        if st.session_state.get("w_stmt_opt_vat_chk"):
+                            current_note = st.session_state["stmt_settings"].get("opt_note", "")
+                            if "(부가세 포함)" not in current_note:
+                                st.session_state["stmt_settings"]["opt_note"] = (current_note + " (부가세 포함)").strip()
+                        st.session_state["stmt_settings"]["opt_vat_chk"] = st.session_state["w_stmt_opt_vat_chk"]
+                        clear_all_print_views()
+
+                    st.checkbox("부가세 포함 문구 추가", value=s['opt_vat_chk'], key="w_stmt_opt_vat_chk", on_change=on_vat_note_change)
+                    st.text_area("하단 참고사항", value=s['opt_note'], height=60, key="w_stmt_opt_note", on_change=update_stmt_setting, args=('opt_note',))
+
                 if selection.selection.rows:
                     selected_indices = selection.selection.rows
                     
@@ -759,80 +889,19 @@ def render_shipping_status(db, sub_menu):
                                 # [NEW] 인쇄 미리보기 상태 키
                                 ss_key_print = f"print_view_{cust_name}"
                                 
-                                # [NEW] 설정 변경 시 미리보기 초기화 콜백
+                                # [NEW] 탭별 미리보기 초기화 콜백
                                 def clear_print_view():
                                     if ss_key_print in st.session_state:
                                         del st.session_state[ss_key_print]
 
                                 partner_info = partners_map.get(cust_name, {})
                                 
-                                # [NEW] 거래명세서 상세 설정 (복원)
-                                with st.expander("⚙️ 거래명세서 상세 설정", expanded=False):
-                                    st.info("인쇄 모양과 내용을 설정합니다.")
-                                    
-                                    t_c1, t_c2, t_c3 = st.columns(3)
-                                    opt_type = t_c1.radio("인쇄 종류", ["공급받는자용", "공급자용", "모두 인쇄(2장)"], index=0, key=f"opt_type_{cust_name}", on_change=clear_print_view)
-                                    opt_merge = t_c2.checkbox("동일 품목 합산 발행", value=True, help="제품명, 규격, 단가가 같은 항목을 한 줄로 합쳐서 표시합니다.", key=f"opt_merge_{cust_name}", on_change=clear_print_view)
-                                    opt_inc_ship = t_c3.checkbox("운임비 포함하여 발행", value=True, key=f"opt_ship_{cust_name}", on_change=clear_print_view)
-                                    
-                                    st.markdown("---")
-                                    st.markdown("###### 표시 설정")
-                                    d_c1, d_c2, d_c3, d_c4 = st.columns(4)
-                                    opt_show_sign = d_c1.checkbox("인수자 서명란 표시", value=True, key=f"opt_sign_{cust_name}", on_change=clear_print_view)
-                                    opt_show_appr = d_c2.checkbox("결재란 표시", value=False, key=f"opt_appr_{cust_name}", on_change=clear_print_view)
-                                    opt_show_logo = d_c3.checkbox("회사 로고 표시", value=True, key=f"opt_logo_{cust_name}", on_change=clear_print_view)
-                                    opt_show_stamp = d_c4.checkbox("직인(도장) 표시", value=True, key=f"opt_stamp_{cust_name}", on_change=clear_print_view)
-                                    
-                                    opt_hide_price = st.checkbox("단가/금액 숨기기 (수량만 표시)", value=False, key=f"opt_hide_p_{cust_name}", on_change=clear_print_view)
-                                    
-                                    # [NEW] 결재란 상세 설정 (인원 및 직책)
-                                    appr_titles = ["담당", "검토", "승인"] # 기본값
-                                    if opt_show_appr:
-                                        st.caption("결재란 설정")
-                                        c_a1, c_a2 = st.columns([1, 3])
-                                        opt_appr_cnt = c_a1.number_input("결재 인원", min_value=1, max_value=5, value=3, key=f"opt_ac_{cust_name}", on_change=clear_print_view)
-                                        
-                                        appr_titles = []
-                                        c_titles = st.columns(opt_appr_cnt)
-                                        default_titles = ["담당", "검토", "승인", "이사", "사장"]
-                                        for j in range(opt_appr_cnt):
-                                            def_t = default_titles[j] if j < len(default_titles) else ""
-                                            t = c_titles[j].text_input(f"직책 {j+1}", value=def_t, key=f"opt_at_{cust_name}_{j}", on_change=clear_print_view)
-                                            appr_titles.append(t)
-                                    
-                                    st.markdown("---")
-                                    st.markdown("###### 여백 및 스타일")
-                                    m_c1, m_c2, m_c3, m_c4 = st.columns(4)
-                                    opt_mt = m_c1.number_input("상단 여백(mm)", value=10, key=f"opt_mt_{cust_name}", on_change=clear_print_view)
-                                    opt_mb = m_c2.number_input("하단 여백(mm)", value=10, key=f"opt_mb_{cust_name}", on_change=clear_print_view)
-                                    opt_ml = m_c3.number_input("좌측 여백(mm)", value=10, key=f"opt_ml_{cust_name}", on_change=clear_print_view)
-                                    opt_mr = m_c4.number_input("우측 여백(mm)", value=10, key=f"opt_mr_{cust_name}", on_change=clear_print_view)
-                                    
-                                    s_c1, s_c2, s_c3, s_c4 = st.columns(4)
-                                    opt_title = s_c1.text_input("문서 제목", value="거 래 명 세 서", key=f"opt_title_{cust_name}", on_change=clear_print_view)
-                                    opt_title_size = s_c2.number_input("제목 크기(px)", value=24, key=f"opt_ts_{cust_name}", on_change=clear_print_view)
-                                    opt_font_size = s_c3.number_input("본문 글자 크기(px)", value=12, key=f"opt_fs_{cust_name}", on_change=clear_print_view)
-                                    opt_padding = s_c4.number_input("셀 여백(px)", value=5, key=f"opt_pad_{cust_name}", on_change=clear_print_view)
-                                    
-                                    # [NEW] A4 맞춤 설정 (최소 행 수)
-                                    opt_min_rows = st.number_input("목록 최소 줄 수 (A4 맞춤용)", min_value=5, max_value=50, value=18, help="용지 여백에 따라 줄 수를 조절하여 A4 한 페이지에 맞추세요.", key=f"opt_rows_{cust_name}", on_change=clear_print_view)
-                                    
-                                    st.markdown("---")
-                                    st.markdown("###### 하단 문구")
-                                    opt_bank = st.checkbox("입금계좌 표시", value=True, key=f"opt_bank_{cust_name}", on_change=clear_print_view)
-                                    
-                                    # [NEW] 부가세 포함 문구 추가 옵션
-                                    def on_vat_note_change():
-                                        k_note = f"opt_note_{cust_name}"
-                                        k_chk = f"opt_vat_chk_{cust_name}"
-                                        if st.session_state.get(k_chk):
-                                            current_note = st.session_state.get(k_note, "")
-                                            if "(부가세 포함)" not in current_note:
-                                                st.session_state[k_note] = (current_note + " (부가세 포함)").strip()
-                                        clear_print_view()
-
-                                    opt_vat_msg = st.checkbox("부가세 포함 문구 추가", value=False, key=f"opt_vat_chk_{cust_name}", on_change=on_vat_note_change)
-                                    opt_note = st.text_area("하단 참고사항", value=comp_info.get('note', ''), height=60, key=f"opt_note_{cust_name}", on_change=clear_print_view)
+                                # [NEW] 설정값 로드 (전역 설정 사용)
+                                s = st.session_state["stmt_settings"]
+                                appr_titles = []
+                                if s['opt_show_appr']:
+                                    for j in range(s['opt_ac']):
+                                        appr_titles.append(s.get(f"opt_at_{j}", ""))
 
                                 # [수정] 키(Key)에 인덱스 대신 거래처명을 사용하여 데이터 꼬임 방지
                                 with st.form(f"stmt_form_{cust_name}"):
@@ -883,7 +952,7 @@ def render_shipping_status(db, sub_menu):
                                         })
                                         
                                         cost = int(row.get('shipping_cost', 0))
-                                        if cost > 0 and opt_inc_ship:
+                                        if cost > 0 and s['opt_inc_ship']:
                                             items.append({
                                                 "월일": row.get('shipping_date')[5:] if row.get('shipping_date') and len(str(row.get('shipping_date'))) >= 10 else "",
                                                 "품목": "운임비",
@@ -896,7 +965,7 @@ def render_shipping_status(db, sub_menu):
                                             })
 
                                     # [NEW] 동일 품목 합산 로직
-                                    if opt_merge:
+                                    if s['opt_merge']:
                                         df_items = pd.DataFrame(items)
                                         if not df_items.empty:
                                             # 그룹화 기준: 품목, 규격, 단가
@@ -925,50 +994,62 @@ def render_shipping_status(db, sub_menu):
                                         # [FIX] DataFrame을 딕셔너리 리스트로 변환 (템플릿 렌더링용)
                                         print_items_list = edited_items.to_dict('records')
                                         
-                                        stamp_b64 = comp_info.get('stamp_img') if opt_show_stamp else None
+                                        stamp_b64 = comp_info.get('stamp_img') if s['opt_show_stamp'] else None
                                         stamp_html = f"<img src='data:image/png;base64,{stamp_b64}' class='stamp'>" if stamp_b64 else ""
-                                        logo_b64 = comp_info.get('logo_img') if opt_show_logo else None
+                                        logo_b64 = comp_info.get('logo_img') if s['opt_show_logo'] else None
                                         logo_html = f"<img src='data:image/png;base64,{logo_b64}' class='logo'>" if logo_b64 else ""
                                         
                                         # 결재란 HTML
                                         appr_html = ""
-                                        if opt_show_appr:
+                                        if s['opt_show_appr']:
                                             # [수정] 동적 결재란 생성
                                             appr_html = '<table class="appr-table"><tr><td rowspan="2" class="appr-header">결<br>재</td>'
-                                            for t in appr_titles:
+                                            for t in appr_titles: # 위에서 로드한 titles 사용
                                                 appr_html += f'<td>{t}</td>'
                                             appr_html += '</tr><tr>'
-                                            for _ in appr_titles:
+                                            for _ in range(s['opt_ac']):
                                                 appr_html += '<td class="appr-box"></td>'
                                             appr_html += '</tr></table>'
                                         
                                         # 인수자 서명란 HTML
                                         sign_html = ""
-                                        if opt_show_sign:
+                                        if s['opt_show_sign']:
                                             sign_html = "<div style='margin-top:5px; text-align:right;'><strong>인수자 : ________________ (인)</strong></div>"
 
                                         # 은행 정보
-                                        bank_info = f"입금계좌: {comp_info.get('bank_name','')} {comp_info.get('bank_account','')}" if opt_bank else ""
+                                        bank_info = f"입금계좌: {comp_info.get('bank_name','')} {comp_info.get('bank_account','')}" if s['opt_bank'] else ""
 
                                         html_template = f"""
                                         <html>
                                         <head>
                                             <style>
+                                                * {{ box-sizing: border-box; }}
                                                 body {{ font-family: 'Malgun Gothic', sans-serif; padding: 20px; }}
                                                 .container {{ width: 100%; margin: 0 auto; }}
-                                                .header {{ text-align: center; font-size: {opt_title_size}px; font-weight: bold; text-decoration: underline; margin-bottom: 10px; position: relative; }}
-                                                .logo {{ position: absolute; left: 0; top: 0; max-height: 50px; }}
-                                                .top-section {{ display: flex; width: 100%; border: 2px solid #333; margin-bottom: 5px; }}
+                                                .header {{ 
+                                                    text-align: center; 
+                                                    font-size: {s['ts']}px; 
+                                                    font-weight: bold; 
+                                                    text-decoration: underline; 
+                                                    margin-bottom: 10px; 
+                                                    position: relative;
+                                                    min-height: {s['opt_logo_height'] + 10}px; /* 로고 높이만큼 공간 확보 */
+                                                    display: flex;
+                                                    align-items: center;
+                                                    justify-content: center;
+                                                }}
+                                                .logo {{ position: absolute; left: 0; top: 50%; transform: translateY(-50%); max-height: {s['opt_logo_height']}px; }}
+                                                .top-section {{ display: flex; width: 100%; border: {s['tb']}px solid #333; margin-bottom: 5px; }}
                                                 .supplier, .recipient {{ flex: 1; padding: 5px; }}
-                                                .supplier {{ border-left: 1px solid #333; }} /* [수정] 구분선 위치 변경 */
+                                                .supplier {{ border-left: {s['bi']}px solid #333; }}
                                                 .row {{ display: flex; margin-bottom: 2px; }}
-                                                .label {{ width: 60px; text-align: center; background: #eee; border: 1px solid #ccc; font-size: 12px; display: flex; align-items: center; justify-content: center; }}
+                                                .label {{ width: 90px; text-align: center; background: #eee; border: 1px solid #ccc; font-size: 12px; display: flex; align-items: center; justify-content: center; }}
                                                 .value {{ flex: 1; padding-left: 5px; border-bottom: 1px solid #ccc; font-size: 12px; }}
                                                 .stamp-box {{ position: relative; }}
-                                                .stamp {{ position: absolute; right: 0; top: -10px; width: 50px; opacity: 0.8; }}
-                                                .main-table {{ width: 100%; border-collapse: collapse; border: 2px solid #333; font-size: {opt_font_size}px; }}
-                                                .main-table th {{ background: #eee; border: 1px solid #333; padding: {opt_padding}px; text-align: center; }}
-                                                .main-table td {{ border: 1px solid #333; padding: {opt_padding}px; }}
+                                                .stamp {{ position: absolute; right: {s['opt_sr']}px; top: {s['opt_st']}px; width: {s['opt_sw']}px; opacity: 0.8; }}
+                                                .main-table {{ width: 100%; border-collapse: collapse; border: {s['bo']}px solid #333; font-size: {s['fs']}px; }}
+                                                .main-table th {{ background: #eee; border: {s['bi']}px solid #333; padding: {s['pad']}px; text-align: center; }}
+                                                .main-table td {{ border: {s['bi']}px solid #333; padding: {s['pad']}px; }}
                                                 .center {{ text-align: center; }}
                                                 .right {{ text-align: right; }}
                                                 .total-row {{ background: #f9f9f9; font-weight: bold; }}
@@ -977,7 +1058,7 @@ def render_shipping_status(db, sub_menu):
                                                 .appr-header {{ width: 20px; background: #eee; }}
                                                 .appr-box {{ width: 50px; height: 40px; }}
                                                 @media print {{ 
-                                                    @page {{ size: A4; margin: {opt_mt}mm {opt_mr}mm {opt_mb}mm {opt_ml}mm; }} 
+                                                    @page {{ size: A4; margin: {s['mt']}mm {s['mr']}mm {s['mb']}mm {s['ml']}mm; }} 
                                                     body {{ padding: 0; -webkit-print-color-adjust: exact; }} 
                                                     .page-break {{ page-break-before: always; }}
                                                 }}
@@ -988,15 +1069,21 @@ def render_shipping_status(db, sub_menu):
                                     
                                         # 페이지 생성 함수 (공급자용/공급받는자용)
                                         def create_page(title_suffix, is_supplier_copy):
+                                            # [NEW] 단가/금액 숨김 여부에 따른 헤더 처리
+                                            price_header = f'<th width="{s["w_price"]}%">단가</th><th width="{s["w_supply"]}%">공급가액</th><th width="{s["w_tax"]}%">세액</th>' if not s['opt_hide_price'] else ''
+                                            
                                             page_html = f"""
                                                 <div class="container">
                                                     <div class="header">
-                                                        {logo_html} {opt_title} <span style="font-size:14px;">({title_suffix})</span>
+                                                        {logo_html} {s['title']}
                                                         <span style="font-size: 12px; position: absolute; right: 0; bottom: 0; text-decoration: none; font-weight:normal;">(No. {stmt_no})</span>
                                                     </div>
                                                     {appr_html}
                                                     <div style="clear:both;"></div>
-                                                    <div style="text-align: right; margin-bottom: 5px; font-size: 12px;">작성일자: {stmt_date.strftime('%Y년 %m월 %d일')}</div>
+                                                    <div style="display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 12px;">
+                                                        <span style="font-weight: bold;">{f"({title_suffix})" if title_suffix else ""}</span>
+                                                        <span>작성일자: {stmt_date.strftime('%Y년 %m월 %d일')}</span>
+                                                    </div>
                                                     <div class="top-section">
                                                         <div class="recipient">
                                                             <div style="text-align: center; font-weight: bold; margin-bottom: 5px; border-bottom: 1px solid #333; padding-bottom: 2px;">[공급받는자]</div>
@@ -1017,20 +1104,20 @@ def render_shipping_status(db, sub_menu):
                                                     <table class="main-table">
                                                         <thead>
                                                             <tr>
-                                                            <th width="5%">월일</th><th width="25%">품목</th><th width="15%">규격</th><th width="8%">수량</th>
-                                                            <th width="10%">단가</th><th width="12%">공급가액</th><th width="10%">세액</th>
-                                                            <th width="15%">비고</th>
+                                                            <th width="{s["w_date"]}%">월일</th><th width="{s["w_item"]}%">품목</th><th width="{s["w_spec"]}%">규격</th><th width="{s["w_qty"]}%">수량</th>
+                                                            {price_header}
+                                                            <th width="{s["w_note"]}%">비고</th>
                                                             </tr>
                                                         </thead>
                                                         <tbody>
                                             """
                                             
                                             for item in print_items_list:
-                                                price_cols = f"""<td class="right">{item['단가']:,}</td><td class="right">{item['공급가액']:,}</td><td class="right">{item['세액']:,}</td>""" if not opt_hide_price else "<td></td><td></td><td></td>"
+                                                price_cols = f"""<td class="right">{item['단가']:,}</td><td class="right">{item['공급가액']:,}</td><td class="right">{item['세액']:,}</td>""" if not s['opt_hide_price'] else "<td></td><td></td><td></td>"
                                                 page_html += f"""<tr><td class="center">{item['월일']}</td><td>{item['품목']}</td><td class="center">{item['규격']}</td><td class="right">{item['수량']:,}</td>{price_cols}<td>{item['비고']}</td></tr>"""
                                             
                                             # [수정] 빈 줄 채우기 (사용자 설정 행 수 적용)
-                                            for _ in range(max(0, opt_min_rows - len(print_items_list))):
+                                            for _ in range(max(0, s['rows'] - len(print_items_list))):
                                                 empty_price = "<td></td><td></td><td></td>"
                                                 page_html += f"<tr><td>&nbsp;</td><td></td><td></td><td></td>{empty_price}<td></td></tr>"
                                             
@@ -1040,7 +1127,7 @@ def render_shipping_status(db, sub_menu):
                                             colspan_total = 5
                                             
                                             sum_row = ""
-                                            if not opt_hide_price:
+                                            if not s['opt_hide_price']:
                                                 sum_row = f"""<tr class="total-row"><td colspan="{colspan_sum}" class="center">합 계</td><td class="right">{total_qty:,}</td><td></td><td class="right">{total_supply:,}</td><td class="right">{total_tax:,}</td><td></td></tr>
                                                             <tr class="total-row"><td colspan="{colspan_sum}" class="center">총 합 계</td><td colspan="{colspan_total}" class="right" style="font-size: 14px;">₩ {grand_total:,}</td></tr>"""
                                             else:
@@ -1048,17 +1135,19 @@ def render_shipping_status(db, sub_menu):
 
                                             page_html += f"""</tbody><tfoot>{sum_row}</tfoot></table>
                                                     <div style="margin-top: 5px; font-size: 12px;">{bank_info}</div>
-                                                    <div style="margin-top: 5px; font-size: 12px;">{opt_note}</div>
+                                                    <div style="margin-top: 5px; font-size: 12px;">{s['opt_note']}</div>
                                                     {sign_html}
                                                 </div>
                                             """
                                             return page_html
 
                                         # 인쇄 옵션에 따라 페이지 생성
-                                        if opt_type == "공급받는자용":
+                                        if s['opt_type'] == "공급받는자용":
                                             html = html_template + create_page("공급받는자용", False)
-                                        elif opt_type == "공급자용":
+                                        elif s['opt_type'] == "공급자용":
                                             html = html_template + create_page("공급자용", True)
+                                        elif s['opt_type'] == "표시 없음":
+                                            html = html_template + create_page("", False)
                                         else: # 모두 인쇄
                                             html = html_template + create_page("공급받는자용", False)
                                             html += "<div class='page-break'></div>"

@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import datetime
 import io
+import re
 from firebase_admin import firestore
 from utils import get_common_codes, manage_code_with_code, manage_code, search_address_api, get_partners
 
@@ -217,15 +218,263 @@ def render_partners(db, sub_menu):
     
     # 기초 코드에서 거래처 구분 가져오기
     partner_types = get_common_codes("partner_types", ["발주처", "염색업체", "봉제업체", "배송업체", "기타"])
+    
+    # [NEW] 주소 검색 모달 (Dialog) - 거래처용
+    if "show_partner_addr_dialog" not in st.session_state:
+        st.session_state.show_partner_addr_dialog = False
+
+    @st.dialog("주소 검색")
+    def show_address_search_modal_partner():
+        if "p_addr_keyword" not in st.session_state: st.session_state.p_addr_keyword = ""
+        if "p_addr_page" not in st.session_state: st.session_state.p_addr_page = 1
+
+        with st.form("addr_search_form_partner"):
+            keyword_input = st.text_input("도로명 또는 지번 주소 입력", value=st.session_state.p_addr_keyword, placeholder="예: 세종대로 209")
+            if st.form_submit_button("검색"):
+                st.session_state.p_addr_keyword = keyword_input
+                st.session_state.p_addr_page = 1
+                st.rerun()
+
+        if st.session_state.p_addr_keyword:
+            results, common, error = search_address_api(st.session_state.p_addr_keyword, st.session_state.p_addr_page)
+            if error: st.error(error)
+            elif results:
+                st.session_state['p_addr_results'] = results
+                st.session_state['p_addr_common'] = common
+            else: st.warning("검색 결과가 없습니다.")
+        
+        if 'p_addr_results' in st.session_state:
+            for idx, item in enumerate(st.session_state['p_addr_results']):
+                road = item['roadAddr']
+                zip_no = item['zipNo']
+                full_addr = f"({zip_no}) {road}"
+                if st.button(f"{full_addr}", key=f"sel_p_{zip_no}_{idx}"):
+                    st.session_state["partner_addr_input"] = full_addr
+                    st.session_state.show_partner_addr_dialog = False
+                    for k in ['p_addr_keyword', 'p_addr_page', 'p_addr_results', 'p_addr_common']:
+                        if k in st.session_state: del st.session_state[k]
+                    st.rerun()
+            
+            # Pagination
+            common_info = st.session_state.get('p_addr_common', {})
+            if common_info:
+                total_count = int(common_info.get('totalCount', 0))
+                current_page = int(common_info.get('currentPage', 1))
+                count_per_page = int(common_info.get('countPerPage', 10))
+                total_pages = (total_count + count_per_page - 1) // count_per_page if total_count > 0 else 1
+                
+                if total_pages > 1:
+                    st.divider()
+                    p_cols = st.columns([1, 2, 1])
+                    if p_cols[0].button("◀ 이전", disabled=(current_page <= 1), key="p_prev"):
+                        st.session_state.p_addr_page -= 1
+                        st.rerun()
+                    p_cols[1].write(f"페이지 {current_page} / {total_pages}")
+                    if p_cols[2].button("다음 ▶", disabled=(current_page >= total_pages), key="p_next"):
+                        st.session_state.p_addr_page += 1
+                        st.rerun()
+
+        st.divider()
+        if st.button("닫기", key="close_addr_partner", use_container_width=True):
+            st.session_state.show_partner_addr_dialog = False
+            st.rerun()
 
     if sub_menu == "거래처 등록":
-        # ... (거래처 등록 로직, ui_management.py와 동일) ...
-        # 실제 구현 시에는 ui_management.py의 해당 부분을 그대로 복사해오면 됩니다.
-        st.info("거래처 등록 기능은 ui_management.py의 코드를 그대로 사용합니다.")
+        st.subheader("신규 거래처 등록")
+        
+        # [NEW] 등록 성공 메시지
+        if st.session_state.get("partner_reg_success"):
+            st.success("✅ 거래처가 등록되었습니다.")
+            st.session_state["partner_reg_success"] = False
+
+        c1, c2 = st.columns(2)
+        p_name = c1.text_input("거래처명 (상호)", help="필수 입력 항목입니다.")
+        p_type = c2.selectbox("거래처 구분", partner_types)
+        
+        c3, c4 = st.columns(2)
+        p_biz_num = c3.text_input("사업자등록번호 ('-'없이 숫자만 입력)", max_chars=10)
+        p_rep_name = c4.text_input("대표자명")
+        
+        c5, c6 = st.columns(2)
+        p_phone = c5.text_input("전화번호")
+        p_email = c6.text_input("이메일")
+        
+        # 주소 입력
+        c_addr1, c_addr2, c_addr3 = st.columns([3.5, 2, 0.5], vertical_alignment="bottom")
+        p_addr = c_addr1.text_input("주소", key="partner_addr_input")
+        p_addr_detail = c_addr2.text_input("상세주소", key="partner_addr_detail")
+        if c_addr3.button("🔍주소", key="btn_search_partner_addr", help="주소 검색"):
+            st.session_state.show_partner_addr_dialog = True
+            st.rerun()
+            
+        if st.session_state.show_partner_addr_dialog:
+            show_address_search_modal_partner()
+            
+        p_note = st.text_area("비고")
+        
+        if st.button("등록 저장", type="primary"):
+            if p_name:
+                # [NEW] 사업자등록번호 검증 및 포맷팅
+                final_biz_num = p_biz_num
+                if p_biz_num:
+                    nums = re.sub(r'\D', '', p_biz_num)
+                    if len(nums) == 10:
+                        final_biz_num = f"{nums[:3]}-{nums[3:5]}-{nums[5:]}"
+                    else:
+                        st.warning("사업자등록번호는 10자리 숫자여야 합니다.")
+                        return
+
+                doc_ref = db.collection("partners").document(p_name)
+                if doc_ref.get().exists:
+                    st.error(f"이미 존재하는 거래처명입니다: {p_name}")
+                else:
+                    doc_ref.set({
+                        "name": p_name,
+                        "type": p_type,
+                        "biz_num": final_biz_num,
+                        "rep_name": p_rep_name,
+                        "phone": p_phone,
+                        "email": p_email,
+                        "address": p_addr,
+                        "address_detail": p_addr_detail,
+                        "note": p_note,
+                        "created_at": datetime.datetime.now()
+                    })
+                    st.session_state["partner_reg_success"] = True
+                    # 입력 필드 초기화
+                    keys_to_clear = ["partner_addr_input", "partner_addr_detail"]
+                    for k in keys_to_clear:
+                        if k in st.session_state: del st.session_state[k]
+                    st.rerun()
+            else:
+                st.warning("거래처명을 입력해주세요.")
 
     elif sub_menu == "거래처 목록":
-        # ... (거래처 목록 로직, ui_management.py와 동일) ...
-        st.info("거래처 목록 기능은 ui_management.py의 코드를 그대로 사용합니다.")
+        st.subheader("거래처 목록")
+        
+        # 검색
+        with st.expander("검색", expanded=True):
+            c_s1, c_s2 = st.columns(2)
+            s_type = c_s1.selectbox("구분 필터", ["전체"] + partner_types)
+            s_keyword = c_s2.text_input("거래처명 검색")
+            
+        # 데이터 조회
+        partners_ref = db.collection("partners")
+        if s_type != "전체":
+            partners_ref = partners_ref.where("type", "==", s_type)
+            
+        docs = partners_ref.stream()
+        p_list = []
+        for doc in docs:
+            d = doc.to_dict()
+            if s_keyword and s_keyword not in d.get('name', ''):
+                continue
+            p_list.append(d)
+            
+        if p_list:
+            df = pd.DataFrame(p_list)
+            
+            # 컬럼 정리
+            col_map = {
+                "name": "거래처명", "type": "구분", "biz_num": "사업자번호", 
+                "rep_name": "대표자", "phone": "전화번호", "address": "주소"
+            }
+            display_cols = ["name", "type", "biz_num", "rep_name", "phone", "address"]
+            final_cols = [c for c in display_cols if c in df.columns]
+            
+            st.write("🔽 수정할 거래처를 선택하세요.")
+            selection = st.dataframe(
+                df[final_cols].rename(columns=col_map),
+                width="stretch",
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                key="partner_list_table"
+            )
+            
+            # 엑셀 다운로드
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                df[final_cols].rename(columns=col_map).to_excel(writer, index=False)
+            st.download_button("💾 엑셀 다운로드", buffer.getvalue(), "거래처목록.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            
+            if selection.selection.rows:
+                idx = selection.selection.rows[0]
+                sel_row = df.iloc[idx]
+                sel_name = sel_row['name']
+                
+                st.divider()
+                st.subheader(f"거래처 수정: {sel_name}")
+                
+                # 수정 폼 (주소 검색 포함)
+                c1, c2 = st.columns(2)
+                e_name = c1.text_input("거래처명", value=sel_name, disabled=True, help="거래처명은 수정할 수 없습니다.")
+                e_type = c2.selectbox("거래처 구분", partner_types, index=partner_types.index(sel_row['type']) if sel_row['type'] in partner_types else 0, key="e_p_type")
+                
+                c3, c4 = st.columns(2)
+                e_biz_num = c3.text_input("사업자등록번호 ('-'없이 숫자만 입력)", value=sel_row.get('biz_num', ''), max_chars=12, key="e_p_biz")
+                e_rep_name = c4.text_input("대표자명", value=sel_row.get('rep_name', ''), key="e_p_rep")
+                
+                c5, c6 = st.columns(2)
+                e_phone = c5.text_input("전화번호", value=sel_row.get('phone', ''), key="e_p_phone")
+                e_email = c6.text_input("이메일", value=sel_row.get('email', ''), key="e_p_email")
+                
+                # 주소 수정 (세션 상태 활용)
+                if "edit_p_addr" not in st.session_state or st.session_state.get("edit_p_target") != sel_name:
+                    st.session_state["edit_p_addr"] = sel_row.get('address', '')
+                    st.session_state["edit_p_target"] = sel_name
+                
+                c_addr1, c_addr2, c_addr3 = st.columns([3.5, 2, 0.5], vertical_alignment="bottom")
+                e_addr = c_addr1.text_input("주소", key="edit_p_addr")
+                e_addr_detail = c_addr2.text_input("상세주소", value=sel_row.get('address_detail', ''), key="e_p_addr_detail")
+                
+                # 주소 검색 팝업 (수정용)
+                if c_addr3.button("🔍", key="btn_search_edit_p_addr"):
+                    st.session_state.show_partner_addr_dialog = True
+                    st.rerun()
+                
+                if st.session_state.get("partner_addr_input"):
+                    # 현재 수정 중인 상태라면
+                    st.session_state["edit_p_addr"] = st.session_state["partner_addr_input"]
+                    st.session_state["partner_addr_input"] = "" # 소비함
+                    st.rerun()
+
+                if st.session_state.show_partner_addr_dialog:
+                    show_address_search_modal_partner()
+
+                e_note = st.text_area("비고", value=sel_row.get('note', ''), key="e_p_note")
+                
+                c_btn1, c_btn2 = st.columns(2)
+                if c_btn1.button("수정 저장", type="primary", key="btn_save_p_edit"):
+                    # [NEW] 사업자등록번호 검증 및 포맷팅 (수정)
+                    final_e_biz_num = e_biz_num
+                    if e_biz_num:
+                        nums = re.sub(r'\D', '', e_biz_num)
+                        if len(nums) == 10:
+                            final_e_biz_num = f"{nums[:3]}-{nums[3:5]}-{nums[5:]}"
+                        elif len(nums) > 0:
+                            st.warning("사업자등록번호는 10자리 숫자여야 합니다.")
+                            st.stop()
+
+                    db.collection("partners").document(sel_name).update({
+                        "type": e_type,
+                        "biz_num": final_e_biz_num,
+                        "rep_name": e_rep_name,
+                        "phone": e_phone,
+                        "email": e_email,
+                        "address": e_addr,
+                        "address_detail": e_addr_detail,
+                        "note": e_note
+                    })
+                    st.success("수정되었습니다.")
+                    st.rerun()
+                    
+                if c_btn2.button("🗑️ 삭제", key="btn_del_p"):
+                    db.collection("partners").document(sel_name).delete()
+                    st.success("삭제되었습니다.")
+                    st.rerun()
+        else:
+            st.info("등록된 거래처가 없습니다.")
 
     elif sub_menu == "거래처 구분 관리":
         st.subheader("거래처 구분 관리")

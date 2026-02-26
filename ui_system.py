@@ -6,9 +6,138 @@ from firebase_admin import firestore
 from utils import get_partners, validate_password, search_address_api
 
 def render_users(db, sub_menu):
-    # ... (사용자 관리 로직, ui_management.py와 동일) ...
-    st.info("사용자 관리 기능은 ui_management.py의 코드를 그대로 사용합니다.")
+    st.header("사용자 관리")
 
+    # [NEW] 전체 권한 목록 (사이드바 메뉴 기준)
+    all_permissions = [
+        "공지사항", "업무일정", "발주서접수", "발주현황", "제직현황", "제직조회",
+        "염색현황", "봉제현황", "출고작업", "출고현황", "재고현황",
+        "제품 관리", "거래처관리", "제직기관리", "제품코드설정",
+        # 파트너용 메뉴
+        "발주현황(거래처)", "재고현황(거래처)"
+    ]
+    
+    if sub_menu == "사용자 등록":
+        st.subheader("신규 사용자 등록")
+        
+        partners = get_partners() # For linking partner accounts
+
+        with st.form("add_user_form", clear_on_submit=True):
+            c1, c2 = st.columns(2)
+            user_id = c1.text_input("아이디", help="로그인 시 사용할 고유 아이디입니다.")
+            name = c2.text_input("이름")
+            
+            c3, c4 = st.columns(2)
+            password = c3.text_input("초기 비밀번호", type="password", value="0000", help="최초 로그인 시 변경해야 합니다.")
+            phone = c4.text_input("연락처")
+            
+            c5, c6 = st.columns(2)
+            role = c5.selectbox("권한", ["admin", "user", "partner"], help="admin: 모든 권한, user: 직원, partner: 거래처")
+            department = c6.text_input("부서/직책")
+            
+            linked_partner = ""
+            if role == "partner":
+                linked_partner = st.selectbox("연동 거래처", ["선택하세요"] + partners, help="이 계정과 연결할 거래처를 선택하세요.")
+
+            permissions = st.multiselect("메뉴 접근 권한", all_permissions, help="이 사용자에게 허용할 메뉴를 선택하세요. (admin은 모든 메뉴에 접근 가능)")
+
+            if st.form_submit_button("등록"):
+                if user_id and name and password:
+                    doc_ref = db.collection("users").document(user_id)
+                    if doc_ref.get().exists:
+                        st.error(f"이미 존재하는 아이디입니다: {user_id}")
+                    else:
+                        user_data = {
+                            "username": user_id,
+                            "name": name,
+                            "password": password,
+                            "phone": phone,
+                            "role": role,
+                            "department": department,
+                            "permissions": permissions,
+                            "linked_partner": linked_partner if role == "partner" and linked_partner != "선택하세요" else "",
+                            "created_at": datetime.datetime.now()
+                        }
+                        doc_ref.set(user_data)
+                        st.success(f"사용자 '{name}'({user_id})가 등록되었습니다.")
+                else:
+                    st.warning("아이디, 이름, 비밀번호는 필수 항목입니다.")
+
+    elif sub_menu == "사용자 목록":
+        st.subheader("사용자 목록")
+        users_ref = db.collection("users").stream()
+        user_list = []
+        for doc in users_ref:
+            item = doc.to_dict()
+            item['id'] = doc.id
+            user_list.append(item)
+        
+        if not user_list:
+            st.warning("등록된 사용자가 없습니다.")
+        else:
+            df = pd.DataFrame(user_list)
+            col_map = {"username": "아이디", "name": "이름", "role": "권한", "department": "부서/직책", "phone": "연락처", "linked_partner": "연동거래처"}
+            
+            display_cols = ["username", "name", "role", "department", "phone", "linked_partner"]
+            final_cols = [c for c in display_cols if c in df.columns]
+            
+            df_display = df[final_cols].rename(columns=col_map)
+            
+            st.write("🔽 수정할 사용자를 선택하세요.")
+            selection = st.dataframe(df_display, width="stretch", hide_index=True, on_select="rerun", selection_mode="single-row", key="user_list")
+            
+            if selection.selection.rows:
+                idx = selection.selection.rows[0]
+                sel_item = user_list[idx]
+                sel_id = sel_item['id']
+                
+                st.divider()
+                st.subheader(f"사용자 정보 수정: {sel_item['name']}")
+                
+                with st.form(f"edit_user_form_{sel_id}"):
+                    c1, c2 = st.columns(2)
+                    e_name = c1.text_input("이름", value=sel_item.get('name', ''))
+                    e_phone = c2.text_input("연락처", value=sel_item.get('phone', ''))
+                    
+                    c3, c4 = st.columns(2)
+                    role_opts = ["admin", "user", "partner"]
+                    e_role = c3.selectbox("권한", role_opts, index=role_opts.index(sel_item['role']) if sel_item.get('role') in role_opts else 0)
+                    e_dept = c4.text_input("부서/직책", value=sel_item.get('department', ''))
+                    
+                    e_linked_partner = ""
+                    if e_role == "partner":
+                        partners = get_partners()
+                        e_linked_partner = st.selectbox("연동 거래처", ["선택하세요"] + partners, index=partners.index(sel_item['linked_partner']) + 1 if sel_item.get('linked_partner') in partners else 0)
+
+                    e_permissions = st.multiselect("메뉴 접근 권한", all_permissions, default=sel_item.get('permissions', []))
+                    
+                    if st.form_submit_button("수정 저장"):
+                        updates = {
+                            "name": e_name,
+                            "phone": e_phone,
+                            "role": e_role,
+                            "department": e_dept,
+                            "permissions": e_permissions,
+                            "linked_partner": e_linked_partner if e_role == "partner" and e_linked_partner != "선택하세요" else ""
+                        }
+                        db.collection("users").document(sel_id).update(updates)
+                        st.success("수정되었습니다.")
+                        st.rerun()
+                
+                st.divider()
+                st.markdown("##### 관리 기능")
+                c_adm1, c_adm2 = st.columns(2)
+                if c_adm1.button("🔑 비밀번호 초기화 (0000)", key=f"reset_pw_{sel_id}"):
+                    db.collection("users").document(sel_id).update({"password": "0000", "password_changed_at": firestore.DELETE_FIELD})
+                    st.success(f"'{sel_item['name']}'님의 비밀번호가 '0000'으로 초기화되었습니다.")
+                
+                if c_adm2.button("🗑️ 이 사용자 삭제", type="primary", key=f"del_user_{sel_id}"):
+                    if sel_id == st.session_state.get("user_id"):
+                        st.error("현재 로그인된 계정은 삭제할 수 없습니다.")
+                    else:
+                        db.collection("users").document(sel_id).delete()
+                        st.success(f"'{sel_item['name']}' 사용자가 삭제되었습니다.")
+                        st.rerun()
 def render_my_profile(db):
     st.header("로그인 정보 설정")
     

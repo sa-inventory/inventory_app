@@ -55,11 +55,22 @@ base_css = """
 if st.session_state.get("role") != "admin":
     base_css += """
         /* [NEW] 보안 및 깔끔한 화면을 위해 Streamlit 기본 메뉴 숨기기 */
-        #MainMenu {visibility: hidden; display: none !important;} /* 우측 상단 햄버거 메뉴 숨김 */
-        footer {visibility: hidden; display: none !important;}    /* 하단 'Made with Streamlit' 숨김 */
-        /* header {visibility: hidden;} */ /* [수정] 모바일 사이드바 토글 버튼 유지를 위해 헤더 전체 숨김 제거 */
-        [data-testid="stDecoration"] {visibility: hidden; display: none !important;} /* 상단 데코레이션(고양이 등) 숨김 */
-        .stDeployButton {display: none !important;} /* 배포 버튼 숨김 */
+        
+        /* 1. 헤더 전체를 숨김 (점 3개 메뉴, 배포 버튼 등 포함) - visibility 사용으로 자식 요소 노출 가능 */
+        header[data-testid="stHeader"] {
+            visibility: hidden;
+        }
+        
+        /* 2. 사이드바 토글 버튼(<<)만 다시 보이게 설정 */
+        [data-testid="stSidebarCollapsedControl"] {
+            visibility: visible;
+            display: block !important;
+        }
+        
+        /* 3. 기타 요소 완전 숨김 (공간 차지 안함) */
+        [data-testid="stDecoration"] {visibility: hidden; display: none !important;}
+        footer {visibility: hidden; display: none !important;}
+        .stDeployButton {display: none !important;}
     """
 
 base_css += "</style>"

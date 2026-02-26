@@ -623,15 +623,6 @@ def render_partner_order_status(db):
                     st.session_state["partner_order_key"] += 1
                     st.rerun()
 
-            # 제직기 명칭 매핑을 위한 데이터 가져오기 (필요 시)
-            machine_map = {}
-            try:
-                m_docs = db.collection("machines").stream()
-                for m in m_docs:
-                    md = m.to_dict()
-                    machine_map[md.get('machine_no')] = md.get('name')
-            except: pass
-
             # 포맷팅 함수들
             def fmt_dt(val):
                 if pd.isna(val) or val == "" or val is None: return "-"
@@ -645,15 +636,7 @@ def render_partner_order_status(db):
                 if isinstance(val, datetime.datetime): return val.strftime("%Y-%m-%d")
                 return str(val)[:10]
 
-            def fmt_num(val, unit=""):
-                try: return f"{int(val):,}{unit}"
-                except: return "-"
-            
-            def fmt_float(val, unit=""):
-                try: return f"{float(val):,.1f}{unit}"
-                except: return "-"
-
-            # [NEW] 공정별 개별 테이블 표시
+            # [NEW] 공정별 개별 테이블 표시 (민감 정보 제외)
             
             # --- 1. 제직 공정 ---
             st.markdown("##### 제직 공정")
@@ -711,20 +694,6 @@ def render_partner_order_status(db):
                 st.dataframe(pd.DataFrame(sewing_data), hide_index=True, use_container_width=True)
             else:
                 st.info("봉제 공정 대기 중입니다.")
-
-            # --- 4. 출고 공정 ---
-            st.markdown("##### 출고/배송")
-            shipping_data = []
-            if sel_row.get('shipping_date'):
-                shipping_data.append({
-                    "상태": "완료",
-                    "출고일시": fmt_dt(sel_row.get('shipping_date')),
-                })
-
-            if shipping_data:
-                st.dataframe(pd.DataFrame(shipping_data), hide_index=True, use_container_width=True)
-            else:
-                st.info("출고 대기 중입니다.")
 
         st.divider()
         

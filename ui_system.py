@@ -405,7 +405,7 @@ def render_company_settings(db, sub_menu):
                 st.info("등록된 직인이 없습니다.")
                 
         with c_stamp2:
-            new_stamp_file = st.file_uploader("이미지 업로드", type=['png', 'jpg', 'jpeg'], key="stamp_uploader")
+            new_stamp_file = st.file_uploader("이미지 업로드 (200KB 이하)", type=['png', 'jpg', 'jpeg'], key="stamp_uploader")
 
         # [NEW] 회사 로고 이미지 업로드
         st.markdown("---")
@@ -424,7 +424,7 @@ def render_company_settings(db, sub_menu):
                 st.info("등록된 로고가 없습니다.")
                 
         with c_logo2:
-            new_logo_file = st.file_uploader("로고 이미지 업로드", type=['png', 'jpg', 'jpeg'], key="logo_uploader")
+            new_logo_file = st.file_uploader("로고 이미지 업로드 (200KB 이하)", type=['png', 'jpg', 'jpeg'], key="logo_uploader")
 
         if st.button("저장", type="primary"):
             new_data = {
@@ -438,6 +438,9 @@ def render_company_settings(db, sub_menu):
             
             # 직인 처리
             if new_stamp_file:
+                if new_stamp_file.size > 200 * 1024:
+                    st.error("직인 이미지 용량이 너무 큽니다. (200KB 이하 권장)")
+                    st.stop()
                 stamp_bytes = new_stamp_file.read()
                 new_data["stamp_img"] = base64.b64encode(stamp_bytes).decode('utf-8')
             elif current_stamp and not delete_stamp:
@@ -447,6 +450,9 @@ def render_company_settings(db, sub_menu):
 
             # 로고 처리
             if new_logo_file:
+                if new_logo_file.size > 200 * 1024:
+                    st.error("로고 이미지 용량이 너무 큽니다. (200KB 이하 권장)")
+                    st.stop()
                 logo_bytes = new_logo_file.read()
                 new_data["logo_img"] = base64.b64encode(logo_bytes).decode('utf-8')
             elif current_logo and not delete_logo:

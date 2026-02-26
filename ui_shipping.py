@@ -413,6 +413,29 @@ def render_shipping_status(db, sub_menu):
     st.header("출고 현황")
     st.info("출고된 내역을 조회하고 거래명세서를 발행합니다.")
 
+    def num_to_korean(num):
+        units = ['', '십', '백', '천']
+        large_units = ['', '만', '억', '조', '경']
+        digits = ['', '일', '이', '삼', '사', '오', '육', '칠', '팔', '구']
+        
+        if not isinstance(num, int) or num < 0: return ""
+        if num == 0: return '영'
+            
+        result_parts = []
+        num_str = str(num)
+        
+        while num_str:
+            part, num_str = num_str[-4:], num_str[:-4]
+            if int(part) > 0:
+                part_korean = ""
+                for i, digit_char in enumerate(reversed(part)):
+                    digit = int(digit_char)
+                    if digit > 0:
+                        num_word = digits[digit] if not (digit == 1 and i > 0) else ""
+                        part_korean = num_word + units[i] + part_korean
+                result_parts.append(part_korean)
+        return ''.join(f"{part}{unit}" for i, (part, unit) in enumerate(zip(reversed(result_parts), reversed(large_units[:len(result_parts)]))) if part)
+
     # [NEW] 거래명세서 설정을 위한 세션 상태 초기화
     if "stmt_settings" not in st.session_state:
         # 회사 정보 먼저 로드
@@ -1043,7 +1066,7 @@ def render_shipping_status(db, sub_menu):
                                                 .supplier, .recipient {{ flex: 1; padding: 5px; }}
                                                 .supplier {{ border-left: {s['bi']}px solid #333; }}
                                                 .row {{ display: flex; margin-bottom: 2px; }}
-                                                .label {{ width: 90px; text-align: center; background: #eee; border: 1px solid #ccc; font-size: 12px; display: flex; align-items: center; justify-content: center; }}
+                                                .label {{ width: 90px; text-align: center; background: transparent; border: {s['bi']}px solid #ccc; font-size: 12px; display: flex; align-items: center; justify-content: center; }}
                                                 .value {{ flex: 1; padding-left: 5px; border-bottom: 1px solid #ccc; font-size: 12px; }}
                                                 .stamp-box {{ position: relative; }}
                                                 .stamp {{ position: absolute; right: {s['opt_sr']}px; top: {s['opt_st']}px; width: {s['opt_sw']}px; opacity: 0.8; }}
@@ -1053,6 +1076,7 @@ def render_shipping_status(db, sub_menu):
                                                 .center {{ text-align: center; }}
                                                 .right {{ text-align: right; }}
                                                 .total-row {{ background: #f9f9f9; font-weight: bold; }}
+                                                .total-amount-section {{ border: {s['bo']}px solid #333; border-bottom: none; padding: 8px; text-align: center; font-weight: bold; font-size: 1.1em; background-color: #f9f9f9; }}
                                                 .appr-table {{ float: right; border-collapse: collapse; font-size: 10px; margin-bottom: 5px; }}
                                                 .appr-table td {{ border: 1px solid #333; text-align: center; padding: 2px; }}
                                                 .appr-header {{ width: 20px; background: #eee; }}
@@ -1072,6 +1096,14 @@ def render_shipping_status(db, sub_menu):
                                             # [NEW] 단가/금액 숨김 여부에 따른 헤더 처리
                                             price_header = f'<th width="{s["w_price"]}%">단가</th><th width="{s["w_supply"]}%">공급가액</th><th width="{s["w_tax"]}%">세액</th>' if not s['opt_hide_price'] else ''
                                             
+                                            # [NEW] 합계 금액 한글 변환
+                                            korean_grand_total = num_to_korean(grand_total)
+                                            total_amount_html = f"""
+                                            <div class="total-amount-section">
+                                                합계금액 (공급가액+세액): 일금 {korean_grand_total} 원정 (₩ {grand_total:,})
+                                            </div>
+                                            """
+                                            
                                             page_html = f"""
                                                 <div class="container">
                                                     <div class="header">
@@ -1086,14 +1118,14 @@ def render_shipping_status(db, sub_menu):
                                                     </div>
                                                     <div class="top-section">
                                                         <div class="recipient">
-                                                            <div style="text-align: center; font-weight: bold; margin-bottom: 5px; border-bottom: 1px solid #333; padding-bottom: 2px;">[공급받는자]</div>
+                                                            <div style="text-align: center; font-weight: normal; margin-bottom: 5px; border-bottom: {s['bi']}px solid #333; padding-bottom: 2px;">[공급받는자]</div>
                                                             <div class="row"><div class="label">상호</div><div class="value">{r_name}</div></div>
                                                             <div class="row"><div class="label">사업자번호</div><div class="value">{r_biz}</div></div>
                                                             <div class="row"><div class="label">대표자</div><div class="value">{r_rep}</div></div>
                                                             <div class="row"><div class="label">주소</div><div class="value">{r_addr}</div></div>
                                                         </div>
                                                         <div class="supplier">
-                                                            <div style="text-align: center; font-weight: bold; margin-bottom: 5px; border-bottom: 1px solid #333; padding-bottom: 2px;">[공급자]</div>
+                                                            <div style="text-align: center; font-weight: normal; margin-bottom: 5px; border-bottom: {s['bi']}px solid #333; padding-bottom: 2px;">[공급자]</div>
                                                             <div class="row"><div class="label">상호</div><div class="value stamp-box">{s_name} {stamp_html}</div></div>
                                                             <div class="row"><div class="label">사업자번호</div><div class="value">{s_biz}</div></div>
                                                             <div class="row"><div class="label">대표자</div><div class="value">{s_rep}</div></div>
@@ -1101,6 +1133,7 @@ def render_shipping_status(db, sub_menu):
                                                             <div class="row"><div class="label">업태</div><div class="value">{s_cond}</div> <div class="label">종목</div><div class="value">{s_item}</div></div>
                                                         </div>
                                                     </div>
+                                                    {total_amount_html}
                                                     <table class="main-table">
                                                         <thead>
                                                             <tr>

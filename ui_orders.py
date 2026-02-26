@@ -64,18 +64,77 @@ def render_order_entry(db, sub_menu):
         with st.expander("검색", expanded=True):
             f1, f2, f3, f4 = st.columns(4)
             
-            # 필터 옵션 생성 (전체 + 고유값)
-            def get_options(col):
-                if col in df_products.columns:
-                    # None 값 처리 및 문자열 변환
-                    values = [str(x) for x in df_products[col].unique() if pd.notna(x)]
-                    return ["전체"] + sorted(values)
-                return ["전체"]
+            # [수정] 기초 코드 가져오기 및 정렬 (코드 순) - 재고임의등록과 동일한 방식
+            pt_codes = get_common_codes("product_types", [])
+            yt_codes = get_common_codes("yarn_types_coded", [])
+            wt_codes = get_common_codes("weight_codes", [])
+            sz_codes = get_common_codes("size_codes", [])
             
-            s_type = f1.selectbox("제품종류", get_options("product_type"), key="filter_pt")
-            s_yarn = f2.selectbox("사종", get_options("yarn_type"), key="filter_yt")
-            s_weight = f3.selectbox("중량(g)", get_options("weight"), key="filter_wt")
-            s_size = f4.selectbox("사이즈(폭*길이)", get_options("size"), key="filter_sz")
+            # 코드 기준 정렬
+            pt_codes.sort(key=lambda x: x.get('code', ''))
+            yt_codes.sort(key=lambda x: x.get('code', ''))
+            wt_codes.sort(key=lambda x: x.get('code', ''))
+            sz_codes.sort(key=lambda x: x.get('code', ''))
+            
+            # 필터 옵션 생성 함수 (기초 코드 기반 + 실제 데이터 존재 여부 확인)
+            def get_sorted_options(col_name, code_list, is_weight=False):
+                if col_name not in df_products.columns:
+                    return ["전체"]
+                
+                # 실제 데이터에 존재하는 값들
+                existing_values = set(df_products[col_name].dropna().unique())
+                
+                options = ["전체"]
+                
+                # 1. 기초 코드에 정의된 순서대로 추가
+                for item in code_list:
+                    name = item.get('name', '')
+                    code = item.get('code', '')
+                    
+                    # 중량의 경우 데이터는 숫자(int)일 수 있고 코드는 문자열일 수 있음
+                    if is_weight:
+                        try:
+                            # 데이터에 해당 중량(숫자)이 있는지 확인
+                            if int(code) in existing_values:
+                                options.append(name)
+                                continue
+                        except:
+                            pass
+                    
+                    # 일반적인 경우 (이름으로 매칭)
+                    if name in existing_values:
+                        options.append(name)
+                
+                # 2. 기초 코드에는 없지만 데이터에는 있는 값들 추가 (기타 값)
+                if is_weight:
+                    # 기초 코드에 매핑되지 않은 값 찾기
+                    mapped_values = set()
+                    for item in code_list:
+                        try: mapped_values.add(int(item.get('code')))
+                        except: pass
+                    
+                    for val in existing_values:
+                        if val not in mapped_values:
+                            options.append(str(val))
+                else:
+                    # 일반 컬럼
+                    mapped_names = set([item.get('name') for item in code_list])
+                    for val in existing_values:
+                        if val not in mapped_names:
+                            options.append(str(val))
+                            
+                return options
+
+            # 각 필드별 옵션 생성
+            opt_pt = get_sorted_options("product_type", pt_codes)
+            opt_yt = get_sorted_options("yarn_type", yt_codes)
+            opt_wt = get_sorted_options("weight", wt_codes, is_weight=True)
+            opt_sz = get_sorted_options("size", sz_codes)
+            
+            s_type = f1.selectbox("제품종류", opt_pt, key="filter_pt")
+            s_yarn = f2.selectbox("사종", opt_yt, key="filter_yt")
+            s_weight = f3.selectbox("중량", opt_wt, key="filter_wt")
+            s_size = f4.selectbox("사이즈", opt_sz, key="filter_sz")
 
         # 필터링 적용
         df_filtered = df_products.copy()
@@ -84,7 +143,25 @@ def render_order_entry(db, sub_menu):
         if s_yarn != "전체":
             df_filtered = df_filtered[df_filtered['yarn_type'].astype(str) == s_yarn]
         if s_weight != "전체":
-            df_filtered = df_filtered[df_filtered['weight'].astype(str) == s_weight]
+            # 중량 필터링: 선택된 명칭(s_weight)에 해당하는 코드값 찾기
+            target_code = None
+            # 1. 기초 코드에서 찾기
+            for item in wt_codes:
+                if item.get('name') == s_weight:
+                    target_code = item.get('code')
+                    break
+            
+            if target_code:
+                try:
+                    # 숫자로 변환하여 비교
+                    target_val = int(target_code)
+                    df_filtered = df_filtered[df_filtered['weight'] == target_val]
+                except:
+                    df_filtered = df_filtered[df_filtered['weight'].astype(str) == str(target_code)]
+            else:
+                # 기초 코드에 없는 값인 경우 문자열로 비교
+                df_filtered = df_filtered[df_filtered['weight'].astype(str) == s_weight]
+
         if s_size != "전체":
             df_filtered = df_filtered[df_filtered['size'].astype(str) == s_size]
 

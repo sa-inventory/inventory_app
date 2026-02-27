@@ -388,50 +388,50 @@ def render_company_settings(db, sub_menu):
         
         note = st.text_area("비고 / 하단 문구", value=data.get("note", ""), help="명세서 하단에 들어갈 안내 문구 등을 입력하세요.")
         
-        # [NEW] 직인 이미지 업로드
-        st.markdown("---")
-        st.markdown("##### 🔴 직인(도장) 이미지")
-        st.caption("거래명세서의 '공급자 성명' 란에 표시될 도장 이미지입니다. (배경이 투명한 PNG 파일 권장)")
-        
-        c_stamp1, c_stamp2 = st.columns([1, 2])
-        current_stamp = data.get("stamp_img")
-        delete_stamp = False
-        
-        with c_stamp1:
-            if current_stamp:
-                st.image(base64.b64decode(current_stamp), width=80, caption="현재 등록된 직인")
-                delete_stamp = st.checkbox("직인 삭제", key="del_stamp_chk")
-            else:
-                st.info("등록된 직인이 없습니다.")
+        # [수정] 직인 및 로고 이미지 설정을 Expander로 감싸고 좌우 배치
+        with st.expander("직인(도장) 및 회사 로고 설정", expanded=False):
+            col_img1, col_img2 = st.columns(2)
+            
+            # 직인 설정
+            with col_img1:
+                st.markdown("##### 🔴 직인(도장)")
+                st.caption("공급자 성명 란에 표시 (투명 PNG 권장)")
+                current_stamp = data.get("stamp_img")
+                delete_stamp = False
                 
-        with c_stamp2:
-            new_stamp_file = st.file_uploader("이미지 업로드 (200KB 이하)", type=['png', 'jpg', 'jpeg'], key="stamp_uploader")
+                c_s1, c_s2 = st.columns([1, 2])
+                with c_s1:
+                    if current_stamp:
+                        st.image(base64.b64decode(current_stamp), width=80)
+                        delete_stamp = st.checkbox("직인 삭제", key="del_stamp_chk")
+                    else:
+                        st.info("미등록")
+                with c_s2:
+                    new_stamp_file = st.file_uploader("직인 업로드", type=['png', 'jpg', 'jpeg'], key="stamp_uploader")
 
-        # [NEW] 회사 로고 이미지 업로드
-        st.markdown("---")
-        st.markdown("##### 🏢 회사 로고 이미지")
-        st.caption("거래명세서 좌측 상단에 표시될 로고 이미지입니다.")
-        
-        c_logo1, c_logo2 = st.columns([1, 2])
-        current_logo = data.get("logo_img")
-        delete_logo = False
-        
-        with c_logo1:
-            if current_logo:
-                st.image(base64.b64decode(current_logo), width=150, caption="현재 등록된 로고")
-                delete_logo = st.checkbox("로고 삭제", key="del_logo_chk")
-            else:
-                st.info("등록된 로고가 없습니다.")
+            # 로고 설정
+            with col_img2:
+                st.markdown("##### 🏢 회사 로고")
+                st.caption("명세서 좌측 상단에 표시")
+                current_logo = data.get("logo_img")
+                delete_logo = False
                 
-        with c_logo2:
-            new_logo_file = st.file_uploader("로고 이미지 업로드 (200KB 이하)", type=['png', 'jpg', 'jpeg'], key="logo_uploader")
+                c_l1, c_l2 = st.columns([1, 2])
+                with c_l1:
+                    if current_logo:
+                        st.image(base64.b64decode(current_logo), width=100)
+                        delete_logo = st.checkbox("로고 삭제", key="del_logo_chk")
+                    else:
+                        st.info("미등록")
+                with c_l2:
+                    new_logo_file = st.file_uploader("로고 업로드", type=['png', 'jpg', 'jpeg'], key="logo_uploader")
 
         # [NEW] 디자인 설정 섹션 추가
         st.markdown("---")
         st.markdown("##### 🎨 디자인 설정 (로고/제목)")
         st.caption("로고 크기와 제목의 줄바꿈(&lt;br&gt; 태그 사용), 글자 크기를 조정하여 화면 배치를 변경할 수 있습니다.")
         
-        with st.expander("좌측 사이드바 설정", expanded=True):
+        with st.expander("좌측 사이드바 설정", expanded=False):
             c_sb1, c_sb2 = st.columns(2)
             sb_logo_width = c_sb1.number_input("로고 너비 (px)", value=data.get("sb_logo_width", 45), min_value=10, max_value=300)
             sb_title_size = c_sb2.number_input("제목 글자 크기 (rem)", value=data.get("sb_title_size", 2.2), min_value=0.5, max_value=5.0, step=0.1)
@@ -439,7 +439,7 @@ def render_company_settings(db, sub_menu):
             sb_title_html = st.text_area("사이드바 제목 (HTML 허용)", value=data.get("sb_title_html", data.get("name", "세안타올")), help="줄바꿈은 <br> 태그를 사용하세요. 예: 세안타올<br>생산관리")
             sb_subtitle = st.text_input("사이드바 부제목", value=data.get("sb_subtitle", "생산관리 시스템"))
 
-        with st.expander("로그인 화면 설정", expanded=True):
+        with st.expander("로그인 화면 설정", expanded=False):
             c_lg1, c_lg2 = st.columns(2)
             lg_logo_width = c_lg1.number_input("로그인 로고 너비 (px)", value=data.get("lg_logo_width", 120), min_value=20, max_value=500)
             lg_title_size = c_lg2.number_input("로그인 제목 글자 크기 (rem)", value=data.get("lg_title_size", 2.5), min_value=0.5, max_value=5.0, step=0.1)

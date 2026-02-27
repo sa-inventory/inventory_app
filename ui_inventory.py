@@ -263,54 +263,52 @@ def render_inventory_logic(db, allow_shipping=False):
         if is_partner:
             view_mode = "제품명 보기(제품코드별 상세품목)"
         else:
-            # [수정] 버튼 토글 방식으로 변경 (사용자 요청 반영)
-            vm_key = f"view_mode_state_{allow_shipping}"
-            if vm_key not in st.session_state:
-                st.session_state[vm_key] = "제품코드 보기"
+            # [수정] 탭 방식으로 변경 (사용자 요청 반영)
+            # 탭 스타일링 (글자 크기 확대 및 굵게)
+            st.markdown("""
+            <style>
+                button[data-baseweb="tab"] div p {
+                    font-size: 1.2rem !important;
+                    font-weight: bold !important;
+                }
+            </style>
+            """, unsafe_allow_html=True)
 
-            # 버튼 배치를 위한 컬럼 설정
-            c_vm1, c_vm2, c_dummy = st.columns([1.5, 1.5, 7])
+            tab1, tab2 = st.tabs(["제품코드별 보기", "제품명별 보기(상세정보)"])
             
-            # 현재 상태 확인
-            current_mode = st.session_state[vm_key]
+            # 탭 선택에 따라 view_mode 설정 (실제 렌더링은 아래 if문에서 분기)
+            # st.tabs는 컨테이너 역할만 하므로, 현재 활성화된 탭을 알기 위해선
+            # 각 탭 내부에서 내용을 그리거나, 별도의 상태 관리가 필요하지 않음 (순차 실행)
+            # 여기서는 구조상 view_mode 변수를 설정하고 아래 로직을 태우기 위해
+            # 탭 내부가 아닌 외부 변수로 제어하려 했으나, st.tabs는 UI 컨테이너이므로
+            # 탭 내부에서 각각 렌더링 로직을 호출하거나, 탭 선택 상태를 알 수 있는 방법이 제한적임.
+            # 따라서, 아래의 if view_mode == ... 로직을 각 탭 내부로 이동시키는 것이 가장 깔끔함.
             
-            # 제품코드 보기 버튼
-            with c_vm1:
-                if st.button("제품코드 보기", 
-                             type="primary" if current_mode == "제품코드 보기" else "secondary", 
-                             use_container_width=True, 
-                             key=f"btn_vm_code_{allow_shipping}"):
-                    st.session_state[vm_key] = "제품코드 보기"
-                    st.rerun()
+            # 하지만 기존 로직(if view_mode == ...)이 길어서 이동 시 코드 중복이나 복잡도가 증가할 수 있음.
+            # 여기서는 탭 내부에서 view_mode를 강제로 지정하여 아래 로직이 실행되도록 구조를 변경함.
             
-            # 제품명 보기 버튼
-            with c_vm2:
-                if st.button("제품명 보기(상세)", 
-                             type="primary" if current_mode == "제품명 보기(제품코드별 상세품목)" else "secondary", 
-                             use_container_width=True, 
-                             help="제품코드별 상세 품목 리스트를 확인합니다.",
-                             key=f"btn_vm_name_{allow_shipping}"):
-                    st.session_state[vm_key] = "제품명 보기(제품코드별 상세품목)"
-                    st.rerun()
+            # [중요] st.tabs는 클릭 시 리런되지 않음. 
+            # 따라서 탭 내부에서 내용을 직접 그려야 함.
             
-            view_mode = st.session_state[vm_key]
+            # 공통 로직(데이터 준비 등)은 위에서 이미 수행됨.
+            
+            # 탭 1: 제품코드별 보기
+            with tab1:
+                view_mode = "제품코드 보기"
+                # 아래 로직이 view_mode 변수에 의존하므로, 여기서 바로 그리지 않고
+                # view_mode 변수만 설정하면 탭 밖에서 그려질 것 같지만,
+                # st.tabs는 컨테이너라 탭 밖의 내용은 탭과 무관하게 그려짐 (탭 아래에 그려짐).
+                # 즉, 탭을 누르면 해당 탭 내용만 보여야 하는데, 
+                # 기존 코드는 view_mode 변수 하나로 전체 화면을 제어하고 있었음.
+                
+                # 해결책: 기존의 if view_mode == ... else ... 로직을 함수화하거나
+                # 각 탭 안으로 코드를 이동시켜야 함.
+                # 여기서는 코드 이동 방식을 선택 (가장 직관적)
+                pass # 아래에서 처리
 
-        # [NEW] 테이블 우측 상단에 '모든 품목 조회' 체크박스 배치
-        # [수정] 라디오버튼을 우측 끝으로 붙이기 위해 비율 조정 (좌측 텍스트영역 확보, 우측 라디오버튼 영역 최소화)
-        c_h1, c_h2 = st.columns([7.5, 2.5])
-        with c_h1:
-            if view_mode == "제품코드 보기":
-                 st.write("🔽 상세 내역을 확인할 제품을 선택하세요.")
-            else:
-                 st.write("🔽 전체 재고 내역입니다.")
-             
-        # [수정] 재고 필터: 라디오 버튼 (전체코드보기 / 재고있는 품목보기)
-        with c_h2:
-            stock_filter_opt = st.radio("조회 옵션", ["전체코드보기", "재고있는 품목보기"], index=0, horizontal=True, label_visibility="collapsed", key=f"inv_stock_filter_{allow_shipping}")
-
-        # [NEW] 재고 필터 적용 (기본: 재고 > 0)
-        if stock_filter_opt == "재고있는 품목보기":
-            df = df[df['stock'] > 0]
+            with tab2:
+                view_mode = "제품명 보기(제품코드별 상세품목)"
+                pass # 아래에서 처리
 
         # [MOVED] 요약 데이터 계산 (필터링 후)
         summary = df.groupby('product_code').agg({
@@ -357,22 +355,38 @@ def render_inventory_logic(db, allow_shipping=False):
         # [NEW] 선택된 행을 저장할 변수 (출고용)
         selected_rows_for_shipping = None
 
-        # [NEW] 스마트 데이터 에디터 - 2. 수정 모드 토글
-        is_admin = st.session_state.get("role") == "admin"
-        can_edit = is_admin and not allow_shipping
-        edit_mode = False
-        if can_edit:
-            edit_mode = st.toggle("재고 수정 모드 (수량/단가)", key=f"edit_mode_{allow_shipping}")
-
         # 관리자 권한 확인 (삭제 기능용)
         is_admin = st.session_state.get("role") == "admin"
 
-        if view_mode == "제품코드 보기":
+
+        # [수정] 탭 내부로 로직 이동
+        # 탭 1 내용
+        with tab1:
+            # [NEW] 테이블 우측 상단에 '모든 품목 조회' 체크박스 배치 (탭 내부로 이동)
+            c_h1, c_h2 = st.columns([7.5, 2.5])
+            with c_h1:
+                 st.write("🔽 상세 내역을 확인할 제품을 선택하세요.")
+            with c_h2:
+                stock_filter_opt_1 = st.radio("조회 옵션", ["전체코드보기", "재고있는 품목보기"], index=0, horizontal=True, label_visibility="collapsed", key=f"inv_stock_filter_1_{allow_shipping}")
+
+            # [NEW] 재고 필터 적용 (탭별 독립 적용)
+            summary_view = summary.copy()
+            if stock_filter_opt_1 == "재고있는 품목보기":
+                summary_view = summary_view[summary_view['stock'] > 0]
+
+            # [MOVED] 스마트 데이터 에디터 - 2. 수정 모드 토글 (테이블 좌측 상단으로 이동 - 탭 내부)
+            can_edit = is_admin and not allow_shipping
+            edit_mode_t1 = False
+            if can_edit:
+                # [수정] 토글 스위치 배치 (좌측 정렬)
+                c_toggle, _ = st.columns([2, 8])
+                edit_mode_t1 = c_toggle.toggle("재고 수정 모드", help="활성화하면 목록에서 수량과 단가를 직접 수정할 수 있습니다.", key=f"edit_mode_{allow_shipping}")
+
             # [수정] 동적 높이 계산 (행당 약 35px, 최대 20행 700px)
-            summary_height = min((len(summary) + 1) * 35 + 3, 700)
+            summary_height = min((len(summary_view) + 1) * 35 + 3, 700)
             
             selection_summary = st.dataframe(
-                summary[disp_cols].rename(columns=summary_cols),
+                summary_view[disp_cols].rename(columns=summary_cols),
                 width="stretch",
                 hide_index=True,
                 on_select="rerun",
@@ -382,11 +396,11 @@ def render_inventory_logic(db, allow_shipping=False):
             )
             
             # [NEW] 제품별 요약 목록 합계 표시
-            st.markdown(f"<div style='text-align:right; font-weight:bold; padding:5px; color:#333;'>총 재고수량 합계: {summary['stock'].sum():,}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='text-align:right; font-weight:bold; padding:5px; color:#333;'>총 재고수량 합계: {summary_view['stock'].sum():,}</div>", unsafe_allow_html=True)
 
             if selection_summary.selection.rows:
                 idx = selection_summary.selection.rows[0]
-                sel_p_code = summary.iloc[idx]['product_code']
+                sel_p_code = summary_view.iloc[idx]['product_code']
                 
                 st.divider()
                 st.markdown(f"### 상세 재고 내역: **{sel_p_code}**")
@@ -401,7 +415,7 @@ def render_inventory_logic(db, allow_shipping=False):
                     detail_df['order_no'] = detail_df['order_no'].apply(lambda x: '-' if str(x).startswith('STOCK-') else x)
 
                 # [NEW] 스마트 데이터 에디터 - 3. 수정 모드 분기
-                if edit_mode:
+                if edit_mode_t1:
                     st.info("수정할 셀을 더블클릭하여 값을 변경한 후, 하단의 '변경사항 저장' 버튼을 누르세요.")
                     
                     detail_cols_for_editor = ["id", "customer", "name", "product_type", "yarn_type", "weight", "size", "color", "shipping_unit_price", "stock", "order_no", "date", "note"]
@@ -532,8 +546,21 @@ def render_inventory_logic(db, allow_shipping=False):
                                 st.session_state[f"confirm_del_all_{sel_p_code}"] = False
                                 st.rerun()
 
-        
-        else: # 전체 상세 내역 (리스트)
+        # 탭 2 내용
+        with tab2:
+            # [수정] 상단 컨트롤 영역 레이아웃 변경 (문구를 좌측 끝으로 이동)
+            c_h1, c_h2 = st.columns([7.5, 2.5])
+            with c_h1:
+                st.write("🔽 전체 재고 내역입니다.")
+            with c_h2:
+                stock_filter_opt_2 = st.radio("조회 옵션", ["전체코드보기", "재고있는 품목보기"], index=0, horizontal=True, label_visibility="collapsed", key=f"inv_stock_filter_2_{allow_shipping}")
+            
+            # [FIX] 변수 초기화 (Pylance 경고 해결)
+            edit_mode_t2 = False
+            if can_edit:
+                c_toggle, _ = st.columns([2, 8])
+                edit_mode_t2 = c_toggle.toggle("재고 수정 모드", key=f"edit_mode_t2_{allow_shipping}", help="활성화하면 목록에서 수량과 단가를 직접 수정할 수 있습니다.")
+
             full_df = df.copy()
             if 'date' in full_df.columns:
                 full_df['date'] = full_df['date'].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isnull(x) and hasattr(x, 'strftime') else str(x)[:10])
@@ -542,7 +569,11 @@ def render_inventory_logic(db, allow_shipping=False):
             if 'order_no' in full_df.columns:
                 full_df['order_no'] = full_df['order_no'].apply(lambda x: '-' if str(x).startswith('STOCK-') else x)
 
-            if edit_mode:
+            # [NEW] 재고 필터 적용 (탭별 독립 적용)
+            if stock_filter_opt_2 == "재고있는 품목보기":
+                full_df = full_df[full_df['stock'] > 0]
+
+            if edit_mode_t2:
                 st.info("수정할 셀을 더블클릭하여 값을 변경한 후, 하단의 '변경사항 저장' 버튼을 누르세요.")
                 
                 full_cols_for_editor = ["id", "product_code", "customer", "name", "product_type", "yarn_type", "weight", "size", "color", "shipping_unit_price", "stock", "order_no", "date", "note"]
@@ -1296,24 +1327,18 @@ def render_inventory(db, sub_menu):
 
                     if st.form_submit_button("재고 등록"):
                         if sel_product:
-                            # 임의의 발주번호 생성 (STOCK-YYMMDD-HHMMSS)
+                            # [FIX] IndentationError 수정
                             stock_no = f"STOCK-{datetime.datetime.now().strftime('%y%m%d-%H%M%S')}"
-                            
                             doc_data = {
                                 "product_code": sel_code,
                                 "product_type": sel_product.get('product_type'),
                                 "yarn_type": sel_product.get('yarn_type'),
-                                "weight": reg_weight, # 입력값 사용
-                                "size": reg_size,     # 입력값 사용
-                                "name": reg_name,
-                                "color": reg_color,
-                                "order_no": stock_no,
-                                "customer": reg_customer,
+                                "weight": reg_weight, "size": reg_size,
+                                "name": reg_name, "color": reg_color,
+                                "order_no": stock_no, "customer": reg_customer,
                                 "date": datetime.datetime.combine(reg_date, datetime.datetime.now().time()),
-                                "stock": reg_qty,
-                                "shipping_unit_price": reg_price, # 단가 저장 (출고 단가 필드 재활용)
-                                "status": "봉제완료", # 즉시 출고 가능 상태
-                                "note": reg_note
+                                "stock": reg_qty, "shipping_unit_price": reg_price,
+                                "status": "봉제완료", "note": reg_note
                             }
                             db.collection("orders").add(doc_data)
                             st.success(f"재고가 등록되었습니다. (번호: {stock_no})")

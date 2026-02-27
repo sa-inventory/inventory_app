@@ -77,10 +77,27 @@ def render_shipping_operations(db, sub_menu):
             st.session_state.show_ship_addr_dialog = False
             st.rerun()
 
-    # [수정] 작업 모드 선택 (메뉴 통합)
-    op_mode = st.radio("작업 모드", ["주문별 보기 (접수일순)", "제품별 보기 (재고순)"], horizontal=True)
-    
-    if op_mode == "주문별 보기 (접수일순)":
+    # [수정] 작업 모드 선택 (버튼 토글 방식)
+    if "ship_op_mode" not in st.session_state:
+        st.session_state["ship_op_mode"] = "주문접수 보기"
+
+    c_mode1, c_mode2 = st.columns([1, 1])
+    with c_mode1:
+        if st.button("주문접수 기준으로 보기", 
+                     type="primary" if st.session_state["ship_op_mode"] == "주문접수 보기" else "secondary", 
+                     use_container_width=True, 
+                     key="btn_ship_mode_order"):
+            st.session_state["ship_op_mode"] = "주문접수 보기"
+            st.rerun()
+    with c_mode2:
+        if st.button("제품코드 or 제품명 기준으로 보기", 
+                     type="primary" if st.session_state["ship_op_mode"] == "제품기준 보기" else "secondary", 
+                     use_container_width=True, 
+                     key="btn_ship_mode_product"):
+            st.session_state["ship_op_mode"] = "제품기준 보기"
+            st.rerun()
+
+    if st.session_state["ship_op_mode"] == "주문접수 보기":
         st.subheader("주문별 출고 (발주번호 기준)")
         
         # [NEW] 검색 및 필터 UI
@@ -1238,7 +1255,11 @@ def render_shipping_status(db, sub_menu):
                         
                         batch.commit() # 한 번의 요청으로 모든 변경사항 적용
                         st.success(f"총 {len(target_ids)}건의 출고가 취소되었습니다.")
+                        
+                        # [FIX] 취소 후 목록 갱신 및 선택 초기화
                         st.session_state["key_ship_done"] += 1
+                        if "last_ship_selection" in st.session_state:
+                            del st.session_state["last_ship_selection"]
                         st.rerun()
                 else:
                     st.info("취소할 항목을 선택하세요.")

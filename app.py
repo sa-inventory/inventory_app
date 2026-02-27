@@ -115,31 +115,6 @@ if not st.session_state["logged_in"]:
     else:
         st.markdown(f"<h1 style='text-align: center; font-size: {lg_title_size}rem;'>{lg_title_html}</h1>", unsafe_allow_html=True)
     
-    # [NEW] 아이디 입력 후 엔터 시 비밀번호 필드로 포커스 이동 (JS 주입)
-    components.html("""
-    <script>
-        const doc = window.parent.document;
-        const observer = new MutationObserver(() => {
-            const idInputs = doc.querySelectorAll('input[aria-label="아이디"]');
-            const pwInputs = doc.querySelectorAll('input[aria-label="비밀번호"]');
-            
-            idInputs.forEach((idInput, idx) => {
-                if (pwInputs[idx] && !idInput.dataset.hasEnterListener) {
-                    idInput.dataset.hasEnterListener = "true";
-                    idInput.addEventListener('keydown', (e) => {
-                        if (e.key === 'Enter') {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            pwInputs[idx].focus();
-                        }
-                    });
-                }
-            });
-        });
-        observer.observe(doc.body, { childList: true, subtree: true });
-    </script>
-    """, height=0, width=0)
-    
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
         tab_staff, tab_partner = st.tabs(["직원 로그인", "거래처 로그인"])
@@ -282,6 +257,32 @@ if not st.session_state["logged_in"]:
         for key in list(st.session_state.keys()):
             del st.session_state[key]
         st.rerun()
+
+    # [MOVED] 아이디 입력 후 엔터 시 비밀번호 필드로 포커스 이동 (JS 주입)
+    # 화면 렌더링 간섭(깜빡임)을 최소화하기 위해 st.stop() 직전으로 이동
+    components.html("""
+    <script>
+        const doc = window.parent.document;
+        const observer = new MutationObserver(() => {
+            const idInputs = doc.querySelectorAll('input[aria-label="아이디"]');
+            const pwInputs = doc.querySelectorAll('input[aria-label="비밀번호"]');
+            
+            idInputs.forEach((idInput, idx) => {
+                if (pwInputs[idx] && !idInput.dataset.hasEnterListener) {
+                    idInput.dataset.hasEnterListener = "true";
+                    idInput.addEventListener('keydown', (e) => {
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            pwInputs[idx].focus();
+                        }
+                    });
+                }
+            });
+        });
+        observer.observe(doc.body, { childList: true, subtree: true });
+    </script>
+    """, height=0, width=0)
 
     st.stop()
 

@@ -426,6 +426,26 @@ def render_company_settings(db, sub_menu):
         with c_logo2:
             new_logo_file = st.file_uploader("로고 이미지 업로드 (200KB 이하)", type=['png', 'jpg', 'jpeg'], key="logo_uploader")
 
+        # [NEW] 디자인 설정 섹션 추가
+        st.markdown("---")
+        st.markdown("##### 🎨 디자인 설정 (로고/제목)")
+        st.caption("로고 크기와 제목의 줄바꿈(&lt;br&gt; 태그 사용), 글자 크기를 조정하여 화면 배치를 변경할 수 있습니다.")
+        
+        with st.expander("좌측 사이드바 설정", expanded=True):
+            c_sb1, c_sb2 = st.columns(2)
+            sb_logo_width = c_sb1.number_input("로고 너비 (px)", value=data.get("sb_logo_width", 45), min_value=10, max_value=300)
+            sb_title_size = c_sb2.number_input("제목 글자 크기 (rem)", value=data.get("sb_title_size", 2.2), min_value=0.5, max_value=5.0, step=0.1)
+            
+            sb_title_html = st.text_area("사이드바 제목 (HTML 허용)", value=data.get("sb_title_html", data.get("name", "세안타올")), help="줄바꿈은 <br> 태그를 사용하세요. 예: 세안타올<br>생산관리")
+            sb_subtitle = st.text_input("사이드바 부제목", value=data.get("sb_subtitle", "생산관리 시스템"))
+
+        with st.expander("로그인 화면 설정", expanded=True):
+            c_lg1, c_lg2 = st.columns(2)
+            lg_logo_width = c_lg1.number_input("로그인 로고 너비 (px)", value=data.get("lg_logo_width", 120), min_value=20, max_value=500)
+            lg_title_size = c_lg2.number_input("로그인 제목 글자 크기 (rem)", value=data.get("lg_title_size", 2.5), min_value=0.5, max_value=5.0, step=0.1)
+            
+            lg_title_html = st.text_area("로그인 제목 (HTML 허용)", value=data.get("lg_title_html", data.get("app_title", "세안타올 생산 관리")), help="줄바꿈은 <br> 태그를 사용하세요.")
+
         if st.button("저장", type="primary"):
             new_data = {
                 "name": name, "rep_name": rep_name, "biz_num": biz_num, 
@@ -433,7 +453,15 @@ def render_company_settings(db, sub_menu):
                 "phone": phone, "fax": fax, "biz_type": biz_type, "biz_item": biz_item,
                 "email": email, "bank_name": bank_name, "bank_account": bank_account, "note": note,
                 "juso_api_key": juso_api_key,
-                "app_title": app_title
+                "app_title": app_title,
+                # [NEW] 디자인 설정 저장
+                "sb_logo_width": sb_logo_width,
+                "sb_title_size": sb_title_size,
+                "sb_title_html": sb_title_html,
+                "sb_subtitle": sb_subtitle,
+                "lg_logo_width": lg_logo_width,
+                "lg_title_size": lg_title_size,
+                "lg_title_html": lg_title_html
             }
             
             # 직인 처리

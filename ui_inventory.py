@@ -4,7 +4,7 @@ import datetime
 import io
 import uuid
 from firebase_admin import firestore
-from utils import get_partners, get_common_codes, search_address_api, generate_report_html
+from utils import get_partners, get_common_codes, search_address_api, generate_report_html, save_user_settings, load_user_settings
 
 # [NEW] 재고 현황 로직을 별도 함수로 분리 (출고 작업과 재고 현황에서 공유)
 def render_inventory_logic(db, allow_shipping=False):
@@ -12,6 +12,51 @@ def render_inventory_logic(db, allow_shipping=False):
     user_role = st.session_state.get("role")
     linked_partner = st.session_state.get("linked_partner")
     is_partner = (user_role == "partner")
+    user_id = st.session_state.get("user_id")
+
+    # [NEW] 인쇄 설정 로드 및 초기화
+    inv_print_defaults = {
+        "inv_p_mode": "요약 목록", "inv_p_title": "재고 현황",
+        "inv_p_ts": 24, "inv_p_fs": 12, "inv_p_pad": 5,
+        "inv_p_date": True, "inv_p_total": True,
+        "inv_p_mt": 15, "inv_p_mb": 15, "inv_p_ml": 15, "inv_p_mr": 15,
+        "inv_p_bo": 1.0, "inv_p_bi": 0.5
+    }
+    
+    saved_opts = load_user_settings(user_id, "inv_print_opts", {})
+    
+    for k, v in inv_print_defaults.items():
+        wk = f"{k}_{allow_shipping}"
+        if wk not in st.session_state:
+            st.session_state[wk] = saved_opts.get(k, v)
+
+    def save_inv_opts():
+        current_opts = {}
+        for k in inv_print_defaults.keys():
+            wk = f"{k}_{allow_shipping}"
+            current_opts[k] = st.session_state[wk]
+        save_user_settings(user_id, "inv_print_opts", current_opts)
+
+    # [NEW] 인쇄용 HTML 생성 함수 (우측 정렬 지원)
+    def generate_inventory_report_html(title, df, summary_text, options, right_align_cols=[]):
+        mt, mr, mb, ml = options.get('mt', 15), options.get('mr', 15), options.get('mb', 15), options.get('ml', 15)
+        ts, bs, pad = options.get('ts', 24), options.get('bs', 11), options.get('pad', 6)
+        da, ds, dd = options.get('da', 'right'), options.get('ds', 12), options.get('dd', 'block')
+        bo, bi = options.get('bo', 1.0), options.get('bi', 0.5)
+        
+        print_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        
+        align_css = ""
+        if right_align_cols:
+            for col in right_align_cols:
+                if col in df.columns:
+                    idx = df.columns.get_loc(col) + 1
+                    align_css += f"table tr td:nth-child({idx}) {{ text-align: right; }}\n"
+
+        css = f"""@page {{ margin: {mt}mm {mr}mm {mb}mm {ml}mm; }} body {{ font-family: 'Malgun Gothic', sans-serif; padding: 0; margin: 0; }} h2 {{ text-align: center; margin-bottom: 5px; font-size: {ts}px; }} .info {{ text-align: {da}; font-size: {ds}px; margin-bottom: 10px; color: #555; display: {dd}; }} table {{ width: 100%; border-collapse: collapse; font-size: {bs}px; border: {bo}px solid #444; }} th, td {{ border: {bi}px solid #444; padding: {pad}px 4px; text-align: center; }} th {{ background-color: #f0f0f0; }} .summary {{ text-align: right; margin-top: 10px; font-weight: bold; font-size: {bs}px; }} {align_css} @media screen {{ body {{ display: none; }} }}"""
+        
+        html = f"""<html><head><title>{title}</title><style>{css}</style></head><body onload="window.print()"><h2>{title}</h2><div class="info">출력일시: {print_now}</div>{df.to_html(index=False)}<div class="summary">{summary_text}</div></body></html>"""
+        return html
 
     # [NEW] 주소 검색 모달 (Dialog) - 재고 출고용
     if "show_inv_ship_addr_dialog" not in st.session_state:
@@ -632,28 +677,28 @@ def render_inventory_logic(db, allow_shipping=False):
         with st.expander("인쇄 옵션 설정"):
             pe_c1, pe_c2, pe_c3 = st.columns(3)
             # [수정] 옵션명에 공백 추가하여 일관성 유지
-            print_mode = pe_c1.radio("출력 모드", ["요약 목록", "제품별 상세내역(그룹)", "전체 상세내역 (리스트)"], key=f"inv_p_mode_{allow_shipping}")
-            p_title = pe_c2.text_input("문서 제목", value="재고 현황", key=f"inv_p_title_{allow_shipping}")
+            print_mode = pe_c1.radio("출력 모드", ["요약 목록", "제품별 상세내역(그룹)", "전체 상세내역 (리스트)"], key=f"inv_p_mode_{allow_shipping}", on_change=save_inv_opts)
+            p_title = pe_c2.text_input("문서 제목", key=f"inv_p_title_{allow_shipping}", on_change=save_inv_opts)
             
             pe_c4, pe_c5, pe_c6 = st.columns(3)
-            p_title_size = pe_c4.number_input("제목 크기(px)", value=24, step=1, key=f"inv_p_ts_{allow_shipping}")
-            p_font_size = pe_c5.number_input("본문 글자 크기(px)", value=12, step=1, key=f"inv_p_fs_{allow_shipping}")
-            p_padding = pe_c6.number_input("셀 여백(px)", value=5, step=1, key=f"inv_p_pad_{allow_shipping}")
+            p_title_size = pe_c4.number_input("제목 크기(px)", step=1, key=f"inv_p_ts_{allow_shipping}", on_change=save_inv_opts)
+            p_font_size = pe_c5.number_input("본문 글자 크기(px)", step=1, key=f"inv_p_fs_{allow_shipping}", on_change=save_inv_opts)
+            p_padding = pe_c6.number_input("셀 여백(px)", step=1, key=f"inv_p_pad_{allow_shipping}", on_change=save_inv_opts)
             
             pe_c7, pe_c8 = st.columns(2)
-            p_show_date = pe_c7.checkbox("출력일시 표시", value=True, key=f"inv_p_date_{allow_shipping}")
-            p_show_total = pe_c8.checkbox("하단 합계수량 표시", value=True, key=f"inv_p_total_{allow_shipping}")
+            p_show_date = pe_c7.checkbox("출력일시 표시", key=f"inv_p_date_{allow_shipping}", on_change=save_inv_opts)
+            p_show_total = pe_c8.checkbox("하단 합계수량 표시", key=f"inv_p_total_{allow_shipping}", on_change=save_inv_opts)
             
             st.caption("페이지 여백 (mm)")
             pe_m1, pe_m2, pe_m3, pe_m4 = st.columns(4)
-            p_m_top = pe_m1.number_input("상단", value=15, step=1, key=f"inv_p_mt_{allow_shipping}")
-            p_m_bottom = pe_m2.number_input("하단", value=15, step=1, key=f"inv_p_mb_{allow_shipping}")
-            p_m_left = pe_m3.number_input("좌측", value=15, step=1, key=f"inv_p_ml_{allow_shipping}")
-            p_m_right = pe_m4.number_input("우측", value=15, step=1, key=f"inv_p_mr_{allow_shipping}")
+            p_m_top = pe_m1.number_input("상단", step=1, key=f"inv_p_mt_{allow_shipping}", on_change=save_inv_opts)
+            p_m_bottom = pe_m2.number_input("하단", step=1, key=f"inv_p_mb_{allow_shipping}", on_change=save_inv_opts)
+            p_m_left = pe_m3.number_input("좌측", step=1, key=f"inv_p_ml_{allow_shipping}", on_change=save_inv_opts)
+            p_m_right = pe_m4.number_input("우측", step=1, key=f"inv_p_mr_{allow_shipping}", on_change=save_inv_opts)
             
             pe_m5, pe_m6 = st.columns(2)
-            p_bo = pe_m5.number_input("외곽선 굵기", value=1.0, step=0.1, format="%.1f", key=f"inv_p_bo_{allow_shipping}")
-            p_bi = pe_m6.number_input("안쪽선 굵기", value=0.5, step=0.1, format="%.1f", key=f"inv_p_bi_{allow_shipping}")
+            p_bo = pe_m5.number_input("외곽선 굵기", step=0.1, format="%.1f", key=f"inv_p_bo_{allow_shipping}", on_change=save_inv_opts)
+            p_bi = pe_m6.number_input("안쪽선 굵기", step=0.1, format="%.1f", key=f"inv_p_bi_{allow_shipping}", on_change=save_inv_opts)
 
         # 엑셀 다운로드 및 인쇄 버튼 (Expander 밖으로 이동)
         c_btn_xls, c_btn_gap, c_btn_prt = st.columns([1.5, 5, 1.5])
@@ -693,17 +738,29 @@ def render_inventory_logic(db, allow_shipping=False):
 
                 if print_mode == "요약 목록":
                     df_print = summary[disp_cols].rename(columns=summary_cols)
+                    # [NEW] 천단위 구분기호 적용
+                    for col in ['평균단가', '재고수량', '총재고금액']:
+                        if col in df_print.columns:
+                            df_print[col] = df_print[col].apply(lambda x: f"{int(x):,}" if pd.notnull(x) else "")
+                    
                     total_q = summary['stock'].sum()
-                    html = generate_report_html(p_title, df_print, get_summary_text(f"총 {len(df_print)}개 품목", total_q), options)
+                    html = generate_inventory_report_html(p_title, df_print, get_summary_text(f"총 {len(df_print)}개 품목", total_q), options, right_align_cols=['평균단가', '재고수량', '총재고금액'])
                     st.components.v1.html(html, height=0, width=0)
                     
                 elif print_mode == "전체 상세내역 (리스트)":
                     # 제품코드, 제품명 순으로 정렬
                     if "제품코드" in df_detail_final.columns:
                         df_detail_final = df_detail_final.sort_values(by=["제품코드", "제품명"])
+                    
+                    # [NEW] 천단위 구분기호 적용
+                    for col in ['단가', '재고수량', '중량']:
+                        if col in df_detail_final.columns:
+                            df_detail_final[col] = df_detail_final[col].apply(lambda x: f"{int(x):,}" if pd.notnull(x) and str(x).replace('.','',1).isdigit() else x)
+
                     # [FIX] 컬럼명 변경 반영 (stock -> 재고수량)
-                    total_q = df_detail_final['재고수량'].sum()
-                    html = generate_report_html(p_title, df_detail_final, get_summary_text(f"총 {len(df_detail_final)}건", total_q), options)
+                    # df_detail_final의 재고수량은 이미 문자열로 변환되었으므로 원본 df에서 합계 계산
+                    total_q = df['stock'].sum()
+                    html = generate_inventory_report_html(p_title, df_detail_final, get_summary_text(f"총 {len(df_detail_final)}건", total_q), options, right_align_cols=['단가', '재고수량', '중량'])
                     st.components.v1.html(html, height=0, width=0)
                     
                 elif print_mode == "제품별 상세내역(그룹)":
@@ -723,6 +780,8 @@ def render_inventory_logic(db, allow_shipping=False):
                             table {{ width: 100%; border-collapse: collapse; font-size: {p_font_size}px; margin-bottom: 20px; border: {p_bo}px solid #444; }}
                             th, td {{ border: {p_bi}px solid #444; padding: {p_padding}px; text-align: center; }}
                             th {{ background-color: #f0f0f0; }}
+                            /* [NEW] 우측 정렬 클래스 */
+                            .align-right {{ text-align: right; }}
                             .group-header {{ background-color: #e6f3ff; font-weight: bold; text-align: left; padding: 8px; border: 1px solid #444; margin-top: 10px; }}
                             .no-data {{ text-align: center; padding: 10px; color: #888; }}
                             .grand-total {{ text-align: right; font-weight: bold; font-size: {p_font_size + 2}px; margin-top: 20px; border-top: 2px solid #333; padding-top: 10px; }}
@@ -745,6 +804,12 @@ def render_inventory_logic(db, allow_shipping=False):
                         # 해당 제품의 상세 내역 필터링
                         sub_df = df_detail_final[df_detail_final['제품코드'] == p_code]
                         grand_total_stock += p_stock
+
+                        # [NEW] 천단위 구분기호 적용 (출력용 복사본)
+                        sub_df_print = sub_df.copy()
+                        for col in ['단가', '재고수량', '중량']:
+                            if col in sub_df_print.columns:
+                                sub_df_print[col] = sub_df_print[col].apply(lambda x: f"{int(x):,}" if pd.notnull(x) and str(x).replace('.','',1).isdigit() else x)
                         
                         # 그룹 헤더
                         html_content += f"""
@@ -753,9 +818,24 @@ def render_inventory_logic(db, allow_shipping=False):
                         </div>
                         """
                         
-                        if not sub_df.empty:
+                        if not sub_df_print.empty:
                             # 상세 테이블
-                            html_content += sub_df.to_html(index=False, border=1)
+                            # [NEW] to_html 대신 직접 생성하거나 to_html 후 클래스 주입
+                            # 여기서는 to_html 사용 후 CSS로 제어하기 어려우므로, 특정 컬럼에 클래스를 줄 수 없으니
+                            # generate_inventory_report_html 로직을 응용하거나, to_html의 formatters 사용
+                            # 하지만 formatters는 값만 바꿈. 정렬은 CSS.
+                            # 간단하게 to_html 결과에 style 주입은 어려우므로, 위에서 정의한 CSS nth-child 활용을 위해
+                            # 테이블에 클래스를 주거나, 인라인 스타일을 가진 HTML을 생성해야 함.
+                            # 여기서는 간단히 sub_df_print를 HTML로 변환하고, 위쪽 CSS에서 nth-child로 제어하도록 함.
+                            # 단, 컬럼 순서가 고정되어야 함.
+                            
+                            # 컬럼 순서 고정 (화면에 보이는 순서대로)
+                            # detail_cols_view와 유사하게
+                            cols_to_show = [c for c in sub_df_print.columns if c not in ['제품코드', '제품명', '제품종류', '사종', '중량', '사이즈']] # 공통 정보 제외하고 보여줄 수도 있지만, 여기서는 전체 보여줌
+                            
+                            # [FIX] 우측 정렬을 위해 CSS nth-child 사용 (단가, 재고수량 등 위치 확인 필요)
+                            # 여기서는 간단히 전체 테이블 렌더링
+                            html_content += sub_df_print.to_html(index=False, border=1, classes='detail-table')
                         else:
                             html_content += "<div class='no-data'>상세 내역 없음</div>"
                             

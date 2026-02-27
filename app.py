@@ -91,24 +91,31 @@ if not st.session_state["logged_in"]:
         if comp_doc.exists:
             comp_data = comp_doc.to_dict()
             login_logo = comp_data.get("logo_img")
-            login_title = comp_data.get("app_title", "세안타올 생산 관리")
+            # [NEW] 로그인 화면 디자인 설정 적용
+            lg_logo_width = comp_data.get("lg_logo_width", 120)
+            lg_title_size = comp_data.get("lg_title_size", 2.5)
+            lg_title_html = comp_data.get("lg_title_html", comp_data.get("app_title", "세안타올 생산 관리"))
         else:
             login_logo = None
-            login_title = "세안타올 생산 관리"
+            lg_title_html = "세안타올 생산 관리"
+            lg_logo_width = 120
+            lg_title_size = 2.5
     except:
         login_logo = None
-        login_title = "세안타올 생산 관리"
+        lg_title_html = "세안타올 생산 관리"
+        lg_logo_width = 120
+        lg_title_size = 2.5
 
     if login_logo:
         st.markdown(
-            f"""<div style="display: flex; justify-content: center; align-items: center; margin-bottom: 30px;">
-                <img src="data:image/png;base64,{login_logo}" style="max-width: 120px; max-height: 100px; margin-right: 20px;">
-                <h1 style='margin: 0; font-size: 2.5rem;'>{login_title}</h1>
+            f"""<div style="display: flex; justify-content: center; align-items: center; margin-bottom: 30px; flex-wrap: wrap;">
+                <img src="data:image/png;base64,{login_logo}" style="width: {lg_logo_width}px; max-height: 200px; margin-right: 20px;">
+                <h1 style='margin: 0; font-size: {lg_title_size}rem; text-align: center; line-height: 1.2;'>{lg_title_html}</h1>
             </div>""",
             unsafe_allow_html=True
         )
     else:
-        st.markdown(f"<h1 style='text-align: center;'>{login_title}</h1>", unsafe_allow_html=True)
+        st.markdown(f"<h1 style='text-align: center; font-size: {lg_title_size}rem;'>{lg_title_html}</h1>", unsafe_allow_html=True)
     
     # [NEW] 아이디 입력 후 엔터 시 비밀번호 필드로 포커스 이동 (JS 주입)
     components.html("""
@@ -309,28 +316,46 @@ with st.sidebar:
         comp_info_ref = db.collection("settings").document("company_info").get()
         if comp_info_ref.exists:
             comp_data = comp_info_ref.to_dict()
-            company_name = comp_data.get("name", "세안타올")
             logo_img = comp_data.get("logo_img")
+            
+            # [NEW] 사이드바 디자인 설정 적용
+            sb_logo_width = comp_data.get("sb_logo_width", 45)
+            sb_title_size = comp_data.get("sb_title_size", 2.2)
+            sb_title_html = comp_data.get("sb_title_html", comp_data.get("name", "세안타올"))
+            sb_subtitle = comp_data.get("sb_subtitle", "생산관리 시스템")
         else:
-            company_name = "세안타올"
             logo_img = None
+            sb_title_html = "세안타올"
+            sb_logo_width = 45
+            sb_title_size = 2.2
+            sb_subtitle = "생산관리 시스템"
     except:
-        company_name = "세안타올"
         logo_img = None
+        sb_title_html = "세안타올"
+        sb_logo_width = 45
+        sb_title_size = 2.2
+        sb_subtitle = "생산관리 시스템"
 
     # 로고 이미지 처리
     if logo_img:
-        title_html = f'<img src="data:image/png;base64,{logo_img}" style="max-height: 45px; margin-right: 10px;"> {company_name}'
-    else:
-        title_html = f"🏢 {company_name}"
-
-    # [수정] 회사명 글씨 크기 확대 및 스타일 개선
-    st.markdown(f"""
+        # [수정] 로고와 제목 배치 유연성 확보 (flex-wrap)
+        st.markdown(f"""
         <div style='text-align: center; margin-bottom: 20px;'>
-            <h1 style='margin:0; font-size: 2.2rem; font-weight: 700; display: flex; align-items: center; justify-content: center;'>{title_html}</h1>
-            <h3 style='margin:0; font-size: 1.5rem; color: #333; font-weight: 600; margin-top: 5px;'>생산관리 시스템</h3>
+            <div style='display: flex; align-items: center; justify-content: center; flex-wrap: wrap;'>
+                <img src="data:image/png;base64,{logo_img}" style="width: {sb_logo_width}px; max-height: 100px; margin-right: 10px;">
+                <h1 style='margin:0; font-size: {sb_title_size}rem; font-weight: 700; line-height: 1.2;'>{sb_title_html}</h1>
+            </div>
+            <h3 style='margin:0; font-size: 1.5rem; color: #333; font-weight: 600; margin-top: 5px;'>{sb_subtitle}</h3>
         </div>
     """, unsafe_allow_html=True)
+    else:
+        st.markdown(f"""
+        <div style='text-align: center; margin-bottom: 20px;'>
+            <h1 style='margin:0; font-size: {sb_title_size}rem; font-weight: 700;'>🏢 {sb_title_html}</h1>
+            <h3 style='margin:0; font-size: 1.5rem; color: #333; font-weight: 600; margin-top: 5px;'>{sb_subtitle}</h3>
+        </div>
+    """, unsafe_allow_html=True)
+
     user_display = st.session_state.get("user_name", st.session_state.get("role"))
     st.write(f"환영합니다.  **{user_display}**님!")
     

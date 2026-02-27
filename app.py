@@ -56,15 +56,13 @@ if st.session_state.get("role") != "admin":
     base_css += """
         /* [NEW] 보안 및 깔끔한 화면을 위해 Streamlit 기본 메뉴 숨기기 */
         
-        /* 1. 상단 데코레이션 바 숨김 */
-        [data-testid="stDecoration"] {
-            display: none !important;
-        }
-        
-        /* 2. 우측 상단 툴바(점 3개 메뉴, 배포 버튼 등) 숨김 */
-        [data-testid="stToolbar"] {
-            display: none !important;
-        }
+        /*
+         [수정] 사이드바 토글 버튼이 사라지는 문제를 해결하기 위해,
+         우측 상단 메뉴(stToolbar)와 상단 바(stDecoration)를 숨기는 CSS를 제거합니다.
+         이로 인해 우측 상단에 Streamlit 기본 메뉴(점 3개 등)가 다시 표시됩니다.
+        */
+        /* [data-testid="stDecoration"] { display: none !important; } */
+        /* [data-testid="stToolbar"] { display: none !important; } */
         
         /* 3. 푸터 숨김 */
         footer {

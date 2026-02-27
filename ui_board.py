@@ -311,8 +311,11 @@ def render_notice_board(db):
                         file_data = None
                         file_name = None
                         if uploaded_file:
-                            if uploaded_file.size > 1024 * 1024: # 1MB 제한
-                                st.error("첨부파일은 1MB 이하여야 합니다.")
+                            # [수정] Firestore 문서 제한(1MB) 고려하여 파일 크기 제한 축소 (Base64 인코딩 시 약 33% 용량 증가)
+                            # 1MB = 1,048,576 bytes. Base64로 변환하면 약 1.37MB가 되어 저장 불가.
+                            # 안전하게 700KB로 제한 (700KB * 1.33 = 931KB + 기타 필드 < 1MB)
+                            if uploaded_file.size > 700 * 1024:
+                                st.error("첨부파일은 700KB 이하여야 합니다. (데이터베이스 문서 크기 제한)")
                                 st.stop()
                             file_bytes = uploaded_file.read()
                             file_data = base64.b64encode(file_bytes).decode('utf-8')

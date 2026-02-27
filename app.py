@@ -260,7 +260,14 @@ if not st.session_state["logged_in"]:
                                     del st.session_state["current_menu"]
                                 
                                 user_perms = user_data.get("permissions", [])
-                                st.session_state["current_menu"] = user_perms[0] if user_perms else "발주현황(거래처)"
+                                # [FIX] 파트너 계정의 기본 메뉴를 '발주현황(거래처)'로 우선 설정
+                                if "발주현황" in user_perms or "발주현황(거래처)" in user_perms:
+                                    st.session_state["current_menu"] = "발주현황(거래처)"
+                                elif user_perms: # 발주현황 권한은 없지만 다른 권한이 있는 경우
+                                    st.session_state["current_menu"] = user_perms[0]
+                                else: # 권한이 아예 없는 경우
+                                    st.session_state["current_menu"] = "발주현황(거래처)"
+
                                 if "current_sub_menu" in st.session_state:
                                     del st.session_state["current_sub_menu"]
                                 st.rerun()

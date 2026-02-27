@@ -251,8 +251,7 @@ def render_shipping_operations(db, sub_menu):
                 s_method = c2.selectbox("배송방법", shipping_methods)
                 s_carrier = c3.selectbox("배송업체", ["직접입력"] + shipping_partners)
                 if s_carrier == "직접입력":
-                    s_carrier_input = c3.text_input("업체명 직접입력", placeholder="택배사/기사님 성함")
-                    final_carrier = s_carrier_input
+                    final_carrier = c3.text_input("업체명 직접입력", placeholder="")
                 else:
                     final_carrier = s_carrier
                 
@@ -272,8 +271,11 @@ def render_shipping_operations(db, sub_menu):
 
                 # [수정] 레이아웃 변경: 납품처/연락처(1줄) -> 주소/상세주소(1줄)
                 c_d1, c_d2 = st.columns(2)
-                d_to = c_d1.text_input("납품처명", value=first_row.get('delivery_to', ''))
-                d_contact = c_d2.text_input("납품연락처", value=first_row.get('delivery_contact', ''))
+                # [FIX] NaN 값 처리
+                val_to = first_row.get('delivery_to', '')
+                val_contact = first_row.get('delivery_contact', '')
+                d_to = c_d1.text_input("납품처명", value=str(val_to) if pd.notna(val_to) else '')
+                d_contact = c_d2.text_input("납품연락처", value=str(val_contact) if pd.notna(val_contact) else '')
                 
                 c_addr1, c_addr2, c_addr3 = st.columns([3.5, 2, 0.5], vertical_alignment="bottom")
                 d_addr = c_addr1.text_input("납품주소", key="ship_addr_input")
@@ -286,7 +288,8 @@ def render_shipping_operations(db, sub_menu):
 
                 s_note = st.text_area("비고 (송장번호/차량번호 등)", placeholder="예: 경동택배 123-456-7890")
 
-                s_vat_inc = st.checkbox("단가에 부가세 포함", value=False)
+                # [FIX] 부가세 포함 기본 체크
+                s_vat_inc = st.checkbox("단가에 부가세 포함", value=True)
                 if s_vat_inc:
                     s_supply_price = int(total_est_amt / 1.1)
                     s_vat = total_est_amt - s_supply_price
@@ -1211,17 +1214,10 @@ def render_shipping_status(db, sub_menu):
 
                                         html += f"<!-- {uuid.uuid4()} -->" # [FIX] 매번 다른 내용을 추가하여 강제 리로드 유도
                                         html += "</body></html>"
-                                        
-                                        # [NEW] 세션에 HTML 저장 (미리보기 유지용)
-                                        st.session_state[ss_key_print] = html
-                                        st.rerun()
 
-                            # [NEW] 인쇄 미리보기 및 재인쇄 버튼 (폼 밖에서 렌더링)
-                            if ss_key_print in st.session_state:
-                                # [수정] 접었다 펼칠 수 있는 Expander로 변경하고 버튼 제거
-                                with st.expander("🖨️ 인쇄 미리보기 (자동으로 인쇄창이 열립니다)", expanded=True):
-                                    # HTML 렌더링 (onload=print() 포함)
-                                    st.components.v1.html(st.session_state[ss_key_print], height=900, scrolling=True)
+                                        # [수정] 세션 상태와 미리보기를 제거하고, 버튼 클릭 시 보이지 않는 컴포넌트로 직접 인쇄창을 호출합니다.
+                                        # 이렇게 하면 재인쇄 시 발생하던 오류가 해결됩니다.
+                                        st.components.v1.html(html, height=0, width=0)
 
                 else:
                     st.info("거래명세서를 발행할 항목을 선택하세요.")

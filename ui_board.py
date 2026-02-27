@@ -1036,10 +1036,11 @@ def render_schedule(db):
     
     # [NEW] 목록 조회 기간 설정
     with st.expander("검색", expanded=True):
-        # [수정] 레이아웃 변경: 라디오버튼 옆에 입력필드 배치
-        c_opt, c_range = st.columns([1.5, 3.5])
-        list_mode = c_opt.radio("조회 기준", ["달력과 동일 (위)", "별도 기간 선택"], horizontal=True, key="sch_list_mode")
-        
+        # [FIX] NameError: 'list_mode' is not defined 오류 수정
+        # 레이아웃 변경 및 수직 정렬 (라디오 버튼과 기간 선택 높이 맞춤)
+        c_opt, c_range = st.columns([1.5, 3.5], vertical_alignment="bottom")
+        list_mode = c_opt.radio("조회 기준", ["현재 선택된 월", "별도 기간 선택"], horizontal=True, key="sch_list_mode")
+
         # 기본값 (달력 기준)
         l_start = datetime.date(sel_year, sel_month, 1)
         l_last = calendar.monthrange(sel_year, sel_month)[1]

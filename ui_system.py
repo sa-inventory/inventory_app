@@ -126,17 +126,52 @@ def render_users(db, sub_menu):
                 
                 st.divider()
                 st.markdown("##### 관리 기능")
-                c_adm1, c_adm2 = st.columns(2)
+                c_adm1, c_adm2, c_adm3 = st.columns([1.5, 1.5, 3])
                 if c_adm1.button("🔑 비밀번호 초기화 (0000)", key=f"reset_pw_{sel_id}"):
                     db.collection("users").document(sel_id).update({"password": "0000", "password_changed_at": firestore.DELETE_FIELD})
                     st.success(f"'{sel_item['name']}'님의 비밀번호가 '0000'으로 초기화되었습니다.")
                 
+                # [수정] 사용자 삭제 시 작성한 게시물/일정 처리 로직 추가
                 if c_adm2.button("🗑️ 이 사용자 삭제", type="primary", key=f"del_user_{sel_id}"):
                     if sel_id == st.session_state.get("user_id"):
                         st.error("현재 로그인된 계정은 삭제할 수 없습니다.")
                     else:
-                        db.collection("users").document(sel_id).delete()
-                        st.success(f"'{sel_item['name']}' 사용자가 삭제되었습니다.")
+                        # 삭제 확인을 위한 세션 상태 설정
+                        st.session_state[f"confirm_delete_{sel_id}"] = True
+                
+                # 삭제 확인 UI
+                if st.session_state.get(f"confirm_delete_{sel_id}"):
+                    st.warning(f"**{sel_item['name']}** 사용자를 정말로 삭제하시겠습니까? 이 사용자가 작성한 모든 게시물과 일정의 작성자 이름이 '탈퇴한 사용자'로 변경됩니다.")
+                    
+                    c_del1, c_del2, c_del3 = st.columns([1.2, 1, 4])
+                    if c_del1.button("✅ 예, 삭제합니다", key=f"confirm_del_btn_{sel_id}"):
+                        with st.spinner("사용자 및 관련 데이터 처리 중..."):
+                            # Batch Write 시작
+                            batch = db.batch()
+                            
+                            # 1. 이 사용자가 작성한 게시물(posts)의 작성자 정보 변경
+                            posts_ref = db.collection("posts").where("author_id", "==", sel_id).stream()
+                            for post in posts_ref:
+                                batch.update(post.reference, {"author": "탈퇴한 사용자", "author_id": ""})
+                                
+                            # 2. 이 사용자가 작성한 일정(schedules)의 작성자 정보 변경 (author_id가 없으므로 이름으로 조회)
+                            schedules_ref = db.collection("schedules").where("author", "==", sel_item['name']).stream()
+                            for schedule in schedules_ref:
+                                batch.update(schedule.reference, {"author": "탈퇴한 사용자"})
+                                
+                            # 3. 사용자 문서 삭제
+                            user_ref = db.collection("users").document(sel_id)
+                            batch.delete(user_ref)
+                            
+                            # Batch 실행
+                            batch.commit()
+                            
+                        st.success(f"'{sel_item['name']}' 사용자가 삭제되었고, 관련 데이터가 처리되었습니다.")
+                        del st.session_state[f"confirm_delete_{sel_id}"]
+                        st.rerun()
+                        
+                    if c_del2.button("❌ 아니요", key=f"cancel_del_btn_{sel_id}"):
+                        del st.session_state[f"confirm_delete_{sel_id}"]
                         st.rerun()
 def render_my_profile(db):
     st.header("로그인 정보 설정")

@@ -218,6 +218,8 @@ def render_order_entry(db, sub_menu):
         # 상태 업데이트
         if current_code != last_code:
             st.session_state["last_sel_product_code"] = current_code
+            # [FIX] 제품 변경 시 주소 검색 팝업 닫기
+            st.session_state["show_order_addr_dialog"] = False
 
         # --- 위젯 렌더링 ---
         sel_prod_str = st.selectbox("제품 선택 (검색 가능)", product_opts, key="order_prod_selectbox")
@@ -246,13 +248,6 @@ def render_order_entry(db, sub_menu):
             if st.session_state.get("last_sel_product_code") is not None:
                 st.session_state["last_sel_product_code"] = None
         else:
-            # [FIX] 제품 선택 변경 시 주소 검색 팝업 상태 초기화 (자동 팝업 방지)
-            # 인덱스 대신 제품 코드로 변경 감지
-            # current_code는 위에서 이미 할당됨
-            if st.session_state.get("last_sel_product_code") != current_code:
-                st.session_state["show_order_addr_dialog"] = False
-                st.session_state["last_sel_product_code"] = current_code
-            
             # [NEW] 자동 스크롤 앵커 및 스크립트
             st.markdown('<div id="order-entry-form"></div>', unsafe_allow_html=True)
             js_uuid = uuid.uuid4()
@@ -279,11 +274,16 @@ def render_order_entry(db, sub_menu):
             c_info, c_close = st.columns([5.5, 1.5])
             with c_info:
                 st.success(f"선택된 제품: **{selected_product['product_code']}**\n\n제품종류: {selected_product.get('product_type', '')} | 사종: {selected_product.get('yarn_type', '')} | 중량: {selected_product.get('weight', '')}g | 사이즈: {selected_product.get('size', '')}")
+            
+            # [FIX] 버튼 클릭 시 콜백 함수로 상태 초기화 (StreamlitAPIException 방지)
+            def reset_order_selection():
+                st.session_state["order_df_key"] += 1
+                st.session_state["last_sel_product_code"] = None
+                st.session_state["order_prod_selectbox"] = "선택하세요"
+                st.session_state["show_order_addr_dialog"] = False
+
             with c_close:
-                if st.button("닫기", key="close_order_detail", use_container_width=True):
-                    st.session_state["order_df_key"] += 1
-                    st.session_state["last_sel_product_code"] = None
-                    st.rerun()
+                st.button("닫기", key="close_order_detail", use_container_width=True, on_click=reset_order_selection)
 
             # [NEW] 주소 검색 모달 (Dialog)
             if "show_order_addr_dialog" not in st.session_state:

@@ -384,7 +384,7 @@ def render_company_settings(db, sub_menu):
         # [NEW] 주소 검색 API 키 입력
         juso_api_key = st.text_input("도로명주소 API 승인키", value=data.get("juso_api_key", ""), type="password", help="행정안전부 개발자센터에서 발급받은 '주소검색 API' 승인키를 입력하세요.")
         
-        app_title = st.text_input("시스템 제목 (브라우저 탭)", value=data.get("app_title", "타올 생산 현황 관리"), help="웹브라우저 탭에 표시될 제목입니다.")
+        app_title = st.text_input("로그인 제목", value=data.get("app_title", "타올 생산 현황 관리"), help="로그인 화면과 브라우저 탭에 표시될 제목입니다.")
         
         note = st.text_area("비고 / 하단 문구", value=data.get("note", ""), help="명세서 하단에 들어갈 안내 문구 등을 입력하세요.")
         

@@ -56,21 +56,20 @@ if st.session_state.get("role") != "admin":
     base_css += """
         /* [NEW] 보안 및 깔끔한 화면을 위해 Streamlit 기본 메뉴 숨기기 */
         
-        /* 1. 헤더 전체를 숨김 (점 3개 메뉴, 배포 버튼 등 포함) - visibility 사용으로 자식 요소 노출 가능 */
-        header[data-testid="stHeader"] {
-            visibility: hidden;
+        /* 1. 상단 데코레이션 바 숨김 */
+        [data-testid="stDecoration"] {
+            display: none !important;
         }
         
-        /* 2. 사이드바 토글 버튼(<<)만 다시 보이게 설정 */
-        [data-testid="stSidebarCollapsedControl"] {
-            visibility: visible;
-            display: block !important;
+        /* 2. 우측 상단 툴바(점 3개 메뉴, 배포 버튼 등) 숨김 */
+        [data-testid="stToolbar"] {
+            display: none !important;
         }
         
-        /* 3. 기타 요소 완전 숨김 (공간 차지 안함) */
-        [data-testid="stDecoration"] {visibility: hidden; display: none !important;}
-        footer {visibility: hidden; display: none !important;}
-        .stDeployButton {display: none !important;}
+        /* 3. 푸터 숨김 */
+        footer {
+            display: none !important;
+        }
     """
 
 base_css += "</style>"
@@ -84,44 +83,32 @@ if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
     st.session_state["role"] = None
 
-# [NEW] 강제 로그아웃 처리 (URL 파라미터 감지)
-if st.query_params.get("logout"):
-    st.query_params.clear()
-    for key in list(st.session_state.keys()):
-        del st.session_state[key]
-    st.rerun()
-
-# [NEW] 자동 로그인 처리 (URL의 session_id 확인)
-if not st.session_state["logged_in"]:
-    session_id = st.query_params.get("session_id")
-    if session_id:
-        # DB에서 세션 정보 확인
-        try:
-            session_doc = db.collection("sessions").document(session_id).get()
-            if session_doc.exists:
-                s_data = session_doc.to_dict()
-                user_id = s_data.get("user_id")
-                
-                # 사용자 정보 로드 및 로그인 상태 복원
-                user_doc = db.collection("users").document(user_id).get()
-                if user_doc.exists:
-                    user_data = user_doc.to_dict()
-                    st.session_state["logged_in"] = True
-                    st.session_state["role"] = user_data.get("role", "user")
-                    st.session_state["user_name"] = user_data.get("name", user_id)
-                    st.session_state["user_id"] = user_id
-                    st.session_state["department"] = user_data.get("department", "")
-                    st.session_state["linked_partner"] = user_data.get("linked_partner", "")
-                    st.session_state["permissions"] = user_data.get("permissions", [])
-                    st.session_state["auto_logout_minutes"] = user_data.get("auto_logout_minutes", 60)
-                    st.session_state["login_time"] = s_data.get("created_at", datetime.datetime.now())
-        except Exception:
-            # 사용량 초과 등으로 DB 접속 실패 시 자동 로그인 건너뜀 (로그인 화면 표시)
-            pass
-
 # 로그인 화면 처리
 if not st.session_state["logged_in"]:
-    st.markdown("<h1 style='text-align: center;'>세안타올 생산 관리</h1>", unsafe_allow_html=True)
+    # [NEW] 회사 로고 및 제목 가져오기
+    try:
+        comp_doc = db.collection("settings").document("company_info").get()
+        if comp_doc.exists:
+            comp_data = comp_doc.to_dict()
+            login_logo = comp_data.get("logo_img")
+            login_title = comp_data.get("app_title", "세안타올 생산 관리")
+        else:
+            login_logo = None
+            login_title = "세안타올 생산 관리"
+    except:
+        login_logo = None
+        login_title = "세안타올 생산 관리"
+
+    if login_logo:
+        st.markdown(
+            f"""<div style="display: flex; justify-content: center; align-items: center; margin-bottom: 30px;">
+                <img src="data:image/png;base64,{login_logo}" style="max-width: 120px; max-height: 100px; margin-right: 20px;">
+                <h1 style='margin: 0; font-size: 2.5rem;'>{login_title}</h1>
+            </div>""",
+            unsafe_allow_html=True
+        )
+    else:
+        st.markdown(f"<h1 style='text-align: center;'>{login_title}</h1>", unsafe_allow_html=True)
     
     # [NEW] 아이디 입력 후 엔터 시 비밀번호 필드로 포커스 이동 (JS 주입)
     components.html("""
@@ -206,18 +193,9 @@ if not st.session_state["logged_in"]:
                                 if "current_menu" in st.session_state:
                                     del st.session_state["current_menu"]
                                 
-                                # [수정] 직원은 공지사항을 기본 화면으로 설정
                                 st.session_state["current_menu"] = "공지사항"
                                 if "current_sub_menu" in st.session_state:
                                     del st.session_state["current_sub_menu"]
-                                
-                                # [NEW] 세션 생성 및 URL 저장 (새로고침 유지용)
-                                new_session_id = str(uuid.uuid4())
-                                db.collection("sessions").document(new_session_id).set({
-                                    "user_id": login_id,
-                                    "created_at": datetime.datetime.now()
-                                })
-                                st.query_params["session_id"] = new_session_id
                                 st.rerun()
                         else:
                             st.error("비밀번호가 일치하지 않습니다.")
@@ -274,19 +252,10 @@ if not st.session_state["logged_in"]:
                                 if "current_menu" in st.session_state:
                                     del st.session_state["current_menu"]
                                 
-                                # 권한 목록이 있으면 첫 번째 메뉴를 기본값으로, 없으면 발주현황(거래처)
                                 user_perms = user_data.get("permissions", [])
                                 st.session_state["current_menu"] = user_perms[0] if user_perms else "발주현황(거래처)"
                                 if "current_sub_menu" in st.session_state:
                                     del st.session_state["current_sub_menu"]
-                                
-                                # [NEW] 세션 생성 및 URL 저장
-                                new_session_id = str(uuid.uuid4())
-                                db.collection("sessions").document(new_session_id).set({
-                                    "user_id": p_id,
-                                    "created_at": datetime.datetime.now()
-                                })
-                                st.query_params["session_id"] = new_session_id
                                 st.rerun()
                             else:
                                 st.error("비밀번호가 일치하지 않습니다.")
@@ -294,6 +263,14 @@ if not st.session_state["logged_in"]:
                             st.error("거래처 계정이 아닙니다. 직원 로그인 탭을 이용해주세요.")
                     else:
                         st.error("등록되지 않은 아이디입니다.")
+    
+    # [NEW] 강제 로그아웃 처리 (URL 파라미터 감지)
+    if st.query_params.get("logout"):
+        st.query_params.clear()
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.rerun()
+
     st.stop()
 
 # [NEW] 브라우저 탭 제목 동적 변경 (사용자 설정 반영)
@@ -552,11 +529,6 @@ with st.sidebar:
     menu_item("로그인 정보 설정", "로그인 정보 설정")
     
     if st.button("로그아웃", use_container_width=True):
-        # [NEW] 로그아웃 시 세션 삭제 및 URL 초기화
-        session_id = st.query_params.get("session_id")
-        if session_id:
-            db.collection("sessions").document(session_id).delete()
-        st.query_params.clear()
 
         st.session_state["logged_in"] = False
         st.session_state["role"] = None
@@ -564,7 +536,6 @@ with st.sidebar:
             del st.session_state["user_name"]
         if "current_menu" in st.session_state:
             del st.session_state["current_menu"]
-        
         # [수정] 로그아웃 시 달력 상태 초기화
         if "cal_year" in st.session_state: del st.session_state["cal_year"]
         if "cal_month" in st.session_state: del st.session_state["cal_month"]
@@ -639,11 +610,9 @@ if st.session_state.get("logged_in"):
                 const idleMs = now - lastActivity;
                 
                 if (idleMs > timeoutMs) {{
-                    // 로그아웃 처리: 스토리지 클리어 및 이동
                     localStorage.removeItem(storageKey);
-                    // 무한 루프 방지: 이미 logout 파라미터가 있으면 이동 안함
                     if (!window.parent.location.href.includes('logout=true')) {{
-                        window.parent.location.href = window.parent.location.href.split('?')[0] + '?logout=true';
+                        window.parent.location.href = window.parent.location.pathname + '?logout=true';
                     }}
                     return true;
                 }}
@@ -655,7 +624,6 @@ if st.session_state.get("logged_in"):
                 if (checkLogout()) return;
 
                 const now = Date.now();
-                let lastActivity = parseInt(localStorage.getItem(storageKey) || now);
                 
                 const idleMs = now - lastActivity;
                 const remainingMs = timeoutMs - idleMs;
@@ -694,11 +662,7 @@ if st.session_state.get("logged_in"):
             }}
             
             function resetTimer() {{
-                // [FIX] 절전모드 해제 시 즉시 로그아웃 되도록 수정
-                // 이벤트 발생 시 먼저 로그아웃 조건인지 확인 (시간 갱신 방지)
                 if (checkLogout()) return;
-                
-                // 타임아웃 전이면 활동 시간 갱신
                 localStorage.setItem(storageKey, Date.now());
                 updateTimer();
             }}

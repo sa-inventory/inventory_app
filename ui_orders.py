@@ -5,7 +5,7 @@ import io
 import uuid
 import re
 from firebase_admin import firestore
-from utils import get_partners, generate_report_html, get_common_codes, search_address_api, get_products_list
+from utils import get_partners, generate_report_html, get_common_codes, search_address_api, get_products_list, save_user_settings, load_user_settings
 
 def render_order_entry(db, sub_menu):
     st.header("발주서 접수")
@@ -750,6 +750,7 @@ def render_partner_order_status(db):
 
 def render_order_status(db, sub_menu):
     st.header("발주 현황")
+    user_id = st.session_state.get("user_id")
 
     # [NEW] 인쇄 설정 세션 상태 초기화 (최초 1회)
     print_options_keys = {
@@ -758,9 +759,13 @@ def render_order_status(db, sub_menu):
         "os_p_mt": 15, "os_p_mb": 15, "os_p_ml": 15, "os_p_mr": 15,
         "os_p_nowrap": False
     }
+    
+    # [NEW] DB에서 인쇄 설정 로드
+    saved_print_opts = load_user_settings(user_id, "order_print_opts", {})
+    
     for key, default_value in print_options_keys.items():
         if key not in st.session_state:
-            st.session_state[key] = default_value
+            st.session_state[key] = saved_print_opts.get(key, default_value)
 
 
 
@@ -1279,27 +1284,32 @@ def render_order_status(db, sub_menu):
 
             # 인쇄 옵션 설정
             with st.expander("인쇄 옵션 설정"):
+                # [NEW] 인쇄 옵션 저장 콜백
+                def save_print_opts():
+                    opts = {k: st.session_state[k] for k in print_options_keys}
+                    save_user_settings(user_id, "order_print_opts", opts)
+
                 po_c1, po_c2, po_c3, po_c4 = st.columns(4)
-                p_title = po_c1.text_input("제목", key="os_p_title")
-                p_title_size = po_c2.number_input("제목 크기(px)", step=1, key="os_p_ts")
-                p_body_size = po_c3.number_input("본문 글자 크기(px)", step=1, key="os_p_bs")
-                p_padding = po_c4.number_input("셀 여백(px)", step=1, key="os_p_pad")
+                p_title = po_c1.text_input("제목", key="os_p_title", on_change=save_print_opts)
+                p_title_size = po_c2.number_input("제목 크기(px)", step=1, key="os_p_ts", on_change=save_print_opts)
+                p_body_size = po_c3.number_input("본문 글자 크기(px)", step=1, key="os_p_bs", on_change=save_print_opts)
+                p_padding = po_c4.number_input("셀 여백(px)", step=1, key="os_p_pad", on_change=save_print_opts)
                 
                 po_c5, po_c6, po_c7 = st.columns(3)
-                p_show_date = po_c5.checkbox("출력일시 표시", key="os_p_sd")
-                p_date_pos = po_c6.selectbox("일시 위치", ["Right", "Left", "Center"], key="os_p_dp")
-                p_date_size = po_c7.number_input("일시 글자 크기(px)", step=1, key="os_p_ds")
+                p_show_date = po_c5.checkbox("출력일시 표시", key="os_p_sd", on_change=save_print_opts)
+                p_date_pos = po_c6.selectbox("일시 위치", ["Right", "Left", "Center"], key="os_p_dp", on_change=save_print_opts)
+                p_date_size = po_c7.number_input("일시 글자 크기(px)", step=1, key="os_p_ds", on_change=save_print_opts)
                 
                 st.caption("페이지 여백 (mm)")
                 po_c8, po_c9, po_c10, po_c11 = st.columns(4)
-                p_m_top = po_c8.number_input("상단", step=1, key="os_p_mt")
-                p_m_bottom = po_c9.number_input("하단", step=1, key="os_p_mb")
-                p_m_left = po_c10.number_input("좌측", step=1, key="os_p_ml")
-                p_m_right = po_c11.number_input("우측", step=1, key="os_p_mr")
+                p_m_top = po_c8.number_input("상단", step=1, key="os_p_mt", on_change=save_print_opts)
+                p_m_bottom = po_c9.number_input("하단", step=1, key="os_p_mb", on_change=save_print_opts)
+                p_m_left = po_c10.number_input("좌측", step=1, key="os_p_ml", on_change=save_print_opts)
+                p_m_right = po_c11.number_input("우측", step=1, key="os_p_mr", on_change=save_print_opts)
                 
                 po_c12, po_c13 = st.columns(2)
-                os_p_bo = po_c12.number_input("외곽선 굵기", value=1.0, step=0.1, format="%.1f", key="os_p_bo")
-                os_p_bi = po_c13.number_input("안쪽선 굵기", value=0.5, step=0.1, format="%.1f", key="os_p_bi")
+                os_p_bo = po_c12.number_input("외곽선 굵기", value=1.0, step=0.1, format="%.1f", key="os_p_bo", on_change=save_print_opts)
+                os_p_bi = po_c13.number_input("안쪽선 굵기", value=0.5, step=0.1, format="%.1f", key="os_p_bi", on_change=save_print_opts)
                 
                 st.divider()
                 st.markdown("###### 컬럼 설정 (출력 여부, 순서, 너비)")
@@ -1310,7 +1320,7 @@ def render_order_status(db, sub_menu):
 
                 # 세션에서 현재 선택된 컬럼 목록 가져오기 (순서 유지)
                 if "os_p_selected_cols" not in st.session_state:
-                    st.session_state["os_p_selected_cols"] = final_cols_kr.copy()
+                    st.session_state["os_p_selected_cols"] = load_user_settings(user_id, "order_cols", final_cols_kr.copy())
 
                 # 현재 데이터에 없는 컬럼은 선택 목록에서 제거
                 st.session_state["os_p_selected_cols"] = [c for c in st.session_state["os_p_selected_cols"] if c in final_cols_kr]
@@ -1320,12 +1330,18 @@ def render_order_status(db, sub_menu):
                 if new_cols:
                     st.session_state["os_p_selected_cols"].extend(new_cols)
 
+                # [NEW] 컬럼 선택 저장 콜백
+                def save_cols():
+                    st.session_state["os_p_selected_cols"] = st.session_state["os_p_multiselect"]
+                    save_user_settings(user_id, "order_cols", st.session_state["os_p_selected_cols"])
+
                 # 멀티셀렉트로 출력 여부 결정
                 selected_cols = st.multiselect(
                     "출력할 컬럼 선택",
                     options=final_cols_kr,
                     default=st.session_state["os_p_selected_cols"],
-                    key="os_p_multiselect"
+                    key="os_p_multiselect",
+                    on_change=save_cols
                 )
                 # 변경사항을 즉시 세션에 반영
                 st.session_state["os_p_selected_cols"] = selected_cols
@@ -1342,6 +1358,7 @@ def render_order_status(db, sub_menu):
                             selected_cols.pop(idx)
                             selected_cols.insert(idx - 1, target_col)
                             st.session_state["os_p_selected_cols"] = selected_cols
+                            save_user_settings(user_id, "order_cols", selected_cols) # [NEW] 저장
                             st.rerun()
 
                 if c_move3.button("⬇️ 아래로", help="아래로 이동", key="os_btn_down"):
@@ -1351,15 +1368,17 @@ def render_order_status(db, sub_menu):
                             selected_cols.pop(idx)
                             selected_cols.insert(idx + 1, target_col)
                             st.session_state["os_p_selected_cols"] = selected_cols
+                            save_user_settings(user_id, "order_cols", selected_cols) # [NEW] 저장
                             st.rerun()
                 
                 if c_move4.button("🔄 순서 초기화", help="기본 순서로 되돌립니다.", key="os_btn_reset"):
                     st.session_state["os_p_selected_cols"] = final_cols_kr.copy()
+                    save_user_settings(user_id, "order_cols", st.session_state["os_p_selected_cols"]) # [NEW] 저장
                     st.rerun()
 
                 # [수정] 2. 너비 설정 (st.data_editor)
                 if "os_p_widths" not in st.session_state:
-                    st.session_state["os_p_widths"] = {}
+                    st.session_state["os_p_widths"] = load_user_settings(user_id, "order_widths", {})
 
                 width_df_data = []
                 for col in selected_cols:
@@ -1377,11 +1396,17 @@ def render_order_status(db, sub_menu):
                         width="stretch",
                         key="os_p_width_editor"
                     )
-                    # 변경된 너비 저장
+                    # 변경된 너비 저장 (세션 및 DB)
+                    widths_changed = False
                     for _, row in edited_widths_df.iterrows():
-                        st.session_state["os_p_widths"][row["컬럼명"]] = row["너비(px)"]
+                        if st.session_state["os_p_widths"].get(row["컬럼명"]) != row["너비(px)"]:
+                            st.session_state["os_p_widths"][row["컬럼명"]] = row["너비(px)"]
+                            widths_changed = True
+                    
+                    if widths_changed:
+                        save_user_settings(user_id, "order_widths", st.session_state["os_p_widths"])
                 
-                p_nowrap = st.checkbox("텍스트 줄바꿈 방지 (한 줄 표시)", key="os_p_nowrap")
+                p_nowrap = st.checkbox("텍스트 줄바꿈 방지 (한 줄 표시)", key="os_p_nowrap", on_change=save_print_opts)
 
             # 엑셀 다운로드 및 인쇄 버튼
             c_btn_xls, c_btn_gap, c_btn_prt = st.columns([1.5, 5, 1.5])

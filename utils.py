@@ -334,3 +334,34 @@ def validate_password(password):
             return False, "연속된 문자나 숫자를 4자리 이상 사용할 수 없습니다."
             
     return True, ""
+
+# [NEW] 사용자 설정 저장/로드 함수
+def save_user_settings(user_id, key, value):
+    db = get_db()
+    if not user_id: return
+    try:
+        # settings 필드 내에 key: value 형태로 저장 (Dot notation for nested update)
+        db.collection("users").document(user_id).update({f"settings.{key}": value})
+    except:
+        # 문서가 없거나 settings 필드가 없을 경우 set with merge
+        db.collection("users").document(user_id).set({"settings": {key: value}}, merge=True)
+
+def load_user_settings(user_id, key, default_value):
+    db = get_db()
+    if not user_id: return default_value
+    try:
+        doc = db.collection("users").document(user_id).get()
+        if doc.exists:
+            data = doc.to_dict()
+            settings = data.get("settings", {})
+            val = settings.get(key)
+            if val is not None:
+                if isinstance(default_value, dict) and isinstance(val, dict):
+                    # Merge to keep defaults for missing keys
+                    merged = default_value.copy()
+                    merged.update(val)
+                    return merged
+                return val
+    except:
+        pass
+    return default_value

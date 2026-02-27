@@ -4,7 +4,7 @@ import datetime
 import io
 import uuid
 from firebase_admin import firestore
-from utils import get_partners, get_common_codes, search_address_api, generate_report_html, get_partners_map, get_db
+from utils import get_partners, get_common_codes, search_address_api, generate_report_html, get_partners_map, get_db, save_user_settings, load_user_settings
 from ui_inventory import render_inventory_logic
 
 def render_shipping_operations(db, sub_menu):
@@ -412,6 +412,7 @@ def load_shipping_orders(start_dt, end_dt):
 def render_shipping_status(db, sub_menu):
     st.header("출고 현황")
     st.info("출고된 내역을 조회하고 거래명세서를 발행합니다.")
+    user_id = st.session_state.get("user_id")
 
     def num_to_korean(num):
         units = ['', '십', '백', '천']
@@ -442,7 +443,7 @@ def render_shipping_status(db, sub_menu):
         comp_doc = db.collection("settings").document("company_info").get()
         comp_info = comp_doc.to_dict() if comp_doc.exists else {}
         
-        st.session_state["stmt_settings"] = {
+        default_settings = {
             "opt_type": "공급받는자용", "opt_merge": True, "opt_inc_ship": True,
             "opt_show_sign": True, "opt_hide_price": False, "opt_show_logo": True,
             "opt_logo_height": 50, "opt_show_stamp": True, "opt_sw": 50, "opt_st": -10, "opt_sr": 0,
@@ -457,6 +458,9 @@ def render_shipping_status(db, sub_menu):
             "opt_bank": True, "opt_vat_chk": False,
             "opt_note": comp_info.get('note', '')
         }
+        
+        # [NEW] DB에서 사용자 설정 로드 (없으면 기본값 사용)
+        st.session_state["stmt_settings"] = load_user_settings(user_id, "stmt_settings", default_settings)
     
     shipping_partners = get_partners("배송업체")
     
@@ -774,6 +778,7 @@ def render_shipping_status(db, sub_menu):
                 # [NEW] 설정 업데이트 콜백
                 def update_stmt_setting(key):
                     st.session_state["stmt_settings"][key] = st.session_state[f"w_stmt_{key}"]
+                    save_user_settings(user_id, "stmt_settings", st.session_state["stmt_settings"]) # [NEW] DB 저장
                     clear_all_print_views()
 
                 # [NEW] 거래명세서 상세 설정 (루프 밖으로 이동하여 전역 설정으로 변경)
@@ -873,6 +878,7 @@ def render_shipping_status(db, sub_menu):
                             if "(부가세 포함)" not in current_note:
                                 st.session_state["stmt_settings"]["opt_note"] = (current_note + " (부가세 포함)").strip()
                         st.session_state["stmt_settings"]["opt_vat_chk"] = st.session_state["w_stmt_opt_vat_chk"]
+                        save_user_settings(user_id, "stmt_settings", st.session_state["stmt_settings"]) # [NEW] DB 저장
                         clear_all_print_views()
 
                     st.checkbox("부가세 포함 문구 추가", value=s['opt_vat_chk'], key="w_stmt_opt_vat_chk", on_change=on_vat_note_change)

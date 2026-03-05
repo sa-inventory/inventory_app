@@ -219,62 +219,43 @@ def render_shipping_operations(db, sub_menu):
             if not show_all_items:
                 df = df[df['stock'] > 0]
             
-            # [FIX] 필터링 후 인덱스를 리셋하여 data_editor와 인덱스 불일치 문제 해결
-            df = df.reset_index(drop=True)
-
             # [NEW] 동적 높이 계산 (행당 약 35px, 최대 20행 700px)
             table_height = min((len(df) + 1) * 35 + 3, 700)
             
-            # [NEW] 데이터 에디터 기반 선택 로직으로 변경 (취소 시 체크 해제 기능 지원)
-            if "ship_sel_state" not in st.session_state:
-                st.session_state["ship_sel_state"] = {}
-
-            # 데이터프레임에 '선택' 컬럼 추가 (세션 상태 반영)
-            df_display = df[final_cols].rename(columns=col_map)
-            # ID를 기준으로 선택 상태 매핑
-            df_display.insert(0, "선택", df['id'].map(st.session_state["ship_sel_state"]).fillna(False))
-            
-            # [FIX] 에디터 키를 동적으로 변경하여 강제 리렌더링 (취소 버튼 클릭 시 체크 해제 반영)
-            if "ship_editor_key" not in st.session_state:
-                st.session_state["ship_editor_key"] = 0
-
-            edited_df = st.data_editor(
-                df_display,
+            selection = st.dataframe(
+                df[final_cols].rename(columns=col_map),
                 width="stretch",
                 hide_index=True,
-                column_config={
-                    "선택": st.column_config.CheckboxColumn("선택", width="small"),
-                },
-                disabled=[c for c in df_display.columns if c != "선택"],
+                on_select="rerun",
+                selection_mode="multi-row",
                 height=table_height,
-                key=f"ship_op_editor_{st.session_state['ship_op_key']}_{st.session_state['ship_editor_key']}"
+                key=f"ship_op_list_{st.session_state['ship_op_key']}"
             )
             
-            # 선택된 행 추출
-            selected_rows_display = edited_df[edited_df["선택"]]
-            
-            # 원본 데이터 매핑 (인덱스 기준이 아닌 ID 기준 매칭 필요)
-            # edited_df는 df와 인덱스가 동일하므로 인덱스로 매칭 가능
-            selected_indices = selected_rows_display.index
-            selected_rows = df.iloc[selected_indices].copy()
-            
-            # 세션 상태 업데이트 (사용자 클릭 반영)
-            for idx, row in edited_df.iterrows():
-                row_id = df.iloc[idx]['id']
-                st.session_state["ship_sel_state"][row_id] = row["선택"]
-
-            if not selected_rows.empty:
+            if selection.selection.rows:
+                selected_indices = selection.selection.rows
+                selected_rows = df.iloc[selected_indices]
                 
                 st.divider()
                 st.markdown(f"### 출고 정보 입력 (선택된 {len(selected_rows)}건)")
 
                 st.markdown("##### 1. 출고 품목 상세 입력")
                 
+                # [NEW] 취소된 항목 관리 (세션 상태)
+                if "ship_ignored_ids" not in st.session_state:
+                    st.session_state["ship_ignored_ids"] = set()
+                
+                # [NEW] 선택된 행 중 취소되지 않은 것만 필터링
+                valid_rows = selected_rows[~selected_rows['id'].isin(st.session_state["ship_ignored_ids"])]
+                
+                if valid_rows.empty:
+                    st.warning("출고할 품목이 없습니다.")
+
                 staging_data = []
-                for idx, row in selected_rows.iterrows():
+                for idx, row in valid_rows.iterrows():
                     with st.container(border=True):
                         # [NEW] 1. 제품 정보 한 줄 표시
-                        c_info, c_cancel = st.columns([9.2, 0.8])
+                        c_info, c_cancel = st.columns([8.8, 1.2])
                         stock = int(row.get('stock', 0))
                         price = int(row.get('shipping_unit_price', 0))
                         
@@ -285,41 +266,33 @@ def render_shipping_operations(db, sub_menu):
                         
                         with c_cancel:
                             if st.button("취소", key=f"cancel_item_{row['id']}", help="출고 목록에서 제외"):
-                                # [FIX] 취소 시 세션 상태에서 선택 해제 및 에디터 리셋
-                                st.session_state["ship_sel_state"][row['id']] = False
-                                st.session_state["ship_editor_key"] += 1
+                                st.session_state["ship_ignored_ids"].add(row['id'])
                                 st.rerun()
 
                         # [NEW] 2. 입력 필드 (하단 정렬, 기본값 0)
-                        c_qty, c_price, c_note = st.columns([2, 1.5, 3], vertical_alignment="bottom")
+                        c_qty, c_price, c_note = st.columns([1.5, 1, 2], vertical_alignment="bottom")
                         
                         with c_qty:
                             qty_key = f"ship_qty_{row['id']}"
                             chk_key = f"ship_all_chk_{row['id']}"
 
-                            # [수정] 라벨과 체크박스를 한 줄에 배치 (높이 정렬을 위해 모든 컬럼에 st.columns 사용)
-                            qc1, qc2 = st.columns([0.6, 0.4], vertical_alignment="center")
-                            qc1.markdown("**출고수량**")
-                            is_ship_all = qc2.checkbox("[전량]", key=chk_key)
+                            qc1, qc2 = st.columns([1, 1.5])
+                            qc1.markdown("출고수량")
+                            is_ship_all = qc2.checkbox("전량", key=chk_key)
                             
                             # 기본값 0, 전량 체크 시 재고량
-                            # [FIX] 체크박스가 켜져있으면 세션 상태 강제 업데이트
-                            if is_ship_all:
-                                st.session_state[qty_key] = stock
-                            
-                            # 세션값 가져오기 (없으면 0)
                             current_qty = st.session_state.get(qty_key, 0)
+                            if is_ship_all:
+                                current_qty = stock
                             
                             qty = st.number_input("출고수량", min_value=0, max_value=stock, value=current_qty, step=10, key=qty_key, label_visibility="collapsed")
 
                         with c_price:
-                            # [수정] 라벨 높이 맞춤 (빈 공간 활용)
-                            st.markdown("**단가(원)**")
-                            st.markdown("", unsafe_allow_html=True)
+                            st.markdown("단가(원)")
                             price_input = st.number_input("단가", min_value=0, value=price, step=100, key=f"ship_price_{row['id']}", label_visibility="collapsed")
                         
                         with c_note:
-                            st.markdown("**비고**")
+                            st.markdown("비고")
                             note_input = st.text_input("비고", value=row.get('note', ''), placeholder="비고 사항 입력", key=f"ship_note_{row['id']}", label_visibility="collapsed")
                         
                     staging_data.append({
@@ -366,15 +339,12 @@ def render_shipping_operations(db, sub_menu):
                     if "last_ship_sel_indices" not in st.session_state:
                         st.session_state["last_ship_sel_indices"] = []
                     
-                    # [FIX] pandas Index 비교 오류 방지를 위해 리스트로 변환
-                    current_indices_list = selected_indices.tolist()
-
-                    if st.session_state["last_ship_sel_indices"] != current_indices_list:
+                    if st.session_state["last_ship_sel_indices"] != selected_indices:
                         # [FIX] NaN 값 처리 (text_input 오류 방지)
                         addr_val = first_row.get('delivery_address')
                         st.session_state["ship_addr_input"] = str(addr_val) if addr_val and not pd.isna(addr_val) else ""
                         st.session_state["ship_addr_detail_input"] = ""
-                        st.session_state["last_ship_sel_indices"] = current_indices_list
+                        st.session_state["last_ship_sel_indices"] = selected_indices
                         # [FIX] 선택 변경 시 팝업 강제 닫기 (자동 실행 방지)
                         st.session_state.show_ship_addr_dialog = False
 
@@ -534,6 +504,10 @@ def render_shipping_operations(db, sub_menu):
                     
                     st.success(f"{len(selected_rows)}건 출고 처리 완료!")
                     
+                    # [NEW] 완료 후 취소 목록 초기화
+                    if "ship_ignored_ids" in st.session_state:
+                        del st.session_state["ship_ignored_ids"]
+
                     # [NEW] 출고된 데이터를 세션에 저장하고 리런
                     st.session_state["last_shipped_data"] = pd.DataFrame(shipped_rows)
                     st.session_state["ship_op_key"] += 1
@@ -545,7 +519,7 @@ def render_shipping_operations(db, sub_menu):
     else: # 제품별 보기 (재고순)
         st.subheader("제품별 일괄 출고")
         # 재고 현황 로직 재사용 (출고 기능 포함)
-        render_inventory_logic(db, allow_shipping=True, key_prefix="ship_op")
+        render_inventory_logic(db, allow_shipping=True)
 
 # [NEW] 출고 내역 조회 캐싱 함수 (DB 읽기 비용 절감)
 @st.cache_data(ttl=60) # 1분간 캐시 유지
@@ -601,7 +575,6 @@ def render_shipping_status(db, sub_menu):
 
     if sub_menu == "출고내역":
         st.subheader("출고 목록")
-        today = datetime.date.today()
         
         if "key_ship_done" not in st.session_state:
             st.session_state["key_ship_done"] = 0

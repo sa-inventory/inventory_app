@@ -684,16 +684,16 @@ if st.session_state.get("logged_in"):
                 if (!timerDiv) {{
                     timerDiv = window.parent.document.createElement('div');
                     timerDiv.id = 'auto-logout-timer';
-                    timerDiv.style.position = 'fixed';
-                    timerDiv.style.top = '60px'; 
-                    timerDiv.style.right = '20px';
+                    timerDiv.style.position = 'fixed'; // 위치 고정
+                    timerDiv.style.top = '45px';     // 상단 헤더(약 40px) 바로 아래에 위치하도록 조정
+                    timerDiv.style.right = '20px';   // 오른쪽에서 20px
                     timerDiv.style.backgroundColor = 'rgba(255, 255, 255, 0.8)';
                     timerDiv.style.color = '#000000';
                     timerDiv.style.padding = '4px 8px';
                     timerDiv.style.borderRadius = '4px';
                     timerDiv.style.fontSize = '12px';
                     timerDiv.style.fontWeight = 'normal';
-                    timerDiv.style.zIndex = '999999';
+                    timerDiv.style.zIndex = '1000000'; // 다른 요소(stToolbar)와 겹치지 않도록 z-index 증가
                     timerDiv.style.pointerEvents = 'none';
                     timerDiv.style.lineHeight = '1.3';
                     window.parent.document.body.appendChild(timerDiv);

@@ -412,6 +412,8 @@ def render_inventory_logic(db, allow_shipping=False, key_prefix="inv"):
                     st.markdown(f"### 상세 재고 내역: **{sel_p_code}**")
                     
                     detail_df = df[df['product_code'] == sel_p_code].copy()
+                    # [FIX] 필터링 후 인덱스를 리셋하여 data_editor/dataframe 위젯과 인덱스 불일치 문제 해결
+                    detail_df = detail_df.reset_index(drop=True)
                     
                     if 'date' in detail_df.columns:
                         detail_df['date'] = detail_df['date'].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isnull(x) and hasattr(x, 'strftime') else str(x)[:10])
@@ -607,6 +609,9 @@ def render_inventory_logic(db, allow_shipping=False, key_prefix="inv"):
             # [NEW] 재고 필터 적용 (탭별 독립 적용)
             if stock_filter_opt_2 == "재고있는 품목보기":
                 full_df = full_df[full_df['stock'] > 0]
+
+            # [FIX] 필터링 후 인덱스를 리셋하여 data_editor/dataframe 위젯과 인덱스 불일치 문제 해결
+            full_df = full_df.reset_index(drop=True)
 
             if edit_mode_t2:
                 st.info("수정할 셀을 더블클릭하여 값을 변경한 후, 하단의 '변경사항 저장' 버튼을 누르세요.")
@@ -1093,7 +1098,7 @@ def render_inventory_logic(db, allow_shipping=False, key_prefix="inv"):
                 submitted = st.button("출고 처리", type="primary", disabled=not is_valid_qty, use_container_width=True, key=f"inv_ship_submit_{allow_shipping}")
 
             # 주소 검색 팝업 표시
-            if st.session_state.show_inv_ship_addr_dialog:
+            if st.session_state.get(f"show_inv_ship_addr_dialog_{key_prefix}"):
                 show_address_search_modal_inv_ship()
 
             if submitted:

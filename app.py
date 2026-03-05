@@ -416,6 +416,14 @@ with st.sidebar:
         btn_type = "primary" if is_selected else "secondary"
         
         if st.button(label, use_container_width=True, key=f"menu_{main_menu}_{effective_sub_menu}", type=btn_type):
+            # [FIX] 메뉴 이동 시, 이전 출고 작업 완료 상태 초기화
+            # is_selected가 False라는 것은 다른 메뉴에서 현재 메뉴로 이동함을 의미
+            if not is_selected:
+                if "last_shipped_data" in st.session_state:
+                    del st.session_state["last_shipped_data"]
+                if "show_invoice_preview" in st.session_state:
+                    del st.session_state["show_invoice_preview"]
+
             # [FIX] 메뉴 이동 시 열려있는 주소 검색 팝업 닫기 (상태 초기화)
             for key in ["show_partner_addr_dialog", "show_company_addr_dialog", "show_order_addr_dialog"]:
                 if key in st.session_state:
@@ -492,12 +500,13 @@ with st.sidebar:
                         menu_item("봉제 완료 목록", "봉제현황")
 
         # [수정] 출고관리 메뉴 (출고작업 + 출고현황)
-        if check_access("출고현황"):
+        if check_access("출고현황") or check_access("출고작업"):
             with st.expander("출고관리", expanded=(cm in ["출고작업", "출고현황"])):
-                menu_item("출고작업", "출고작업")
-                with st.expander("출고현황", expanded=(cm == "출고현황")):
-                    menu_item("출고 완료 내역 (조회/명세서)", "출고현황")
-                    menu_item("배송/운임 통계", "출고현황")
+                if check_access("출고작업"):
+                    menu_item("출고작업", "출고작업")
+                if check_access("출고현황"):
+                    menu_item("출고내역", "출고현황")
+                    menu_item("배송내역", "출고현황")
 
         # [수정] 재고관리 메뉴 (재고현황 분리)
         if check_access("재고현황"):

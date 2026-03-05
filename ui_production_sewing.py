@@ -141,6 +141,7 @@ def render_sewing(db, sub_menu):
                             new_doc_data = doc_snapshot.to_dict().copy()
                             new_doc_data['stock'] = s_qty
                             new_doc_data['status'] = "봉제중"
+                            new_doc_data['parent_id'] = sel_id # [NEW] 분할 시 부모 ID 저장
                             new_doc_data['sewing_type'] = s_type
                             new_doc_data['sewing_start_date'] = str(s_date)
                             if s_type == "외주봉제":
@@ -297,29 +298,39 @@ def render_sewing(db, sub_menu):
                     
                     st.markdown("#### 작업 취소")
                     if st.button("봉제 취소 (대기로 되돌리기)", type="primary"):
-                        # [NEW] 병합 로직: 같은 발주번호의 대기중(염색완료)인 항목이 있으면 합침
-                        siblings = list(db.collection("orders")\
-                            .where("order_no", "==", sel_row['order_no'])\
-                            .where("status", "==", "염색완료")\
-                            .stream())
-                        
+                        # [수정] 1. parent_id 우선 병합, 2. order_no 기반 병합, 3. 상태만 변경 순으로 처리
+                        parent_id = sel_row.get('parent_id')
+                        stock_to_return = int(sel_row.get('stock', 0))
                         merged = False
-                        for sib in siblings:
-                            sib_data = sib.to_dict()
-                            # 안전장치: 제품코드와 색상이 같은지 확인 (발주번호가 같으면 보통 같음)
-                            if sib_data.get('product_code') == sel_row.get('product_code') and \
-                               sib_data.get('color') == sel_row.get('color'):
-                                
-                                new_stock = int(sib_data.get('stock', 0)) + int(sel_row.get('stock', 0))
-                                db.collection("orders").document(sib.id).update({"stock": new_stock})
+
+                        if parent_id:
+                            parent_ref = db.collection("orders").document(parent_id)
+                            parent_snap = parent_ref.get()
+                            if parent_snap.exists and parent_snap.to_dict().get('status') == '염색완료':
+                                parent_ref.update({"stock": firestore.Increment(stock_to_return)})
                                 db.collection("orders").document(sel_id).delete()
                                 merged = True
-                                st.success(f"기존 대기 건과 병합되어 '염색완료' 상태로 복귀되었습니다. (합계: {new_stock}장)")
-                                break
+                        
+                        if not merged:
+                            # Fallback: Find sibling by order_no
+                            siblings = list(db.collection("orders")\
+                                .where("order_no", "==", sel_row['order_no'])\
+                                .where("status", "==", "염색완료")\
+                                .stream())
+                            
+                            for sib in siblings:
+                                sib_data = sib.to_dict()
+                                if sib_data.get('product_code') == sel_row.get('product_code') and sib_data.get('color') == sel_row.get('color'):
+                                    db.collection("orders").document(sib.id).update({"stock": firestore.Increment(stock_to_return)})
+                                    db.collection("orders").document(sel_id).delete()
+                                    merged = True
+                                    break
                         
                         if not merged:
                             db.collection("orders").document(sel_id).update({"status": "염색완료"})
                             st.success("취소되었습니다. (염색완료 상태로 복귀)")
+                        else:
+                            st.success(f"기존 대기 건과 병합되어 '염색완료' 상태로 복귀되었습니다.")
                         
                         st.session_state["sewing_ing_key"] += 1
                         st.rerun()

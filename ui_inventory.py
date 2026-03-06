@@ -164,9 +164,11 @@ def render_inventory_logic(db, allow_shipping=False, key_prefix="inv"):
                 return styles
 
             st.dataframe(
-                df_review.drop(columns=['_id']).style.apply(highlight_changes, axis=1),
+                df_review.style.apply(highlight_changes, axis=1),
                 hide_index=True,
-                use_container_width=True
+                use_container_width=True,
+                # [FIX] _id 컬럼을 숨기기 위해 column_config 사용 (drop() 대신)
+                column_config={"_id": None}
             )
         
         c1, c2, c3 = st.columns([1.2, 1, 5])

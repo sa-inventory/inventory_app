@@ -4,32 +4,8 @@ import datetime
 import io
 import uuid
 from firebase_admin import firestore
-from utils import get_partners, get_common_codes, search_address_api, generate_report_html, get_partners_map, get_db, save_user_settings, load_user_settings
+from utils import get_partners, get_common_codes, search_address_api, generate_report_html, get_partners_map, get_db, save_user_settings, load_user_settings, num_to_korean
 from ui_inventory import render_inventory_logic
-
-# [NEW] 숫자 한글 변환 함수 (공통 사용을 위해 밖으로 이동)
-def num_to_korean(num):
-    units = ['', '십', '백', '천']
-    large_units = ['', '만', '억', '조', '경']
-    digits = ['', '일', '이', '삼', '사', '오', '육', '칠', '팔', '구']
-    
-    if not isinstance(num, int) or num < 0: return ""
-    if num == 0: return '영'
-        
-    result_parts = []
-    num_str = str(num)
-    
-    while num_str:
-        part, num_str = num_str[-4:], num_str[:-4]
-        if int(part) > 0:
-            part_korean = ""
-            for i, digit_char in enumerate(reversed(part)):
-                digit = int(digit_char)
-                if digit > 0:
-                    num_word = digits[digit] if not (digit == 1 and i > 0) else ""
-                    part_korean = num_word + units[i] + part_korean
-            result_parts.append(part_korean)
-    return ''.join(f"{part}{unit}" for i, (part, unit) in enumerate(zip(reversed(result_parts), reversed(large_units[:len(result_parts)]))) if part)
 
 def render_shipping_operations(db, sub_menu):
     st.header("출고 작업")
@@ -776,6 +752,7 @@ def render_shipping_status(db, sub_menu):
                     'stock': 'sum',
                     'supply_amount': 'sum',
                     'shipping_cost': 'sum',
+                    'statement_id': 'first', # [NEW] 거래명세서 번호도 그룹에 포함
                     'id': list, # ID들을 리스트로 묶음 (취소 처리용)
                     'order_no': lambda x: f"{str(x.iloc[0]).split('-')[0]} (외 {len(x)-1}건)" if len(x) > 1 else str(x.iloc[0]), # 표시용 번호
                     'note': lambda x: ' / '.join(sorted(set([str(s) for s in x if s]))) # 비고 합치기
@@ -803,9 +780,20 @@ def render_shipping_status(db, sub_menu):
 
             st.write("🔽 목록에서 항목을 선택하여 거래명세서를 발행하거나 취소할 수 있습니다.")
             
+            # [NEW] 선택된 행의 거래명세서 그룹을 하이라이트하기 위한 로직
+            def highlight_statement_group(row):
+                highlight_id = st.session_state.get('highlight_stmt_id')
+                # '거래명세서 번호' 컬럼이 존재하고, 값이 비어있지 않으며, 하이라이트 ID와 일치할 때
+                if '거래명세서 번호' in row and pd.notna(row['거래명세서 번호']) and row['거래명세서 번호'] and row['거래명세서 번호'] == highlight_id:
+                    return ['background-color: #fff3cd'] * len(row) # 노란색 하이라이트
+                return [''] * len(row)
+
+            # [NEW] 화면에 표시할 데이터프레임에 스타일 적용
+            df_to_show = df_display.style.apply(highlight_statement_group, axis=1)
+
             # [수정] 동적 키에 view_mode 반영하여 리셋 방지
             selection = st.dataframe(
-                df_display,
+                df_to_show,
                 width="stretch",
                 on_select="rerun",
                 selection_mode="multi-row",
@@ -820,7 +808,27 @@ def render_shipping_status(db, sub_menu):
             if st.session_state["last_ship_selection"] != current_selection:
                 keys_to_del = [k for k in st.session_state.keys() if k.startswith("print_view_")]
                 for k in keys_to_del: del st.session_state[k]
+                # [NEW] 선택 변경 시 하이라이트 초기화
+                if 'highlight_stmt_id' in st.session_state:
+                    del st.session_state['highlight_stmt_id']
                 st.session_state["last_ship_selection"] = current_selection
+
+            # [NEW] 선택 시 하이라이트 ID 세션에 저장
+            if selection.selection.rows:
+                # 첫 번째 선택된 행을 기준으로 그룹 ID 결정
+                idx = selection.selection.rows[0]
+                if view_grouped:
+                    stmt_id = df_display_source.iloc[idx].get('statement_id')
+                else:
+                    stmt_id = df.iloc[idx].get('statement_id')
+                
+                # statement_id가 있는 경우에만 하이라이트
+                if stmt_id:
+                    st.session_state['highlight_stmt_id'] = stmt_id
+                else:
+                    # 없는 경우, 기존 하이라이트 제거
+                    if 'highlight_stmt_id' in st.session_state:
+                        del st.session_state['highlight_stmt_id']
 
             # [NEW] 선택 항목 합계 표시
             if selection.selection.rows:
@@ -957,6 +965,10 @@ def render_shipping_status(db, sub_menu):
                         my_bar = st.progress(0, text=progress_text)
 
                         batch = db.batch()
+                        
+                        # [NEW] 삭제할 거래명세서 ID 수집
+                        statement_ids_to_delete = set()
+
                         batch_count = 0
                         processed_count = 0
 
@@ -972,6 +984,10 @@ def render_shipping_status(db, sub_menu):
                                 continue
 
                             doc_data = doc_snap.to_dict()
+                            # [NEW] 취소할 항목에 연결된 거래명세서 ID가 있으면 삭제 목록에 추가
+                            if doc_data.get("statement_id"):
+                                statement_ids_to_delete.add(doc_data.get("statement_id"))
+
                             parent_id = doc_data.get('parent_id')
                             stock_to_return = int(doc_data.get('stock', 0))
                             
@@ -1001,19 +1017,26 @@ def render_shipping_status(db, sub_menu):
                                     "shipping_cost_lines": firestore.DELETE_FIELD,
                                     "delivery_to": firestore.DELETE_FIELD,
                                     "delivery_contact": firestore.DELETE_FIELD,
-                                    "delivery_address": firestore.DELETE_FIELD
+                                    "delivery_address": firestore.DELETE_FIELD,
+                                    "statement_id": firestore.DELETE_FIELD # [NEW] 거래명세서 연결 ID 제거
                                 }
                                 batch.update(doc_ref, updates)
                             
                             batch_count += 1
                             processed_count += 1
                             my_bar.progress(processed_count / len(target_ids), text=f"처리 중... ({processed_count}/{len(target_ids)})")
-
+                            
                             if batch_count >= 400:
                                 batch.commit()
                                 batch = db.batch()
                                 batch_count = 0
                         
+                        # [NEW] 수집된 모든 거래명세서 문서를 삭제
+                        for stmt_id in statement_ids_to_delete:
+                            stmt_ref = db.collection("statements").document(stmt_id)
+                            batch.delete(stmt_ref)
+                            batch_count += 1
+
                         if batch_count > 0:
                             batch.commit()
                         
@@ -1031,14 +1054,32 @@ def render_shipping_status(db, sub_menu):
                 else:
                     st.info("취소할 항목을 선택하세요.")
 
-            # [NEW] 거래명세서 확인 버튼 (하단 별도 배치)
+            # [NEW] 거래명세서 발행 버튼 (하단 별도 배치)
             st.divider()
             c_inv_btn, _ = st.columns([2, 8])
-            if c_inv_btn.button("📄 거래명세서 확인하기"):
+            if c_inv_btn.button("📄 거래명세서 발행 (선택 항목)"):
                 if selection.selection.rows:
-                    st.session_state["show_invoice_view_status"] = True
+                    # [FIX] 발행 전, 이미 발행된 항목이 있는지 확인
+                    selected_indices = selection.selection.rows
+                    
+                    target_ids = []
+                    if view_grouped:
+                        sel_rows_grouped = df_display_source.iloc[selected_indices]
+                        for ids_list in sel_rows_grouped['id']:
+                            target_ids.extend(ids_list)
+                    else:
+                        sel_rows_flat = df.iloc[selected_indices]
+                        target_ids = sel_rows_flat['id'].tolist()
+                    
+                    real_target_ids = [tid for tid in target_ids if "_cost" not in str(tid)]
+                    check_df = df[df['id'].isin(real_target_ids)]
+                    
+                    if 'statement_id' in check_df.columns and check_df['statement_id'].notna().any():
+                        st.error("이미 거래명세서가 발행된 항목이 포함되어 있습니다. 신규 발행할 수 없습니다.")
+                    else:
+                        st.session_state["show_invoice_view_status"] = True
                 else:
-                    st.warning("거래명세서를 확인할 항목을 선택하세요.")
+                    st.warning("거래명세서를 발행할 항목을 선택하세요.")
             
             if st.session_state.get("show_invoice_view_status"):
                 if selection.selection.rows:
@@ -1049,8 +1090,9 @@ def render_shipping_status(db, sub_menu):
                         sel_rows = df.iloc[selected_indices]
                     
                     st.markdown("---")
-                    st.markdown("#### 📄 거래명세서 확인")
-                    render_invoice_ui(db, sel_rows)
+                    st.markdown("#### 📄 거래명세서 발행 및 인쇄")
+                    st.info("내용을 확인 후 '발행 및 저장' 버튼을 누르면 거래명세서가 생성되고 목록에서 사라집니다. (생성된 명세서는 '거래명세서 조회' 메뉴에서 확인 가능)")
+                    render_invoice_ui(db, sel_rows, mode="issue")
                     
                     if st.button("닫기", key="close_inv_view"):
                         st.session_state["show_invoice_view_status"] = False
@@ -1125,32 +1167,34 @@ def render_shipping_status(db, sub_menu):
                 
                 st.divider()
                 
-                # 통계 그룹화 기준 설정
-                if stat_type == "기간별(일자)":
-                    df_stats['group_key'] = df_stats['shipping_date'].apply(lambda x: x.strftime('%Y-%m-%d'))
-                    group_label = "일자"
-                elif stat_type == "월별":
-                    df_stats['group_key'] = df_stats['shipping_date'].apply(lambda x: x.strftime('%Y-%m'))
-                    group_label = "월"
-                else:
-                    df_stats['group_key'] = df_stats['shipping_date'].apply(lambda x: x.strftime('%Y'))
-                    group_label = "년도"
+                # [NEW] 그래프를 Expander 안에 배치하여 기본적으로 숨김
+                with st.expander("📈 그래프로 보기"):
+                    # 통계 그룹화 기준 설정
+                    if stat_type == "기간별(일자)":
+                        df_stats['group_key'] = df_stats['shipping_date'].apply(lambda x: x.strftime('%Y-%m-%d'))
+                        group_label = "일자"
+                    elif stat_type == "월별":
+                        df_stats['group_key'] = df_stats['shipping_date'].apply(lambda x: x.strftime('%Y-%m'))
+                        group_label = "월"
+                    else:
+                        df_stats['group_key'] = df_stats['shipping_date'].apply(lambda x: x.strftime('%Y'))
+                        group_label = "년도"
 
-                c_chart1, c_chart2 = st.columns(2)
-                
-                # 1. 시계열 추이 (운임비)
-                with c_chart1:
-                    st.markdown(f"##### {group_label}별 운임비 추이")
-                    time_stats = df_stats.groupby('group_key')['shipping_cost'].sum().reset_index()
-                    time_stats.columns = [group_label, '운임비']
-                    st.bar_chart(time_stats.set_index(group_label))
+                    c_chart1, c_chart2 = st.columns(2)
+                    
+                    # 1. 시계열 추이 (운임비)
+                    with c_chart1:
+                        st.markdown(f"##### {group_label}별 운임비 추이")
+                        time_stats = df_stats.groupby('group_key')['shipping_cost'].sum().reset_index()
+                        time_stats.columns = [group_label, '운임비']
+                        st.bar_chart(time_stats.set_index(group_label))
 
-                # 2. 배송업체별 점유율
-                with c_chart2:
-                    st.markdown("##### 배송업체별 운임비 비중")
-                    if 'shipping_carrier' in df_stats.columns:
-                        carrier_pie = df_stats.groupby('shipping_carrier')['shipping_cost'].sum()
-                        st.bar_chart(carrier_pie) # Streamlit 기본 차트 사용
+                    # 2. 배송업체별 점유율
+                    with c_chart2:
+                        st.markdown("##### 배송업체별 운임비 비중")
+                        if 'shipping_carrier' in df_stats.columns:
+                            carrier_pie = df_stats.groupby('shipping_carrier')['shipping_cost'].sum()
+                            st.bar_chart(carrier_pie) # Streamlit 기본 차트 사용
 
                 # 3. 상세 테이블 (업체별)
                 if 'shipping_carrier' in df_stats.columns and 'shipping_cost' in df_stats.columns:
@@ -1160,15 +1204,13 @@ def render_shipping_status(db, sub_menu):
                     carrier_stats.columns = ['배송업체', '발주처', '운임비 합계']
                     carrier_stats = carrier_stats.sort_values('운임비 합계', ascending=False)
                     st.dataframe(carrier_stats, width="stretch", hide_index=True)
-                    
-                    st.bar_chart(carrier_stats.set_index('배송업체'))
             else:
                 st.info("조회된 배송 내역이 없습니다.")
         else:
             st.write("👆 위 조건 설정 후 **조회** 버튼을 누르면 결과가 표시됩니다.")
 
 # [NEW] 거래명세서 발행 UI 및 로직 함수 (공통 사용)
-def render_invoice_ui(db, df_rows):
+def render_invoice_ui(db, df_rows, mode="preview"):
     user_id = st.session_state.get("user_id")
     
     # [FIX] 세션 상태 초기화 (출고 작업에서 바로 호출될 경우를 대비하여 설정값이 없으면 로드)
@@ -1335,7 +1377,7 @@ def render_invoice_ui(db, df_rows):
                 # [수정] 키(Key)에 인덱스 대신 거래처명을 사용하여 데이터 꼬임 방지
                 with st.form(f"stmt_form_{cust_name}"):
                     c1, c2 = st.columns(2)
-                    stmt_date = c1.date_input("작성일자", datetime.date.today(), key=f"sd_{cust_name}")
+                    stmt_date = c1.date_input("발행일자", datetime.date.today(), key=f"sd_{cust_name}")
                     stmt_no = c2.text_input("일련번호", value=datetime.datetime.now().strftime("%y%m%d-") + str(i+1).zfill(2), key=f"sn_{cust_name}")
                     
                     with st.expander("공급자/공급받는자 정보 수정", expanded=False):
@@ -1422,10 +1464,58 @@ def render_invoice_ui(db, df_rows):
                     
                     st.info(f"합계: 공급가액 {total_supply:,} + 세액 {total_tax:,} = 총액 {grand_total:,}")
                     
-                    if st.form_submit_button("🖨️ 거래명세서 발행"):
+                    # [NEW] 모드에 따른 버튼 텍스트 및 로직 분기
+                    btn_label = "🖨️ 발행 및 저장 (인쇄)" if mode == "issue" else "🖨️ 인쇄 미리보기"
+                    
+                    if st.form_submit_button(btn_label):
                         # [FIX] DataFrame을 딕셔너리 리스트로 변환 (템플릿 렌더링용)
                         print_items_list = edited_items.to_dict('records')
                         
+                        # [NEW] 발행 모드일 경우 DB 저장 로직 실행
+                        if mode == "issue":
+                            # 1. 스냅샷 데이터 생성
+                            snapshot_data = {
+                                "statement_no": stmt_no,
+                                "issue_date": datetime.datetime.combine(stmt_date, datetime.datetime.now().time()),
+                                "customer": cust_name,
+                                "supplier_info": {
+                                    "name": s_name, "rep_name": s_rep, "biz_num": s_biz,
+                                    "address": s_addr, "cond": s_cond, "item": s_item
+                                },
+                                "recipient_info": {
+                                    "name": r_name, "rep_name": r_rep, "biz_num": r_biz,
+                                    "address": r_addr
+                                },
+                                "items": print_items_list, # 품목 리스트 스냅샷
+                                "total_amount": grand_total,
+                                "supply_price": total_supply,
+                                "tax": total_tax,
+                                "created_at": datetime.datetime.now(),
+                                "created_by": user_id
+                            }
+                            
+                            # 2. statements 컬렉션에 저장
+                            # 문서 ID를 statement_no로 사용 (중복 방지)
+                            stmt_ref = db.collection("statements").document(stmt_no)
+                            if stmt_ref.get().exists:
+                                st.error(f"이미 존재하는 일련번호입니다: {stmt_no}")
+                                st.stop()
+                            
+                            stmt_ref.set(snapshot_data)
+                            
+                            # 3. 원본 orders 문서 업데이트 (statement_id 추가)
+                            # group_df에는 원본 orders의 정보가 있음
+                            batch = db.batch()
+                            for _, row in group_df.iterrows():
+                                # _cost 행은 가상 행이므로 제외
+                                if "_cost" not in str(row['id']):
+                                    doc_ref = db.collection("orders").document(row['id'])
+                                    batch.update(doc_ref, {"statement_id": stmt_no})
+                            batch.commit()
+                            
+                            st.success(f"거래명세서({stmt_no})가 발행되었습니다.")
+                            # 인쇄 로직은 아래에서 계속 실행됨
+
                         stamp_b64 = comp_info.get('stamp_img') if s['opt_show_stamp'] else None
                         stamp_html = f"<img src='data:image/png;base64,{stamp_b64}' class='stamp'>" if stamp_b64 else ""
                         logo_b64 = comp_info.get('logo_img') if s['opt_show_logo'] else None
@@ -1601,3 +1691,11 @@ def render_invoice_ui(db, df_rows):
                         # [수정] 세션 상태와 미리보기를 제거하고, 버튼 클릭 시 보이지 않는 컴포넌트로 직접 인쇄창을 호출합니다.
                         # 이렇게 하면 재인쇄 시 발생하던 오류가 해결됩니다.
                         st.components.v1.html(html, height=0, width=0)
+                        
+                        # [NEW] 발행 모드였다면 목록 갱신을 위해 리런 (약간의 지연 후)
+                        if mode == "issue":
+                            import time
+                            time.sleep(1)
+                            st.session_state["key_ship_done"] += 1
+                            st.session_state["show_invoice_view_status"] = False
+                            st.rerun()

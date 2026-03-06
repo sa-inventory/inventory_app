@@ -365,3 +365,27 @@ def load_user_settings(user_id, key, default_value):
     except:
         pass
     return default_value
+
+# [NEW] 숫자 한글 변환 함수 (공통 사용)
+def num_to_korean(num):
+    units = ['', '십', '백', '천']
+    large_units = ['', '만', '억', '조', '경']
+    digits = ['', '일', '이', '삼', '사', '오', '육', '칠', '팔', '구']
+    
+    if not isinstance(num, int) or num < 0: return ""
+    if num == 0: return '영'
+        
+    result_parts = []
+    num_str = str(num)
+    
+    while num_str:
+        part, num_str = num_str[-4:], num_str[:-4]
+        if int(part) > 0:
+            part_korean = ""
+            for i, digit_char in enumerate(reversed(part)):
+                digit = int(digit_char)
+                if digit > 0:
+                    num_word = digits[digit] if not (digit == 1 and i > 0) else ""
+                    part_korean = num_word + units[i] + part_korean
+            result_parts.append(part_korean)
+    return ''.join(f"{part}{unit}" for i, (part, unit) in enumerate(zip(reversed(result_parts), reversed(large_units[:len(result_parts)]))) if part)

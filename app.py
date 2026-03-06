@@ -20,6 +20,7 @@ from ui_production_dyeing import render_dyeing
 from ui_production_sewing import render_sewing
 from ui_shipping import render_shipping_operations, render_shipping_status
 from ui_inventory import render_inventory
+from ui_statements import render_statement_list
 from ui_basic_info import render_product_master, render_partners, render_machines, render_codes
 from ui_system import render_users, render_my_profile, render_company_settings
 from ui_statistics import render_statistics
@@ -500,13 +501,14 @@ with st.sidebar:
                         menu_item("봉제 완료 목록", "봉제현황")
 
         # [수정] 출고관리 메뉴 (출고작업 + 출고현황)
-        if check_access("출고현황") or check_access("출고작업"):
-            with st.expander("출고관리", expanded=(cm in ["출고작업", "출고현황"])):
+        if check_access("출고현황") or check_access("출고작업") or check_access("거래명세서 조회"):
+            with st.expander("출고관리", expanded=(cm in ["출고작업", "출고현황", "거래명세서 조회"])):
                 if check_access("출고작업"):
                     menu_item("출고작업", "출고작업")
                 if check_access("출고현황"):
                     menu_item("출고내역", "출고현황")
                     menu_item("배송내역", "출고현황")
+                    menu_item("거래명세서 조회", "거래명세서 조회")
 
         # [수정] 재고관리 메뉴 (재고현황 분리)
         if check_access("재고현황"):
@@ -761,6 +763,8 @@ elif menu == "출고작업":
     render_shipping_operations(db, sub_menu)
 elif menu == "출고현황":
     render_shipping_status(db, sub_menu)
+elif menu == "거래명세서 조회":
+    render_statement_list(db)
 elif menu == "재고현황":
     render_inventory(db, sub_menu)
 elif menu == "내역조회":

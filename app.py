@@ -208,6 +208,10 @@ if not st.session_state["logged_in"]:
                                 st.session_state["auto_logout_minutes"] = user_data.get("auto_logout_minutes", 60)
                                 st.session_state["login_time"] = datetime.datetime.now()
                                 
+                                # [FIX] 상태 초기화 (이전 세션 잔여 데이터 방지)
+                                st.session_state["password_expired"] = False
+                                st.session_state["password_reset_needed"] = False
+                                
                                 # [NEW] 비밀번호 만료 체크 (90일)
                                 pw_changed = user_data.get("password_changed_at")
                                 if pw_changed:
@@ -267,6 +271,10 @@ if not st.session_state["logged_in"]:
                                 st.session_state["auto_logout_minutes"] = user_data.get("auto_logout_minutes", 60)
                                 st.session_state["login_time"] = datetime.datetime.now()
                                 st.session_state["permissions"] = user_data.get("permissions") or []
+                                
+                                # [FIX] 상태 초기화 (이전 세션 잔여 데이터 방지)
+                                st.session_state["password_expired"] = False
+                                st.session_state["password_reset_needed"] = False
                                 
                                 # [NEW] 비밀번호 만료 체크 (90일)
                                 pw_changed = user_data.get("password_changed_at")
@@ -634,6 +642,10 @@ with st.sidebar:
         # [수정] 로그아웃 시 달력 상태 초기화
         if "cal_year" in st.session_state: del st.session_state["cal_year"]
         if "cal_month" in st.session_state: del st.session_state["cal_month"]
+        
+        # [FIX] 비밀번호 관련 상태 초기화 (로그아웃 시 잔여 상태 제거)
+        if "password_expired" in st.session_state: del st.session_state["password_expired"]
+        if "password_reset_needed" in st.session_state: del st.session_state["password_reset_needed"]
 
         st.rerun()
  

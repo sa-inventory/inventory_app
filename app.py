@@ -82,6 +82,13 @@ if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
     st.session_state["role"] = None
 
+# [FIX] 강제 로그아웃 처리를 로그인 확인보다 먼저 실행하도록 위치 변경
+if st.query_params.get("logout"):
+    st.query_params.clear()
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+    st.rerun()
+
 # 로그인 화면 처리
 if not st.session_state["logged_in"]:
     # [NEW] 회사 로고 및 제목 가져오기
@@ -313,13 +320,6 @@ if not st.session_state["logged_in"]:
                     else:
                         st.error("등록되지 않은 아이디입니다.")
     
-    # [NEW] 강제 로그아웃 처리 (URL 파라미터 감지)
-    if st.query_params.get("logout"):
-        st.query_params.clear()
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.rerun()
-
     # [MOVED] 아이디 입력 후 엔터 시 비밀번호 필드로 포커스 이동 (JS 주입)
     # 화면 렌더링 간섭(깜빡임)을 최소화하기 위해 st.stop() 직전으로 이동
     components.html("""
@@ -693,6 +693,8 @@ if st.session_state.get("logged_in"):
     timeout_min = st.session_state.get("auto_logout_minutes", 60)
     login_time = st.session_state.get("login_time", datetime.datetime.now())
     login_time_str = login_time.strftime("%Y년 %m월 %d일 %H시 %M분")
+    # [NEW] 로그인 시간 타임스탬프 (밀리초) - 이전 세션의 낡은 기록 무시용
+    login_time_epoch = int(login_time.timestamp() * 1000)
     
     # [NEW] 사용자별 고유 키 생성을 위해 user_id 사용
     user_id = st.session_state.get("user_id", "unknown")
@@ -700,104 +702,142 @@ if st.session_state.get("logged_in"):
     js_code = f"""
     <script>
         (function() {{
+            // [FIX] 자동 로그아웃 로직 전체 재구성 (경합 조건 및 타이머 멈춤 현상 해결)
             const loginTimeStr = "{login_time_str}";
+            const loginTimeEpoch = {login_time_epoch};
             const timeoutMinutes = {timeout_min};
             const timeoutMs = timeoutMinutes * 60 * 1000;
-            const storageKey = "lastActivity_" + "{user_id}"; // 사용자별 키 분리
-
-            // [FIX] 초기화: 저장된 활동 시간이 없으면 현재 시간으로 설정 (Local Storage 사용)
-            if (!localStorage.getItem(storageKey)) {{
+            const storageKey = "lastActivity_" + "{user_id}";
+            let isLoggingOut = false;
+            
+            const doc = window.parent.document;
+            
+            // [FIX] 초기화: 저장된 시간이 없거나, 로그인 시간보다 이전이면(낡은 기록) 현재 시간으로 리셋
+            let storedTime = parseInt(localStorage.getItem(storageKey) || 0);
+            if (!storedTime || storedTime < loginTimeEpoch) {{
                 localStorage.setItem(storageKey, Date.now());
             }}
-            
-            // [NEW] 로그아웃 체크 함수 분리
-            function checkLogout() {{
-                const now = Date.now();
-                const lastActivity = parseInt(localStorage.getItem(storageKey) || now);
-                const idleMs = now - lastActivity;
-                
-                if (idleMs > timeoutMs) {{
-                    localStorage.removeItem(storageKey);
-                    if (!window.parent.location.href.includes('logout=true')) {{
-                        window.parent.location.href = window.parent.location.pathname + '?logout=true';
-                    }}
-                    return true;
+
+            function performLogout() {{
+                if (isLoggingOut) return;
+                isLoggingOut = true;
+
+                // 모든 타이머와 이벤트 리스너를 확실히 제거
+                if (window.logoutInterval) {{
+                    clearInterval(window.logoutInterval);
+                    window.logoutInterval = null;
                 }}
-                return false;
+                doc.removeEventListener('mousemove', resetTimer);
+                doc.removeEventListener('keydown', resetTimer);
+                doc.removeEventListener('click', resetTimer);
+                doc.removeEventListener('scroll', resetTimer);
+                doc.removeEventListener('visibilitychange', resetTimer);
+
+                localStorage.removeItem(storageKey);
+
+                // [FIX] 화면 전체를 가려서 조작 방지 (로그아웃 진행 중 표시)
+                let blocker = doc.getElementById('logout-blocker');
+                if (!blocker) {{
+                    blocker = doc.createElement('div');
+                    blocker.id = 'logout-blocker';
+                    blocker.style.position = 'fixed';
+                    blocker.style.top = '0';
+                    blocker.style.left = '0';
+                    blocker.style.width = '100%';
+                    blocker.style.height = '100%';
+                    blocker.style.backgroundColor = 'rgba(255, 255, 255, 0.6)';
+                    blocker.style.backdropFilter = 'blur(8px)';
+                    blocker.style.webkitBackdropFilter = 'blur(8px)';
+                    blocker.style.zIndex = '9999999';
+                    blocker.style.display = 'flex';
+                    blocker.style.flexDirection = 'column';
+                    blocker.style.justifyContent = 'center';
+                    blocker.style.alignItems = 'center';
+                    blocker.style.color = '#333';
+                    blocker.style.fontSize = '24px';
+                    blocker.style.fontWeight = 'bold';
+                    blocker.style.textAlign = 'center';
+                    blocker.innerHTML = '장시간 미사용으로 로그아웃 되었습니다<br><span style="font-size: 16px; font-weight: normal; margin-top: 15px;">(새로고침(F5) 후 다시 로그인 하세요)</span>';
+                    doc.body.appendChild(blocker);
+                }}
             }}
 
-            function updateTimer() {{
-                // [FIX] 타이머 갱신 시마다 로그아웃 조건 체크
-                if (checkLogout()) return;
-
-                const now = Date.now();
-                const lastActivity = parseInt(localStorage.getItem(storageKey) || now);
-                
-                const idleMs = now - lastActivity;
-                const remainingMs = timeoutMs - idleMs;
-                
-                // Format time (1분 이상이면 분 단위, 미만이면 초 단위)
+            function updateTimerDisplay(remainingMs) {{
                 let timeStr = "";
-                if (remainingMs > 60000) {{
+                // [FIX] 경고색 제거
+                let bgColor = 'rgba(255, 255, 255, 0.8)';
+                let textColor = '#000000';
+
+                if (remainingMs <= 0) {{
+                    timeStr = "0초";
+                }} else if (remainingMs > 60000) {{
                     const totalMin = Math.ceil(remainingMs / 60000);
                     const h = Math.floor(totalMin / 60);
                     const m = totalMin % 60;
-                    timeStr = h + "시간 " + m + "분";
+                    if (h > 0) {{
+                        timeStr = h + "시간 " + m + "분";
+                    }} else {{
+                        timeStr = m + "분";
+                    }}
                 }} else {{
                     timeStr = Math.ceil(remainingMs / 1000) + "초";
                 }}
                 
-                // Update display
-                let timerDiv = window.parent.document.getElementById('auto-logout-timer');
+                let timerDiv = doc.getElementById('auto-logout-timer');
                 if (!timerDiv) {{
-                    timerDiv = window.parent.document.createElement('div');
+                    timerDiv = doc.createElement('div');
                     timerDiv.id = 'auto-logout-timer';
-                    timerDiv.style.position = 'fixed'; // 위치 고정
-                    timerDiv.style.top = '45px';     // 상단 헤더(약 40px) 바로 아래에 위치하도록 조정
-                    timerDiv.style.right = '20px';   // 오른쪽에서 20px
-                    timerDiv.style.backgroundColor = 'rgba(255, 255, 255, 0.8)';
-                    timerDiv.style.color = '#000000';
+                    timerDiv.style.position = 'fixed';
+                    timerDiv.style.top = '45px';
+                    timerDiv.style.right = '20px';
                     timerDiv.style.padding = '4px 8px';
                     timerDiv.style.borderRadius = '4px';
                     timerDiv.style.fontSize = '12px';
                     timerDiv.style.fontWeight = 'normal';
-                    timerDiv.style.zIndex = '1000000'; // 다른 요소(stToolbar)와 겹치지 않도록 z-index 증가
+                    timerDiv.style.zIndex = '1000000';
                     timerDiv.style.pointerEvents = 'none';
                     timerDiv.style.lineHeight = '1.3';
-                    window.parent.document.body.appendChild(timerDiv);
+                    doc.body.appendChild(timerDiv);
                 }}
-                timerDiv.innerHTML = '접속시간 ' + loginTimeStr + '<br>[미조작 시 로그아웃] ' + timeStr + ' 남음';
+                // 스타일 업데이트
+                timerDiv.style.backgroundColor = bgColor;
+                timerDiv.style.color = textColor;
+                timerDiv.innerHTML = '접속시간 ' + loginTimeStr + '<br>※ 미조작 시   ' + timeStr + ' 후 로그아웃';
+            }}
+
+            function tick() {{
+                if (isLoggingOut) return;
+                const now = Date.now();
+                const lastActivity = parseInt(localStorage.getItem(storageKey) || now);
+                const idleMs = now - lastActivity;
+                const remainingMs = timeoutMs - idleMs;
+
+                updateTimerDisplay(remainingMs);
+
+                if (remainingMs <= 0) {{
+                    performLogout();
+                }}
             }}
             
-            function resetTimer() {{
-                if (checkLogout()) return;
+            const resetTimer = () => {{
+                if (isLoggingOut) return;
                 localStorage.setItem(storageKey, Date.now());
-                updateTimer();
-            }}
+            }};
             
             // Attach events to parent window
-            const doc = window.parent.document;
-            doc.addEventListener('mousemove', resetTimer);
-            doc.addEventListener('keydown', resetTimer);
-            doc.addEventListener('click', resetTimer);
-            doc.addEventListener('scroll', resetTimer);
-            
-            // [NEW] 탭 활성화/비활성화 감지 (절전모드 복귀 시 체크 강화)
-            doc.addEventListener('visibilitychange', function() {{
-                if (!doc.hidden) {{
-                    checkLogout();
-                    updateTimer();
-                }}
-            }});
+            doc.addEventListener('mousemove', resetTimer, {{ passive: true }});
+            doc.addEventListener('keydown', resetTimer, {{ passive: true }});
+            doc.addEventListener('click', resetTimer, {{ passive: true }});
+            doc.addEventListener('scroll', resetTimer, {{ passive: true }});
+            doc.addEventListener('visibilitychange', resetTimer, {{ passive: true }});
             
             // Interval
             if (!window.logoutInterval) {{
-                window.logoutInterval = setInterval(updateTimer, 1000);
+                window.logoutInterval = setInterval(tick, 1000);
             }}
             
             // 초기 1회 실행
-            checkLogout();
-            updateTimer();
+            tick();
         }})();
     </script>
     """

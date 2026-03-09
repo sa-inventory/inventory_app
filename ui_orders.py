@@ -368,6 +368,10 @@ def render_order_entry(db, sub_menu):
             else:
                 customer = c3.text_input("발주처 (기초정보관리에서 거래처를 등록하세요)")
             delivery_req_date = c4.date_input("납품요청일", datetime.date.today() + datetime.timedelta(days=7), format="YYYY-MM-DD")
+            
+            # [NEW] 납품요청일 과거 날짜 경고
+            if delivery_req_date < datetime.date.today():
+                st.warning("⚠️ 납품요청일이 오늘보다 이전 날짜입니다. 날짜를 확인해주세요.")
 
             c1, c2, c3 = st.columns(3)
             name = c1.text_input("제품명 (고객사 요청 제품명)", help="고객사가 부르는 제품명을 입력하세요. 예: 프리미엄 호텔타올")

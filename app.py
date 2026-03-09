@@ -134,8 +134,7 @@ if not st.session_state["logged_in"]:
             background-color: transparent;
             border: 2px solid transparent;
             border-radius: 6px;
-            padding: 10px 0px; /* 좌우 패딩을 줄여 공간 확보 */
-            padding: 12px 20px; /* [MODIFIED] 패딩을 늘려 여백 확보 */
+            padding: 4px 20px; /* [FIX] 높이(4px)와 좌우여백(20px)을 적절하게 설정 */
             margin: 0;
             display: flex;
             justify-content: center;
@@ -151,9 +150,9 @@ if not st.session_state["logged_in"]:
         }
         /* Selected State */
         div[data-testid="stRadio"] > div[role="radiogroup"] > label:has(input:checked) {
-            background-color: #fce4ec;
-            color: #c2185b;
-            font-weight: bold;
+            background-color: #F0FFFF; /* Azure (사용자 지정 색상) */
+            color: #004085; /* [FIX] 배경색에 맞는 어두운 파란색으로 텍스트 색상 변경 */
+            font-weight: 900;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             border: 2px solid transparent;
         }
@@ -161,7 +160,7 @@ if not st.session_state["logged_in"]:
             font-weight: bold !important;
         }
         div[data-testid="stRadio"] > div[role="radiogroup"] > label:hover {
-            color: #c2185b;
+            color: #004085; /* [FIX] 호버 색상도 텍스트 색상과 통일 */
         }
     </style>
     """, unsafe_allow_html=True)

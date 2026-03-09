@@ -116,15 +116,69 @@ if not st.session_state["logged_in"]:
     else:
         st.markdown(f"<h1 style='text-align: center; font-size: {lg_title_size}rem;'>{lg_title_html}</h1>", unsafe_allow_html=True)
     
+    # [NEW] 토글 스위치 스타일 정의 (Segmented Control)
+    st.markdown("""
+    <style>
+        /* Radio Button Container */
+        div[data-testid="stRadio"] > div[role="radiogroup"] {
+            background-color: #e9ecef;
+            padding: 4px;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: row;
+            gap: 0px;
+        }
+        /* Radio Button Labels (Buttons) */
+        div[data-testid="stRadio"] > div[role="radiogroup"] > label {
+            flex: 1;
+            background-color: transparent;
+            border: 2px solid transparent;
+            border-radius: 6px;
+            padding: 10px 0px; /* 좌우 패딩을 줄여 공간 확보 */
+            padding: 12px 20px; /* [MODIFIED] 패딩을 늘려 여백 확보 */
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: #495057;
+            white-space: nowrap; /* 텍스트 줄바꿈 방지 */
+        }
+        /* Hide the default circle */
+        div[data-testid="stRadio"] > div[role="radiogroup"] > label > div:first-child {
+            display: none;
+        }
+        /* Selected State */
+        div[data-testid="stRadio"] > div[role="radiogroup"] > label:has(input:checked) {
+            background-color: #fce4ec;
+            color: #c2185b;
+            font-weight: bold;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border: 2px solid transparent;
+        }
+        div[data-testid="stRadio"] > div[role="radiogroup"] > label:has(input:checked) * {
+            font-weight: bold !important;
+        }
+        div[data-testid="stRadio"] > div[role="radiogroup"] > label:hover {
+            color: #c2185b;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
-        tab_staff, tab_partner = st.tabs(["직원 로그인", "거래처 로그인"])
+        # [NEW] 토글 스위치 (라디오 버튼)
+        login_mode = st.radio("로그인 모드", ["직원 로그인", "거래처 로그인"], horizontal=True, label_visibility="collapsed", key="login_mode_toggle")
         
-        with tab_staff:
+        st.markdown("<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
+        
+        if login_mode == "직원 로그인":
             with st.form("login_form"):
                 st.subheader("직원 로그인")
-                login_id = st.text_input("아이디", placeholder="아이디를 입력하세요")
-                login_pw = st.text_input("비밀번호", type="password", placeholder="비밀번호를 입력하세요")
+                # [FIX] 고유 key 추가로 DuplicateWidgetID 오류 해결
+                login_id = st.text_input("아이디", placeholder="아이디를 입력하세요", key="login_staff_id")
+                login_pw = st.text_input("비밀번호", type="password", placeholder="비밀번호를 입력하세요", key="login_staff_pw")
                 
                 if st.form_submit_button("로그인", use_container_width=True):
                     if not login_id:
@@ -183,12 +237,12 @@ if not st.session_state["logged_in"]:
                     else:
                         st.error("등록되지 않은 아이디입니다.")
 
-        with tab_partner:
+        else: # 거래처 로그인
             with st.form("partner_login_form"):
                 st.subheader("거래처 로그인")
-                # [수정] 보안을 위해 거래처 목록 선택 대신 아이디/비밀번호 입력 방식으로 변경
-                p_id = st.text_input("아이디", placeholder="아이디를 입력하세요")
-                p_pw = st.text_input("비밀번호", type="password", placeholder="비밀번호를 입력하세요")
+                # [FIX] 고유 key 추가로 DuplicateWidgetID 오류 해결
+                p_id = st.text_input("아이디", placeholder="아이디를 입력하세요", key="login_partner_id")
+                p_pw = st.text_input("비밀번호", type="password", placeholder="비밀번호를 입력하세요", key="login_partner_pw")
                 
                 if st.form_submit_button("로그인", use_container_width=True):
                     if not p_id:

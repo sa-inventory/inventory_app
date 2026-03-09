@@ -730,13 +730,14 @@ def render_shipping_status(db, sub_menu):
                 """, unsafe_allow_html=True)
 
             col_map = {
+                "statement_id": "거래명세서 번호",
                 "shipping_date": "출고일", "customer": "발주처", "order_no": "발주번호", "name": "제품명", "color": "색상", "weight": "중량(g)", "size": "사이즈",
                 "stock": "수량", "shipping_method": "배송방법", "shipping_carrier": "배송업체", "shipping_cost": "운임비",
                 "stock": "수량", "shipping_unit_price": "단가", "supply_amount": "공급가액",
                 "shipping_method": "배송방법", "shipping_carrier": "배송업체", "shipping_cost": "운임비",
                 "delivery_to": "납품처", "delivery_contact": "납품연락처", "delivery_address": "납품주소", "note": "비고"
             }
-            display_cols = ["shipping_date", "customer", "order_no", "name", "color", "weight", "size", "stock", "shipping_unit_price", "supply_amount", "shipping_method", "shipping_carrier", "shipping_cost", "delivery_to", "delivery_contact", "delivery_address", "note"]
+            display_cols = ["statement_id", "shipping_date", "customer", "order_no", "name", "color", "weight", "size", "stock", "shipping_unit_price", "supply_amount", "shipping_method", "shipping_carrier", "shipping_cost", "delivery_to", "delivery_contact", "delivery_address", "note"]
             final_cols = [c for c in display_cols if c in df.columns]
 
             # [NEW] 묶어보기 토글
@@ -752,7 +753,6 @@ def render_shipping_status(db, sub_menu):
                     'stock': 'sum',
                     'supply_amount': 'sum',
                     'shipping_cost': 'sum',
-                    'statement_id': 'first', # [NEW] 거래명세서 번호도 그룹에 포함
                     'id': list, # ID들을 리스트로 묶음 (취소 처리용)
                     'order_no': lambda x: f"{str(x.iloc[0]).split('-')[0]} (외 {len(x)-1}건)" if len(x) > 1 else str(x.iloc[0]), # 표시용 번호
                     'note': lambda x: ' / '.join(sorted(set([str(s) for s in x if s]))) # 비고 합치기
@@ -775,7 +775,6 @@ def render_shipping_status(db, sub_menu):
                 st.info(f"💡 묶어보기 모드입니다. 총 **{len(df)}**건의 상세 내역이 **{len(df_display)}**건으로 요약되었습니다.")
             else:
                 df_display = df[final_cols].rename(columns=col_map)
-                df_display_ids = [[i] for i in df['id'].tolist()] # 1:1 매핑
                 st.write(f"총 **{len(df)}**건의 출고 내역이 조회되었습니다.")
 
             st.write("🔽 목록에서 항목을 선택하여 거래명세서를 발행하거나 취소할 수 있습니다.")
@@ -843,6 +842,14 @@ def render_shipping_status(db, sub_menu):
                 sum_amt = sel_rows['supply_amount'].sum()
                 sum_cost = sel_rows['shipping_cost'].sum()
                 st.info(f"📊 선택 항목 합계: 수량 **{sum_qty:,}** / 공급가액 **{sum_amt:,}원** / 운임비 **{sum_cost:,}원**")
+
+                # [NEW] 거래명세서 바로가기 버튼
+                sel_stmt_id = st.session_state.get('highlight_stmt_id')
+                if sel_stmt_id:
+                    if st.button(f"🔗 거래명세서 '{sel_stmt_id}' 바로가기", key="goto_stmt_btn"):
+                        st.session_state['go_to_statement'] = sel_stmt_id
+                        st.session_state['current_menu'] = '거래명세서 조회'
+                        st.rerun()
             
             st.divider()
             
@@ -945,18 +952,26 @@ def render_shipping_status(db, sub_menu):
             # 3. 출고 취소 (기존 로직 이동)
             elif action_mode == "출고 취소":
                 if selection.selection.rows:
-                    selected_indices = selection.selection.rows
-                    
-                    # [수정] 취소 대상 ID 목록 확보
+                    # [NEW] 그룹 취소 로직
+                    sel_stmt_id = st.session_state.get('highlight_stmt_id')
                     target_ids = []
-                    if view_grouped:
-                        # 그룹화된 행의 'id' 컬럼은 리스트 형태임
-                        sel_rows = df_display_source.iloc[selected_indices]
-                        for ids in sel_rows['id']:
-                            target_ids.extend(ids)
+                    
+                    if sel_stmt_id:
+                        st.warning(f"거래명세서({sel_stmt_id})로 묶인 모든 항목이 함께 취소됩니다.")
+                        # Find all related IDs from the original full dataframe `df`
+                        grouped_rows = df[df['statement_id'] == sel_stmt_id]
+                        target_ids = grouped_rows['id'].tolist()
                     else:
-                        sel_rows = df.iloc[selected_indices]
-                        target_ids = sel_rows['id'].tolist()
+                        # Original logic for non-grouped items
+                        selected_indices = selection.selection.rows
+                        if view_grouped:
+                            # 그룹화된 행의 'id' 컬럼은 리스트 형태임
+                            sel_rows = df_display_source.iloc[selected_indices]
+                            for ids in sel_rows['id']:
+                                target_ids.extend(ids)
+                        else:
+                            sel_rows = df.iloc[selected_indices]
+                            target_ids = sel_rows['id'].tolist()
                     
                     if st.button(f"선택 항목 출고 취소 ({len(target_ids)}건)", type="primary"):
                         # [수정] 개별 업데이트 대신 Batch Write 사용 (성능 및 안정성 개선)

@@ -9,13 +9,30 @@ def render_statement_list(db):
     st.header("거래명세서 조회")
     st.info("발행된 거래명세서 내역을 조회하고 재출력합니다. (수정 불가)")
 
+    # [NEW] Handle quick link from shipping history
+    go_to_stmt_id = st.session_state.pop('go_to_statement', None)
+    if go_to_stmt_id:
+        st.session_state['stmt_search_no'] = go_to_stmt_id
+        # Clear other filters for clarity
+        st.session_state['stmt_search_cust'] = ""
+        st.session_state['stmt_date_range'] = []
+
+    # [FIX] Initialize session state for filters to prevent widget/session state conflicts.
+    today = datetime.date.today()
+    if 'stmt_date_range' not in st.session_state:
+        st.session_state['stmt_date_range'] = [today - datetime.timedelta(days=30), today]
+    if 'stmt_search_cust' not in st.session_state:
+        st.session_state['stmt_search_cust'] = ""
+    if 'stmt_search_no' not in st.session_state:
+        st.session_state['stmt_search_no'] = ""
+
     # 검색 필터
     with st.expander("검색", expanded=True):
         c1, c2, c3 = st.columns([1, 1, 2])
-        today = datetime.date.today()
-        date_range = c1.date_input("발행일 기간", [today - datetime.timedelta(days=30), today])
-        search_cust = c2.text_input("거래처명")
-        search_no = c3.text_input("일련번호")
+        # [FIX] Use the session state as the single source of truth for the widget's value.
+        date_range = c1.date_input("발행일 기간", key="stmt_date_range")
+        search_cust = c2.text_input("거래처명", key="stmt_search_cust")
+        search_no = c3.text_input("일련번호", key="stmt_search_no")
 
     # 데이터 조회
     query = db.collection("statements").order_by("issue_date", direction="DESCENDING")

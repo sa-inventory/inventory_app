@@ -1376,35 +1376,56 @@ def render_order_status(db, sub_menu):
                     save_user_settings(user_id, "order_cols", st.session_state["os_p_selected_cols"]) # [NEW] 저장
                     st.rerun()
 
-                # [수정] 2. 너비 설정 (st.data_editor)
+                # [수정] 2. 너비 설정 (Hybrid Slider)
                 if "os_p_widths" not in st.session_state:
                     st.session_state["os_p_widths"] = load_user_settings(user_id, "order_widths", {})
 
-                width_df_data = []
-                for col in selected_cols:
-                    width = st.session_state["os_p_widths"].get(col, 0)
-                    width_df_data.append({"컬럼명": col, "너비(px)": width})
-                
-                if width_df_data:
-                    edited_widths_df = st.data_editor(
-                        pd.DataFrame(width_df_data),
-                        column_config={
-                            "컬럼명": st.column_config.TextColumn("컬럼명", disabled=True),
-                            "너비(px)": st.column_config.NumberColumn("너비(px)", min_value=0, max_value=500, width="small", help="0으로 설정하면 자동 너비가 적용됩니다."),
-                        },
-                        hide_index=True,
-                        width="stretch",
-                        key="os_p_width_editor"
-                    )
-                    # 변경된 너비 저장 (세션 및 DB)
-                    widths_changed = False
-                    for _, row in edited_widths_df.iterrows():
-                        if st.session_state["os_p_widths"].get(row["컬럼명"]) != row["너비(px)"]:
-                            st.session_state["os_p_widths"][row["컬럼명"]] = row["너비(px)"]
-                            widths_changed = True
+                st.markdown("###### 컬럼 너비 설정 (비율 %)")
+                use_custom_widths = st.checkbox("사용자 정의 너비 사용", value=bool(st.session_state["os_p_widths"]), key="os_ucw")
+
+                if use_custom_widths:
+                    # 컬럼 변경 시 초기화 (균등 분배)
+                    current_widths = st.session_state["os_p_widths"]
+                    # 기존 값이 픽셀 단위(>100)이거나 컬럼이 다르면 리셋
+                    is_pixel_values = any(v > 100 for v in current_widths.values())
                     
-                    if widths_changed:
-                        save_user_settings(user_id, "order_widths", st.session_state["os_p_widths"])
+                    if set(current_widths.keys()) != set(selected_cols) or is_pixel_values:
+                        cnt = len(selected_cols)
+                        if cnt > 0:
+                            avg = 100 // cnt
+                            rem = 100 % cnt
+                            new_widths = {col: avg for col in selected_cols}
+                            new_widths[selected_cols[-1]] += rem
+                            st.session_state["os_p_widths"] = new_widths
+                        else:
+                            st.session_state["os_p_widths"] = {}
+
+                    total_width = 0
+                    for col in selected_cols:
+                        c_name, c_slider, c_num = st.columns([2, 4, 1.5], vertical_alignment="center")
+                        c_name.markdown(f"<span style='font-size:0.9em'>{col}</span>", unsafe_allow_html=True)
+                        
+                        val = st.session_state["os_p_widths"].get(col, 0)
+                        k_s = f"os_s_{col}"
+                        k_n = f"os_n_{col}"
+                        
+                        def on_chg_s(c=col, k=k_s): st.session_state["os_p_widths"][c] = st.session_state[k]
+                        def on_chg_n(c=col, k=k_n): st.session_state["os_p_widths"][c] = st.session_state[k]
+
+                        val_s = c_slider.slider("W", 0, 100, value=int(val), step=1, key=k_s, label_visibility="collapsed", on_change=on_chg_s)
+                        val_n = c_num.number_input("W", 0, 100, value=int(val), step=1, key=k_n, label_visibility="collapsed", on_change=on_chg_n)
+                        
+                        total_width += val
+                    
+                    if total_width != 100:
+                        st.warning(f"⚠️ 합계: {total_width}% (100%가 되도록 조정해주세요)")
+                    else:
+                        st.success("✅ 합계: 100%")
+                    
+                    save_user_settings(user_id, "order_widths", st.session_state["os_p_widths"])
+                else:
+                    st.session_state["os_p_widths"] = {}
+                    save_user_settings(user_id, "order_widths", {})
                 
                 p_nowrap = st.checkbox("텍스트 줄바꿈 방지 (한 줄 표시)", key="os_p_nowrap", on_change=save_print_opts)
 
@@ -1450,7 +1471,7 @@ def render_order_status(db, sub_menu):
                         w = p_widths.get(col, 0)
                         if w > 0:
                             # nth-child는 1부터 시작
-                            custom_css += f"table tr th:nth-child({i+1}), table tr td:nth-child({i+1}) {{ width: {w}px; min-width: {w}px; }}\n"
+                            custom_css += f"table tr th:nth-child({i+1}), table tr td:nth-child({i+1}) {{ width: {w}%; }}\n"
 
                     # [수정] body에 onload를 추가하고, 화면에는 보이지 않도록 CSS 수정
                     print_html = f"""

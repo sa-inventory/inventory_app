@@ -731,6 +731,7 @@ if st.session_state.get("logged_in"):
                 if (checkLogout()) return;
 
                 const now = Date.now();
+                const lastActivity = parseInt(localStorage.getItem(storageKey) || now);
                 
                 const idleMs = now - lastActivity;
                 const remainingMs = timeoutMs - idleMs;

@@ -102,17 +102,6 @@ if not st.session_state["logged_in"]:
     </script>
     """, height=0, width=0)
 
-    # [NEW] 로그아웃 상태일 때 이전 세션의 타이머 UI 제거 (잔상 방지)
-    components.html("""
-    <script>
-        const doc = window.parent.document;
-        const timer = doc.getElementById('auto-logout-timer');
-        if (timer) timer.remove();
-        const blocker = doc.getElementById('logout-blocker');
-        if (blocker) blocker.remove();
-    </script>
-    """, height=0, width=0)
-
     # [NEW] 회사 로고 및 제목 가져오기
     try:
         comp_doc = db.collection("settings").document("company_info").get()
@@ -786,9 +775,9 @@ if st.session_state.get("logged_in"):
 
             function updateTimerDisplay(remainingMs) {{
                 let timeStr = "";
-                // [FIX] 경고색 제거
                 let bgColor = 'rgba(255, 255, 255, 0.8)';
-                let textColor = '#000000';
+                // [MODIFIED] 텍스트 색상을 옅은 파란색으로 변경
+                let textColor = '#A9A9A9';
 
                 if (remainingMs <= 0) {{
                     timeStr = "0초";
@@ -824,7 +813,7 @@ if st.session_state.get("logged_in"):
                 // 스타일 업데이트
                 timerDiv.style.backgroundColor = bgColor;
                 timerDiv.style.color = textColor;
-                timerDiv.innerHTML = '접속시간 ' + loginTimeStr + '<br>※ 미조작 시   ' + timeStr + ' 후 로그아웃';
+                timerDiv.innerHTML = '＃접속시간 ' + loginTimeStr + '<br>미조작 시  [' + timeStr + '] 후 자동로그아웃';
             }}
 
             function tick() {{

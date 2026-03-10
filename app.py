@@ -91,6 +91,28 @@ if st.query_params.get("logout"):
 
 # 로그인 화면 처리
 if not st.session_state["logged_in"]:
+    # [NEW] 로그아웃 상태일 때 이전 세션의 타이머 UI 제거 (잔상 방지)
+    components.html("""
+    <script>
+        const doc = window.parent.document;
+        const timer = doc.getElementById('auto-logout-timer');
+        if (timer) timer.remove();
+        const blocker = doc.getElementById('logout-blocker');
+        if (blocker) blocker.remove();
+    </script>
+    """, height=0, width=0)
+
+    # [NEW] 로그아웃 상태일 때 이전 세션의 타이머 UI 제거 (잔상 방지)
+    components.html("""
+    <script>
+        const doc = window.parent.document;
+        const timer = doc.getElementById('auto-logout-timer');
+        if (timer) timer.remove();
+        const blocker = doc.getElementById('logout-blocker');
+        if (blocker) blocker.remove();
+    </script>
+    """, height=0, width=0)
+
     # [NEW] 회사 로고 및 제목 가져오기
     try:
         comp_doc = db.collection("settings").document("company_info").get()

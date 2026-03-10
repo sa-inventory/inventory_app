@@ -422,24 +422,22 @@ with st.sidebar:
         <div style='text-align: center; margin-bottom: 20px;'>
             <div style='display: flex; align-items: center; justify-content: center; flex-wrap: wrap;'>
                 <img src="data:image/png;base64,{logo_img}" style="width: {sb_logo_width}px; max-height: 100px; margin-right: 10px;">
-                <h1 style='margin:0; font-size: {sb_title_size}rem; font-weight: 700; line-height: 1.2;'>{sb_title_html}</h1>
+                <h1 style='margin:0; font-size: {sb_title_size}rem; font-weight: 700; line-height: 1.0;'>{sb_title_html}</h1>
             </div>
-            <h3 style='margin:0; font-size: 1.5rem; color: #333; font-weight: 600; margin-top: 5px;'>{sb_subtitle}</h3>
+            <h3 style='margin:0; font-size: 1.5rem; color: #333; font-weight: 600; margin-top: -20px;'>{sb_subtitle}</h3>
         </div>
     """, unsafe_allow_html=True)
     else:
         st.markdown(f"""
         <div style='text-align: center; margin-bottom: 20px;'>
-            <h1 style='margin:0; font-size: {sb_title_size}rem; font-weight: 700;'>🏢 {sb_title_html}</h1>
-            <h3 style='margin:0; font-size: 1.5rem; color: #333; font-weight: 600; margin-top: 5px;'>{sb_subtitle}</h3>
+            <h1 style='margin:0; font-size: {sb_title_size}rem; font-weight: 700; line-height: 1.0;'>🏢 {sb_title_html}</h1>
+            <h3 style='margin:0; font-size: 1.5rem; color: #333; font-weight: 600; margin-top: 0px;'>{sb_subtitle}</h3>
         </div>
     """, unsafe_allow_html=True)
 
     user_display = st.session_state.get("user_name", st.session_state.get("role"))
     st.write(f"환영합니다.  **{user_display}**님!")
-    
-    st.divider()
-    
+    st.markdown("<hr style='margin: 0.25rem 0 1.25rem 0; border: none; border-top: 1px solid #ccc;'>", unsafe_allow_html=True)
     # 메뉴 선택 기능 추가
     if "current_menu" not in st.session_state:
         # [수정] 새로고침 시에도 권한 기반 기본 메뉴 설정
@@ -530,13 +528,12 @@ with st.sidebar:
         # [수정] CSS 방식 대신 이모지를 사용하여 직관적으로 구분 (더 안정적임)
         menu_item("📢 공지사항", "공지사항")
         menu_item("🗓️ 업무일정", "업무일정")
-        
-        st.divider()
+        st.markdown("<hr style='margin: 0.25rem 0 1.25rem 0; border: none; border-top: 1px solid #ccc;'>", unsafe_allow_html=True)
 
         if check_access("발주서접수"):
             menu_item("📝 발주서접수", "발주서접수", "개별 접수")
             # [수정] 구분선이 잘 보이도록 색상(#ccc)을 진하게 하고 마진 조정
-            st.markdown("<hr style='margin: 1rem 0; border: none; border-top: 1px solid #ccc;' />", unsafe_allow_html=True)
+            st.markdown("<hr style='margin: 0.25rem 0 1.25rem 0; border: none; border-top: 1px solid #ccc;'>", unsafe_allow_html=True)
 
         if check_access("발주현황"):
             with st.expander("발주현황", expanded=(cm == "발주현황")):
@@ -637,9 +634,7 @@ with st.sidebar:
     
     # [수정] 하단 여백 축소 (50px -> 10px)
     st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
-
-    st.divider()
-    
+    st.markdown("<hr style='margin: -1rem 0 1rem 0; border: none; border-top: 1px solid #ccc;'>", unsafe_allow_html=True)
     menu_item("로그인 정보 설정", "로그인 정보 설정")
     
     if st.button("로그아웃", use_container_width=True):

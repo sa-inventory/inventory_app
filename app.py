@@ -417,13 +417,11 @@ with st.sidebar:
 
     # 로고 이미지 처리
     if logo_img:
-        # [수정] 로고와 제목 배치 유연성 확보 (flex-wrap)
+        # [수정] 로고와 제목을 항상 세로로 배치하도록 구조 변경
         st.markdown(f"""
         <div style='text-align: center; margin-bottom: 20px;'>
-            <div style='display: flex; align-items: center; justify-content: center; flex-wrap: wrap;'>
-                <img src="data:image/png;base64,{logo_img}" style="width: {sb_logo_width}px; max-height: 100px; margin-right: 10px;">
-                <h1 style='margin:0; font-size: {sb_title_size}rem; font-weight: 700; line-height: 1.0;'>{sb_title_html}</h1>
-            </div>
+            <img src="data:image/png;base64,{logo_img}" style="width: {sb_logo_width}px; max-height: 100px; margin-bottom: 0px;">
+            <h1 style='margin:0; font-size: {sb_title_size}rem; font-weight: 700; line-height: 1.0;'>{sb_title_html}</h1>
             <h3 style='margin:0; font-size: 1.5rem; color: #333; font-weight: 600; margin-top: -20px;'>{sb_subtitle}</h3>
         </div>
     """, unsafe_allow_html=True)

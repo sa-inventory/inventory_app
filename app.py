@@ -36,7 +36,7 @@ base_css = """
 
         /* 메인 영역 상단 여백 줄이기 (기본값은 약 6rem) */
         .block-container {
-            padding-top: 7rem !important;
+            padding-top: 5rem !important;
         }
         /* [NEW] 사이드바 Expander 헤더 스타일링 (열려있는 경우 강조) */
         [data-testid="stSidebar"] details[open] > summary {

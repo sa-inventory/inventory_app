@@ -29,9 +29,14 @@ from ui_board import render_notice_board, render_schedule
 # [수정] CSS 스타일 정의 (관리자 여부에 따라 메뉴 표시/숨김 분기)
 base_css = """
     <style>
+        /* [NEW] 로그인 탭 글자 크기 조정 */
+        button[data-baseweb="tab"] > div > p {
+            font-size: 1rem; /* 이 값을 조정하여 크기 변경 */
+        }
+
         /* 메인 영역 상단 여백 줄이기 (기본값은 약 6rem) */
         .block-container {
-            padding-top: 3rem !important;
+            padding-top: 7rem !important;
         }
         /* [NEW] 사이드바 Expander 헤더 스타일링 (열려있는 경우 강조) */
         [data-testid="stSidebar"] details[open] > summary {
@@ -48,7 +53,7 @@ base_css = """
         }
         /* [NEW] 사이드바 하위 메뉴 (Expander 내부 버튼) 글자 크기 축소 */
         [data-testid="stSidebar"] details button p {
-            font-size: 0.9rem !important;
+            font-size: 0.85rem !important;
         }
 """
 
@@ -134,65 +139,13 @@ if not st.session_state["logged_in"]:
     else:
         st.markdown(f"<h1 style='text-align: center; font-size: {lg_title_size}rem;'>{lg_title_html}</h1>", unsafe_allow_html=True)
     
-    # [NEW] 토글 스위치 스타일 정의 (Segmented Control)
-    st.markdown("""
-    <style>
-        /* Radio Button Container */
-        div[data-testid="stRadio"] > div[role="radiogroup"] {
-            background-color: #e9ecef;
-            padding: 4px;
-            border-radius: 8px;
-            display: flex;
-            flex-direction: row;
-            gap: 0px;
-        }
-        /* Radio Button Labels (Buttons) */
-        div[data-testid="stRadio"] > div[role="radiogroup"] > label {
-            flex: 1;
-            background-color: transparent;
-            border: 2px solid transparent;
-            border-radius: 6px;
-            padding: 4px 20px; /* [FIX] 높이(4px)와 좌우여백(20px)을 적절하게 설정 */
-            margin: 0;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            cursor: pointer;
-            transition: all 0.2s;
-            color: #495057;
-            white-space: nowrap; /* 텍스트 줄바꿈 방지 */
-        }
-        /* Hide the default circle */
-        div[data-testid="stRadio"] > div[role="radiogroup"] > label > div:first-child {
-            display: none;
-        }
-        /* Selected State */
-        div[data-testid="stRadio"] > div[role="radiogroup"] > label:has(input:checked) {
-            background-color: #F0FFFF; /* Azure (사용자 지정 색상) */
-            color: #004085; /* [FIX] 배경색에 맞는 어두운 파란색으로 텍스트 색상 변경 */
-            font-weight: 900;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            border: 2px solid transparent;
-        }
-        div[data-testid="stRadio"] > div[role="radiogroup"] > label:has(input:checked) * {
-            font-weight: bold !important;
-        }
-        div[data-testid="stRadio"] > div[role="radiogroup"] > label:hover {
-            color: #004085; /* [FIX] 호버 색상도 텍스트 색상과 통일 */
-        }
-    </style>
-    """, unsafe_allow_html=True)
-
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
-        # [NEW] 토글 스위치 (라디오 버튼)
-        login_mode = st.radio("로그인 모드", ["직원 로그인", "거래처 로그인"], horizontal=True, label_visibility="collapsed", key="login_mode_toggle")
-        
-        st.markdown("<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
-        
-        if login_mode == "직원 로그인":
+        # [수정] 로그인 화면을 탭으로 변경하여 다크 모드 가독성 개선
+        tab1, tab2 = st.tabs(["**직원 로그인**", "**거래처 로그인**"])
+
+        with tab1:
             with st.form("login_form"):
-                st.subheader("직원 로그인")
                 # [FIX] 고유 key 추가로 DuplicateWidgetID 오류 해결
                 login_id = st.text_input("아이디", placeholder="아이디를 입력하세요", key="login_staff_id")
                 login_pw = st.text_input("비밀번호", type="password", placeholder="비밀번호를 입력하세요", key="login_staff_pw")
@@ -258,9 +211,8 @@ if not st.session_state["logged_in"]:
                     else:
                         st.error("등록되지 않은 아이디입니다.")
 
-        else: # 거래처 로그인
+        with tab2:
             with st.form("partner_login_form"):
-                st.subheader("거래처 로그인")
                 # [FIX] 고유 key 추가로 DuplicateWidgetID 오류 해결
                 p_id = st.text_input("아이디", placeholder="아이디를 입력하세요", key="login_partner_id")
                 p_pw = st.text_input("비밀번호", type="password", placeholder="비밀번호를 입력하세요", key="login_partner_pw")
